@@ -110,3 +110,21 @@
   - **APK SHA-256**: `912953708e44d264cb53e7c658baa8b1923d074345d3ab5857ea0204bdf13f06`.
   - **Signing Certificate SHA-256**: `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`.
 
+---
+
+## Physical Device Inspection & `v1.0.1` Hotfix (`motorola_edge_50_pro`, Android 16)
+- **Root Diagnosis on Connected Device (`ZD222KQP8M`)**:
+  - Initial ADB check found `com.ledgerflow.app` was **not yet installed** (although `/sdcard/Download/LedgerFlow-v1.0.0.apk` existed with exact SHA-256 `912953708...`), while another browser app (`io.github.itripathiharsh.aegis`) was foregrounded and had startup crash entries (`lateinit property tabManager has not been initialized`) in `dumpsys dropbox`.
+  - Installing `LedgerFlow` over ADB launched cleanly (`0` crashes in `logcat -b crash`), while live interaction testing on the dark-mode Android 16 phone exposed 4 UI/UX defects plus 1 auth-sync bug:
+    1. Invisible white status bar icons on light Alabaster UI when phone Dark Mode was enabled -> fixed with explicit `SystemBarStyle.light(...)` in [MainActivity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/MainActivity.kt) and `android:windowLightStatusBar=true` in [themes.xml](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/res/values/themes.xml).
+    2. System Back inside `AddTransactionScreen` exited the app -> fixed with `BackHandler` in [MainActivity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/MainActivity.kt).
+    3. Hardcoded `color = SlateInk` in `AppTypography` caused dark-on-dark unreadable Snackbar text -> fixed by removing hardcoded colors from `AppTypography` and adding `inverseSurface`/`inverseOnSurface` in [Theme.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/theme/Theme.kt), plus explicit white-on-slate `Snackbar` styling in [MainActivity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/MainActivity.kt).
+    4. Unfilled `OnlineOnlyAdBanner` rendered an empty bordered stub card -> fixed border/padding visibility until `adLoaded == true` in [OnlineAdBanner.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/ads/OnlineAdBanner.kt).
+    5. `signInSupabase` in [LedgerViewModel.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/LedgerViewModel.kt) left `_syncInProgress = true` before calling `syncNow()`, blocking post-login sync.
+- **`v1.0.1` Verification & GitHub Release**:
+  - `testDebugUnitTest` (`20/20` passed, `0` failed, `0` skipped), `lintDebug` (`0` errors), `assembleRelease` (`BUILD SUCCESSFUL`).
+  - Signed `LedgerFlow-v1.0.1.apk` (`versionCode: 2`, `4,333,857` bytes, SHA-256 `eef5a362002157adabd6dd70b008985fba27ff4c43513807a58210cb3a2f1652`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`).
+  - Installed & verified live on `ZD222KQP8M` (dark status bar icons, crisp Snackbar contrast, Back dismiss on `+` modal, zero empty ad stub, `0` crashes).
+  - Direct APK Download (`v1.0.1`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.1/LedgerFlow-v1.0.1.apk`.
+
+

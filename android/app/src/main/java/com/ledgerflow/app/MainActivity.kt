@@ -1,7 +1,10 @@
 package com.ledgerflow.app
 
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.view.WindowManager
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -42,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -91,7 +95,16 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(
+                AndroidColor.TRANSPARENT,
+                AndroidColor.TRANSPARENT,
+            ),
+            navigationBarStyle = SystemBarStyle.light(
+                AndroidColor.TRANSPARENT,
+                AndroidColor.TRANSPARENT,
+            ),
+        )
 
         setContent {
             LedgerFlowTheme {
@@ -218,6 +231,7 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
     }
 
     if (showAddModal) {
+        BackHandler(onBack = { showAddModal = false })
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -239,7 +253,16 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = AlabasterBg,
-        snackbarHost = { SnackbarHost(snackbarHost) },
+        snackbarHost = {
+            SnackbarHost(snackbarHost) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = SlateInk,
+                    contentColor = Color.White,
+                    actionColor = EmeraldPrimary,
+                )
+            }
+        },
         bottomBar = {
             if (showBottomBar) {
                 Surface(color = Color.White) {
@@ -378,6 +401,8 @@ private fun VaultLockOverlay(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {

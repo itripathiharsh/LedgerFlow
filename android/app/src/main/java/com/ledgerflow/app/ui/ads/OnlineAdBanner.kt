@@ -130,13 +130,13 @@ fun OnlineOnlyAdBanner(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, BorderSubtle),
+        color = if (adLoaded) Color.White else Color.Transparent,
+        border = if (adLoaded) BorderStroke(1.dp, BorderSubtle) else null,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 6.dp, horizontal = 12.dp),
+                .then(if (adLoaded) Modifier.padding(vertical = 6.dp, horizontal = 12.dp) else Modifier),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (adLoaded) {

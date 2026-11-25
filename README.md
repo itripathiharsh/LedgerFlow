@@ -8,25 +8,25 @@ Offline-first personal finance, expense tracking, budgeting, multi-account ledge
 
 Install the latest signed release directly on Android (`minSdk 26` / Android 8.0+):
 
-- **Direct APK Download (`v1.0.0`)**: [**Download `LedgerFlow-v1.0.0.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.0/LedgerFlow-v1.0.0.apk)
+- **Direct APK Download (`v1.0.1`)**: [**Download `LedgerFlow-v1.0.1.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.1/LedgerFlow-v1.0.1.apk)
 - **All Releases**: [github.com/itripathiharsh/LedgerFlow/releases/latest](https://github.com/itripathiharsh/LedgerFlow/releases/latest)
 
 | Artifact | Value |
 | --- | --- |
 | Application ID | `com.ledgerflow.app` |
-| Version | `1.0.0` (`versionCode: 1`) |
+| Version | `1.0.1` (`versionCode: 2`) |
 | Min / Target SDK | `26` / `36` |
 | APK File Size | `4,333,857` bytes (~`4.13 MiB`) |
-| APK SHA-256 | `912953708e44d264cb53e7c658baa8b1923d074345d3ab5857ea0204bdf13f06` |
+| APK SHA-256 | `eef5a362002157adabd6dd70b008985fba27ff4c43513807a58210cb3a2f1652` |
 | Signing Cert SHA-256 (`v2` + `v3` RSA-2048) | `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0` |
 
 ### Verifying & Installing the APK
-1. Download [`LedgerFlow-v1.0.0.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.0/LedgerFlow-v1.0.0.apk) on your Android device.
+1. Download [`LedgerFlow-v1.0.1.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.1/LedgerFlow-v1.0.1.apk) on your Android device.
 2. When prompted, allow installing unknown apps for your browser or file manager.
 3. Optional checksum check before install:
    ```bash
-   sha256sum LedgerFlow-v1.0.0.apk
-   # Expected: 912953708e44d264cb53e7c658baa8b1923d074345d3ab5857ea0204bdf13f06
+   sha256sum LedgerFlow-v1.0.1.apk
+   # Expected: eef5a362002157adabd6dd70b008985fba27ff4c43513807a58210cb3a2f1652
    ```
 
 ---

@@ -672,6 +672,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             }
             _syncInProgress.value = true
             val res = remote.signIn(email.trim(), password)
+            _syncInProgress.value = false
             if (res.success && !res.accessToken.isNullOrBlank()) {
                 _vaultState.value = vault.update {
                     it.copy(
@@ -683,7 +684,6 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 syncNow()
             } else {
-                _syncInProgress.value = false
                 _statusMessage.value = res.message ?: "Sign-in failed"
             }
         }

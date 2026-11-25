@@ -48,6 +48,8 @@ private val LightColors = lightColorScheme(
     onSurface = SlateInk,
     surfaceVariant = SlateTint,
     onSurfaceVariant = MutedSlate,
+    inverseSurface = SlateInk,
+    inverseOnSurface = Color.White,
     outline = BorderSubtle,
     error = RoseOutflow,
     errorContainer = RoseSoft,
@@ -60,7 +62,6 @@ private val AppTypography = Typography(
         fontSize = 32.sp,
         lineHeight = 38.sp,
         letterSpacing = (-0.8).sp,
-        color = SlateInk,
     ),
     headlineMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -68,28 +69,24 @@ private val AppTypography = Typography(
         fontSize = 22.sp,
         lineHeight = 28.sp,
         letterSpacing = (-0.4).sp,
-        color = SlateInk,
     ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 16.sp,
         lineHeight = 22.sp,
-        color = SlateInk,
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        color = SlateInk,
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 11.sp,
         lineHeight = 14.sp,
-        color = MutedSlate,
     ),
 )
 
