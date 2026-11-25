@@ -125,6 +125,34 @@ abstract class LedgerDatabase : RoomDatabase() {
         }
     }
 
+    private suspend fun deleteAllRowsLocked() {
+        // Delete child transactions first so Room's FTS4 external-content triggers clean transactions_fts cleanly.
+        transactionDao().deleteAll()
+        plannedPaymentDao().deleteAll()
+        budgetDao().deleteAll()
+        holdingDao().deleteAll()
+        magicRuleDao().deleteAll()
+        accountDao().deleteAll()
+        categoryDao().deleteAll()
+    }
+
+    suspend fun resetAllDataFresh(
+        defaultCurrency: String = "USD",
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        withTransaction {
+            deleteAllRowsLocked()
+            SeedData.ensureMinimalSetup(this, defaultCurrency = defaultCurrency, nowMs = nowMs)
+        }
+    }
+
+    suspend fun resetAndLoadDemoData(nowMs: Long = System.currentTimeMillis()) {
+        withTransaction {
+            deleteAllRowsLocked()
+            SeedData.ensureSeededIfEmpty(this, nowMs = nowMs)
+        }
+    }
+
     companion object {
         fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long {
             val cal = Calendar.getInstance().apply { timeInMillis = currentDueMs }

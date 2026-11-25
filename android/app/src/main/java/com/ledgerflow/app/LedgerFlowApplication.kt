@@ -44,7 +44,7 @@ class LedgerFlowApplication : Application(), Configuration.Provider {
         updateManager = AppUpdateManager(this, vaultStore)
 
         applicationScope.launch {
-            SeedData.ensureSeededIfEmpty(database)
+            SeedData.ensureMinimalSetup(database, defaultCurrency = vaultStore.read().baseCurrency)
             if (!vaultStore.read().pendingUpdateRelaunch) {
                 AppUpdateManager.cleanupUpdateCache(this@LedgerFlowApplication)
             }

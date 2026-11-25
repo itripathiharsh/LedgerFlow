@@ -169,6 +169,19 @@ class VaultStore(context: Context) {
         it.copy(userId = null, userEmail = null, accessToken = null, refreshToken = null)
     }
 
+    fun resetSyncAndCloudState(): VaultSessionState = update {
+        it.copy(
+            userId = null,
+            lastCloudUserId = null,
+            userEmail = null,
+            accessToken = null,
+            refreshToken = null,
+            lastSyncEpochMs = 0L,
+            lastSyncWatermarkIso = null,
+            hideBalances = false,
+        )
+    }
+
     companion object {
         private val processLock = Any()
         private val cachedStates = mutableMapOf<String, VaultSessionState>()

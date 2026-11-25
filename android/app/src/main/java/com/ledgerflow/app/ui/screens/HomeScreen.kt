@@ -30,16 +30,22 @@ import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ledgerflow.app.data.local.SeedData
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
@@ -104,6 +111,8 @@ fun HomeScreen(
     val dayKey = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
     val monthStart = remember(dayKey) { vm.currentMonthStartEpochMs() }
     val monthFraction = remember(dayKey) { vm.currentMonthFraction() }
+    val hasDemoSeedData = remember(transactions) { transactions.any { it.id == SeedData.DEMO_STARTER_TX_ID } }
+    var showResetConfirm by remember { mutableStateOf(false) }
 
     val dashboard = remember(accounts, transactions, baseCurrency, monthStart) {
         AnalyticsCalculator.computeDashboard(accounts, transactions, baseCurrency, monthStart)
@@ -172,6 +181,29 @@ fun HomeScreen(
                             contentDescription = "Privacy & Vault",
                             tint = EmeraldPrimary,
                         )
+                    }
+                }
+            }
+        }
+
+        if (hasDemoSeedData) {
+            item {
+                CleanCard(
+                    containerColor = AmberSoft,
+                    borderColor = Color(0xFFFDE68A),
+                    padding = 14.dp,
+                    onClick = { showResetConfirm = true },
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Sample Demo Data Loaded", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                            Text("Tap to clear demo records & start fresh at zero", fontSize = 12.sp, color = AmberWarn)
+                        }
+                        StatusPill("Start Fresh", Color.White, RoseOutflow)
                     }
                 }
             }
@@ -409,6 +441,30 @@ fun HomeScreen(
         item {
             OnlineOnlyAdBanner()
         }
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("Clear Demo Data & Start Fresh?") },
+            text = {
+                Text(
+                    "Removes all sample demo transactions, accounts, budgets, bills, and holdings so your ledger starts cleanly at zero balance.",
+                    fontSize = 13.sp,
+                    color = MutedSlate,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.resetAllData()
+                        showResetConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
+                ) { Text("Clear & Start Fresh") }
+            },
+            dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") } },
+        )
     }
 }
 

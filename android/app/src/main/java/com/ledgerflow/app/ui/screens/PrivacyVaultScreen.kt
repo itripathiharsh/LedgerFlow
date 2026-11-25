@@ -58,6 +58,8 @@ import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
 import com.ledgerflow.app.ui.theme.MutedSlate
+import com.ledgerflow.app.ui.theme.RoseOutflow
+import com.ledgerflow.app.ui.theme.RoseSoft
 import com.ledgerflow.app.ui.theme.SkySoft
 import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
@@ -80,6 +82,7 @@ fun PrivacyVaultScreen(
 
     var showPinDialog by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
 
     val fmt = remember { SimpleDateFormat("MMM d, HH:mm", Locale.US) }
 
@@ -279,6 +282,28 @@ fun PrivacyVaultScreen(
                         modifier = Modifier.weight(1f),
                     ) { Text("Export JSON", fontSize = 12.sp, color = SlateInk) }
                 }
+                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showResetConfirm = true },
+                        modifier = Modifier.weight(1.3f),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(
+                            text = "Delete Data & Start Fresh",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = RoseOutflow,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { vm.loadDemoData() },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("Load Demo", fontSize = 12.sp, color = SlateInk)
+                    }
+                }
             }
         }
 
@@ -413,6 +438,30 @@ fun PrivacyVaultScreen(
                 ) { Text(if (createAccount) "Sign Up" else "Sign In") }
             },
             dismissButton = { TextButton(onClick = { showAuthDialog = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("Delete All Data & Start Fresh?") },
+            text = {
+                Text(
+                    "Clears all demo or recorded accounts, transactions, budgets, recurring bills, holdings, rules, and disconnects cloud sync so you start cleanly at zero balance.",
+                    fontSize = 13.sp,
+                    color = MutedSlate,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.resetAllData()
+                        showResetConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
+                ) { Text("Delete Everything") }
+            },
+            dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") } },
         )
     }
 }

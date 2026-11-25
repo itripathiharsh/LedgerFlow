@@ -148,4 +148,49 @@ class LedgerDatabaseRobolectricTest {
         db.executePlannedPaymentAtomic(deletedId, checking.id)
         assertEquals(beforeBalance, db.accountDao().getById(checking.id)!!.balanceMinor)
     }
+
+    @Test
+    fun resetAllDataFresh_clearsDemoAndRebuildsCleanFts4() = runTest {
+        SeedData.ensureSeededIfEmpty(db, nowMs = 1_700_000_000_000L)
+        assertEquals(4, db.accountDao().countAll())
+        assertEquals(8, db.transactionDao().getAllActive().size)
+
+        db.resetAllDataFresh(defaultCurrency = "INR", nowMs = 1_700_000_010_000L)
+
+        val accounts = db.accountDao().getAllActive()
+        assertEquals(1, accounts.size)
+        assertEquals(0L, accounts.first().balanceMinor)
+        assertEquals("INR", accounts.first().currency)
+        assertEquals("Cash Wallet", accounts.first().name)
+        assertEquals(8, db.categoryDao().getAllActive().size)
+        assertEquals(0, db.transactionDao().getAllActive().size)
+        assertEquals(0, db.budgetDao().getAllActive().size)
+        assertEquals(0, db.plannedPaymentDao().getAllActive().size)
+        assertEquals(0, db.holdingDao().getAllActive().size)
+        assertEquals(0, db.magicRuleDao().getAllActive().size)
+        assertTrue(db.transactionDao().searchFts("Blue*").isEmpty())
+
+        // Idempotent on subsequent fresh start checks
+        SeedData.ensureMinimalSetup(db, defaultCurrency = "USD", nowMs = 1_700_000_020_000L)
+        assertEquals(1, db.accountDao().countAll())
+
+        // Fresh transaction still indexes cleanly in FTS4
+        val txId = UUID.randomUUID().toString()
+        db.recordTransactionAtomic(
+            TransactionEntity(
+                id = txId,
+                accountId = accounts.first().id,
+                categoryId = SeedData.CAT_DINING,
+                txType = "EXPENSE",
+                amountMinor = -2_000L,
+                currency = "INR",
+                merchant = "Local Chai Corner",
+                occurredAtEpochMs = 1_700_000_030_000L,
+                createdAtEpochMs = 1_700_000_030_000L,
+                updatedAtEpochMs = 1_700_000_030_000L,
+            )
+        )
+        assertEquals(-2_000L, db.accountDao().getById(accounts.first().id)!!.balanceMinor)
+        assertTrue(db.transactionDao().searchFts("Chai*").any { it.id == txId })
+    }
 }

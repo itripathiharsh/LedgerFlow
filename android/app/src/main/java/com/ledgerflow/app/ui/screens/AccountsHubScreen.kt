@@ -114,6 +114,7 @@ fun AccountsHubScreen(
     var showLinkBank by remember { mutableStateOf(false) }
     var showAddWallet by remember { mutableStateOf(false) }
     var showSmartPaste by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
 
     val csvPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -379,6 +380,51 @@ fun AccountsHubScreen(
                 }
             }
         }
+
+        item {
+            CleanCard(
+                containerColor = RoseSoft,
+                borderColor = Color(0xFFFECDD3),
+                padding = 14.dp,
+                onClick = { showResetConfirm = true },
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Start Fresh (Reset Ledger)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = RoseOutflow)
+                        Text("Delete all demo/test records and start at zero balance", fontSize = 12.sp, color = SlateInk)
+                    }
+                    StatusPill("Reset", Color.White, RoseOutflow)
+                }
+            }
+        }
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("Delete All Data?") },
+            text = {
+                Text(
+                    "This removes all accounts, transactions, budgets, recurring bills, investments, and rules so you can start completely fresh.",
+                    fontSize = 13.sp,
+                    color = MutedSlate,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.resetAllData()
+                        showResetConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
+                ) { Text("Delete & Start Fresh") }
+            },
+            dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") } },
+        )
     }
 
     if (showLinkBank) {

@@ -666,6 +666,27 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun resetAllData() {
+        viewModelScope.launch {
+            val baseCur = _vaultState.value.baseCurrency
+            db.resetAllDataFresh(defaultCurrency = baseCur)
+            _vaultState.value = vault.resetSyncAndCloudState()
+            _searchQuery.value = ""
+            _recordsFilter.value = "ALL"
+            _statusMessage.value = "Deleted all data — started fresh (${MoneyFormatter.formatMinor(0L, baseCur)})"
+        }
+    }
+
+    fun loadDemoData() {
+        viewModelScope.launch {
+            db.resetAndLoadDemoData()
+            _vaultState.value = vault.resetSyncAndCloudState()
+            _searchQuery.value = ""
+            _recordsFilter.value = "ALL"
+            _statusMessage.value = "Loaded sample demo data"
+        }
+    }
+
     fun syncNow() {
         if (_syncInProgress.value) return
         viewModelScope.launch {

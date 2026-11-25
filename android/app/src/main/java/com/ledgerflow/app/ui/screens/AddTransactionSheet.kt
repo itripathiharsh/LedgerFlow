@@ -77,14 +77,14 @@ fun AddTransactionScreen(
     val vault by vm.vaultState.collectAsState()
 
     var txType by remember { mutableStateOf(initialType) }
-    var expr by remember { mutableStateOf("48.50") }
+    var expr by remember { mutableStateOf("0") }
     var currency by remember { mutableStateOf(vault.baseCurrency) }
     var selectedAccountId by remember(accounts) { mutableStateOf(accounts.firstOrNull()?.id ?: "") }
     var transferTargetId by remember(accounts) { mutableStateOf(accounts.getOrNull(1)?.id ?: accounts.firstOrNull()?.id ?: "") }
     var selectedCategoryId by remember { mutableStateOf<String?>(null) }
-    var merchant by remember { mutableStateOf("Trader Joe's") }
+    var merchant by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
-    var label by remember { mutableStateOf("weekly") }
+    var label by remember { mutableStateOf("") }
     var recurring by remember { mutableStateOf(false) }
 
     val evaluatedMinor = remember(expr) { CalculatorEngine.evaluateToMinor(expr) ?: 0L }
@@ -214,6 +214,7 @@ fun AddTransactionScreen(
                     value = merchant,
                     onValueChange = { merchant = it },
                     label = { Text("Merchant / Payee") },
+                    placeholder = { Text("e.g. Coffee, Uber, Salary") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -279,6 +280,7 @@ fun AddTransactionScreen(
                         value = label,
                         onValueChange = { label = it },
                         label = { Text("#Label") },
+                        placeholder = { Text("optional") },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
@@ -314,6 +316,7 @@ fun AddTransactionScreen(
         )
         Spacer(Modifier.height(10.dp))
         Button(
+            enabled = evaluatedMinor > 0L && selectedAccountId.isNotBlank(),
             onClick = {
                 val ok = vm.addTransaction(
                     txType = txType,

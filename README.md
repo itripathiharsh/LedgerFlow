@@ -8,26 +8,26 @@ Offline-first personal finance, expense tracking, budgeting, multi-account ledge
 
 Install the latest signed release directly on Android (`minSdk 26` / Android 8.0+):
 
-- **Direct APK Download (`v1.0.2`)**: [**Download `LedgerFlow-v1.0.2.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.2/LedgerFlow-v1.0.2.apk)
+- **Direct APK Download (`v1.0.3`)**: [**Download `LedgerFlow-v1.0.3.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.3/LedgerFlow-v1.0.3.apk)
 - **All Releases**: [github.com/itripathiharsh/LedgerFlow/releases/latest](https://github.com/itripathiharsh/LedgerFlow/releases/latest)
 
 | Artifact | Value |
 | --- | --- |
 | Application ID | `com.ledgerflow.app` |
-| Version | `1.0.2` (`versionCode: 3`) |
+| Version | `1.0.3` (`versionCode: 4`) |
 | Distribution Flavor | `direct` (Play Protect sideload-safe — zero SMS, Accessibility, or NotificationListener permissions) |
 | Min / Target SDK | `26` / `36` |
 | APK File Size | `4,333,857` bytes (~`4.13 MiB`) |
-| APK SHA-256 | `715ea43120769e09582e828339205b7ccf8a2f7851f7b2543e61ebb1d748a932` |
+| APK SHA-256 | `2b1a680bb277dfc7a2b72ab6780e79ba4a8d7af9088472447c088a3f77ae6c11` |
 | Signing Cert SHA-256 (`v2` + `v3` RSA-2048) | `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0` |
 
 ### Verifying & Installing the APK
-1. Download [`LedgerFlow-v1.0.2.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.2/LedgerFlow-v1.0.2.apk) on your Android device.
+1. Download [`LedgerFlow-v1.0.3.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.3/LedgerFlow-v1.0.3.apk) on your Android device.
 2. When prompted, allow installing unknown apps for your browser or file manager.
 3. Optional checksum check before install:
    ```bash
-   sha256sum LedgerFlow-v1.0.2.apk
-   # Expected: 715ea43120769e09582e828339205b7ccf8a2f7851f7b2543e61ebb1d748a932
+   sha256sum LedgerFlow-v1.0.3.apk
+   # Expected: 2b1a680bb277dfc7a2b72ab6780e79ba4a8d7af9088472447c088a3f77ae6c11
    ```
 
 ---

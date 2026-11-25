@@ -141,5 +141,21 @@
   - Signed `LedgerFlow-v1.0.2.apk` (`4,333,857` bytes, SHA-256 `715ea43120769e09582e828339205b7ccf8a2f7851f7b2543e61ebb1d748a932`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`) verified **0** Play-Protect restricted permissions (`BIND_NOTIFICATION_LISTENER_SERVICE`, `RECEIVE_SMS`, `READ_SMS`, `BIND_ACCESSIBILITY_SERVICE`).
   - Direct APK Download (`v1.0.2`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.2/LedgerFlow-v1.0.2.apk`.
 
+---
+
+## Clean First-Launch & In-App Reset (`v1.0.3`, `versionCode 4`)
+- **Clean Start by Default**:
+  - Updated [LedgerFlowApplication.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/LedgerFlowApplication.kt) to initialize via `SeedData.ensureMinimalSetup(...)` in [SeedData.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/local/SeedData.kt) — creating only 8 starter categories + 1 `$0.00` `Cash Wallet`, with zero fake bank balances, transactions, budgets, bills, or holdings.
+  - Cleared pre-filled test values (`$48.50`, `Trader Joe's`, `weekly`) from [AddTransactionSheet.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AddTransactionSheet.kt) and added flat zero-state chart rendering when holdings are empty in [InvestScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/InvestScreen.kt).
+- **In-App Data Reset (`Delete Data & Start Fresh`)**:
+  - Added atomic `resetAllDataFresh()` / `resetAndLoadDemoData()` in [LedgerDatabase.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/local/LedgerDatabase.kt) backed by DAO `deleteAll()` calls in [LedgerDaos.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/local/LedgerDaos.kt) (deleting `transactions` first so Room FTS4 triggers stay consistent) plus `VaultStore.resetSyncAndCloudState()` in [VaultSecurity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/security/VaultSecurity.kt).
+  - Exposed **"Delete Data & Start Fresh"** (+ optional **"Load Demo"**) in [PrivacyVaultScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/PrivacyVaultScreen.kt), **"Start Fresh (Reset Ledger)"** in [AccountsHubScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AccountsHubScreen.kt), and a conditional 1-tap **"Sample Demo Data Loaded -> Start Fresh"** banner in [HomeScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/HomeScreen.kt) whenever demo seed rows exist.
+- **Verification (`v1.0.3`)**:
+  - Added `resetAllDataFresh_clearsDemoAndRebuildsCleanFts4` in [LedgerDatabaseRobolectricTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/LedgerDatabaseRobolectricTest.kt).
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --no-daemon`: **21 / 21 passed** (`0` failed, `0` skipped), `0` Lint errors (`26` warnings).
+  - Signed `LedgerFlow-v1.0.3.apk` (`4,333,857` bytes, SHA-256 `2b1a680bb277dfc7a2b72ab6780e79ba4a8d7af9088472447c088a3f77ae6c11`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.0.3`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.3/LedgerFlow-v1.0.3.apk`.
+
+
 
 

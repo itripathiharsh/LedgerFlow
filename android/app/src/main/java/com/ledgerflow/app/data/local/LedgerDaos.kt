@@ -37,6 +37,9 @@ interface AccountDao {
 
     @Query("UPDATE accounts SET pendingSync = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    @Query("DELETE FROM accounts")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -58,6 +61,9 @@ interface CategoryDao {
 
     @Query("UPDATE categories SET pendingSync = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    @Query("DELETE FROM categories")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -93,6 +99,9 @@ interface TransactionDao {
 
     @Query("UPDATE transactions SET pendingSync = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -117,6 +126,9 @@ interface BudgetDao {
 
     @Query("UPDATE budgets SET pendingSync = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    @Query("DELETE FROM budgets")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -144,6 +156,9 @@ interface PlannedPaymentDao {
 
     @Query("UPDATE planned_payments SET pendingSync = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    @Query("DELETE FROM planned_payments")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -168,6 +183,9 @@ interface HoldingDao {
 
     @Query("UPDATE holdings SET pendingSync = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    @Query("DELETE FROM holdings")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -192,4 +210,7 @@ interface MagicRuleDao {
 
     @Query("UPDATE magic_rules SET pendingSync = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
+
+    @Query("DELETE FROM magic_rules")
+    suspend fun deleteAll()
 }

@@ -142,7 +142,7 @@ fun InvestScreen(vm: LedgerViewModel) {
                     contentColor = if (summary.gainMinor >= 0) EmeraldDark else RoseOutflow,
                 )
                 Spacer(Modifier.height(14.dp))
-                PortfolioAreaChart(timeframeIdx)
+                PortfolioAreaChart(timeframeIdx = timeframeIdx, isEmpty = holdings.isEmpty())
                 Spacer(Modifier.height(12.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     listOf("1D", "1W", "1M", "1Y", "ALL").forEachIndexed { idx, label ->
@@ -325,7 +325,7 @@ private fun AllocationRow(label: String, value: String, color: Color) {
 }
 
 @Composable
-private fun PortfolioAreaChart(timeframeIdx: Int) {
+private fun PortfolioAreaChart(timeframeIdx: Int, isEmpty: Boolean = false) {
     val curves = listOf(
         listOf(0.55f, 0.58f, 0.56f, 0.61f, 0.64f, 0.68f),
         listOf(0.45f, 0.49f, 0.52f, 0.50f, 0.60f, 0.72f),
@@ -333,7 +333,8 @@ private fun PortfolioAreaChart(timeframeIdx: Int) {
         listOf(0.20f, 0.35f, 0.48f, 0.44f, 0.70f, 0.90f),
         listOf(0.15f, 0.25f, 0.38f, 0.55f, 0.75f, 0.94f),
     )
-    val pts = curves.getOrElse(timeframeIdx) { curves[2] }
+    val pts = if (isEmpty) List(6) { 0.15f } else curves.getOrElse(timeframeIdx) { curves[2] }
+    val strokeColor = if (isEmpty) MutedSlate.copy(alpha = 0.4f) else EmeraldPrimary
     Canvas(modifier = Modifier.fillMaxWidth().height(92.dp)) {
         val stepX = size.width / (pts.size - 1).coerceAtLeast(1)
         val strokePath = Path()
@@ -357,19 +358,23 @@ private fun PortfolioAreaChart(timeframeIdx: Int) {
                 fillPath.close()
             }
         }
-        drawPath(
-            path = fillPath,
-            brush = Brush.verticalGradient(listOf(EmeraldPrimary.copy(alpha = 0.22f), Color.Transparent)),
-        )
+        if (!isEmpty) {
+            drawPath(
+                path = fillPath,
+                brush = Brush.verticalGradient(listOf(EmeraldPrimary.copy(alpha = 0.22f), Color.Transparent)),
+            )
+        }
         drawPath(
             path = strokePath,
-            color = EmeraldPrimary,
+            color = strokeColor,
             style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
         )
-        drawCircle(
-            color = EmeraldPrimary,
-            radius = 5.dp.toPx(),
-            center = Offset(size.width, size.height * (1f - pts.last())),
-        )
+        if (!isEmpty) {
+            drawCircle(
+                color = EmeraldPrimary,
+                radius = 5.dp.toPx(),
+                center = Offset(size.width, size.height * (1f - pts.last())),
+            )
+        }
     }
 }
