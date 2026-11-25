@@ -24,9 +24,10 @@ import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.CalculatorEngine
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MagicRuleEngine
+import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.UpdateManifest
 import com.ledgerflow.app.security.VaultSessionState
-import com.ledgerflow.app.service.PayAndTrackNotificationListenerService
+import com.ledgerflow.app.service.PayAndTrackCapture
 import com.ledgerflow.app.update.AppUpdateManager
 import com.ledgerflow.app.update.UpdateCheckOutcome
 import com.ledgerflow.app.update.UpdateEventBus
@@ -567,7 +568,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun simulateGooglePayTap() {
         viewModelScope.launch {
-            val captured = PayAndTrackNotificationListenerService.capturePayment(
+            val captured = PayAndTrackCapture.capturePayment(
                 context = app,
                 title = "Paid \$14.25 at Sweetgreen",
                 text = "Tap to pay • Google Wallet",
@@ -577,6 +578,32 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 "Pay & Track captured \$14.25 at Sweetgreen locally"
             } else {
                 "Could not capture sample notification"
+            }
+        }
+    }
+
+    fun capturePaymentAlertText(rawText: String, originNote: String = "Captured via Smart Paste") {
+        val cleaned = rawText.trim()
+        if (cleaned.isBlank()) {
+            _statusMessage.value = "Paste a payment alert (e.g. Paid \$14.25 at Sweetgreen)"
+            return
+        }
+        viewModelScope.launch {
+            val lines = cleaned.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val title = lines.firstOrNull().orEmpty()
+            val body = lines.drop(1).joinToString(" ").ifBlank { cleaned }
+            val outcome = PayAndTrackCapture.capturePaymentDetailed(
+                context = app,
+                title = title,
+                text = body,
+                forceForTest = true,
+                noteText = originNote,
+            )
+            _statusMessage.value = if (outcome.captured && outcome.merchant != null) {
+                val formatted = MoneyFormatter.formatMinor(outcome.amountMinor, outcome.currency)
+                "Captured $formatted at ${outcome.merchant}"
+            } else {
+                "Could not find amount + merchant (try: Paid \$18 at Trader Joe's)"
             }
         }
     }

@@ -1,6 +1,5 @@
 package com.ledgerflow.app.ui.screens
 
-import android.content.ComponentName
 import android.content.Intent
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,7 +56,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
-import com.ledgerflow.app.service.PayAndTrackNotificationListenerService
+import com.ledgerflow.app.service.PayAndTrackCapture
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
@@ -92,18 +91,13 @@ fun AccountsHubScreen(
     val baseCurrency = vault.baseCurrency
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    fun checkOsListener(): Boolean {
-        val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners").orEmpty()
-        val cn = ComponentName(context, PayAndTrackNotificationListenerService::class.java)
-        return flat.contains(cn.flattenToString()) || flat.contains(cn.flattenToShortString())
-    }
-
-    var enabledListeners by remember { mutableStateOf(checkOsListener()) }
+    val supportsOsListener = remember(context) { PayAndTrackCapture.isOsListenerAvailable(context) }
+    var enabledListeners by remember { mutableStateOf(PayAndTrackCapture.isOsListenerEnabled(context)) }
     DisposableEffect(lifecycleOwner, vault.payAndTrackEnabled) {
-        enabledListeners = checkOsListener()
+        enabledListeners = PayAndTrackCapture.isOsListenerEnabled(context)
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                enabledListeners = checkOsListener()
+                enabledListeners = PayAndTrackCapture.isOsListenerEnabled(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -119,6 +113,7 @@ fun AccountsHubScreen(
 
     var showLinkBank by remember { mutableStateOf(false) }
     var showAddWallet by remember { mutableStateOf(false) }
+    var showSmartPaste by remember { mutableStateOf(false) }
 
     val csvPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -172,7 +167,11 @@ fun AccountsHubScreen(
                             Text("Pay & Track Auto-Capture", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                             Spacer(Modifier.height(2.dp))
                             StatusPill(
-                                text = if (enabledListeners) "Listener Active" else "Local Simulation Ready",
+                                text = when {
+                                    enabledListeners -> "Listener Active"
+                                    supportsOsListener -> "Tap OS Listener Ready"
+                                    else -> "Share & Smart Paste Ready"
+                                },
                                 containerColor = EmeraldSoft,
                                 contentColor = EmeraldDark,
                                 dotColor = EmeraldPrimary,
@@ -188,28 +187,44 @@ fun AccountsHubScreen(
                 Spacer(Modifier.height(10.dp))
                 CleanCard(padding = 12.dp) {
                     Text(
-                        text = "$gpayCapturedCount transactions captured automatically via Google Wallet listener with duplicate suppression.",
+                        text = if (supportsOsListener) {
+                            "$gpayCapturedCount transactions captured automatically via wallet listener with duplicate suppression."
+                        } else {
+                            "$gpayCapturedCount Pay & Track entries saved locally. Share any payment SMS/alert to LedgerFlow or use Smart Paste."
+                        },
                         fontSize = 12.sp,
                         color = SlateInk,
                     )
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            runCatching {
-                                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (supportsOsListener) {
+                        OutlinedButton(
+                            onClick = {
+                                runCatching {
+                                    val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(intent)
                                 }
-                                context.startActivity(intent)
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Icon(Icons.Outlined.Contactless, contentDescription = null, tint = SkySync)
-                        Spacer(Modifier.width(6.dp))
-                        Text("OS Listener", fontSize = 12.sp, color = SlateInk)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Icon(Icons.Outlined.Contactless, contentDescription = null, tint = SkySync)
+                            Spacer(Modifier.width(6.dp))
+                            Text("OS Listener", fontSize = 12.sp, color = SlateInk)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { showSmartPaste = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Icon(Icons.Outlined.Contactless, contentDescription = null, tint = SkySync)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Smart Paste", fontSize = 12.sp, color = SlateInk)
+                        }
                     }
                     Button(
                         onClick = { vm.simulateGooglePayTap() },
@@ -427,6 +442,41 @@ fun AccountsHubScreen(
                 ) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showAddWallet = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showSmartPaste) {
+        var pasteText by remember { mutableStateOf("Paid Rs. 240 at Zomato") }
+
+        AlertDialog(
+            onDismissRequest = { showSmartPaste = false },
+            title = { Text("Smart Paste Payment Alert") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Paste a Google Pay, UPI, or card SMS alert (or use Android Share → LedgerFlow directly from any app).",
+                        fontSize = 12.sp,
+                        color = MutedSlate,
+                    )
+                    OutlinedTextField(
+                        value = pasteText,
+                        onValueChange = { pasteText = it },
+                        label = { Text("Payment notification or SMS") },
+                        minLines = 2,
+                        maxLines = 4,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.capturePaymentAlertText(pasteText, originNote = "Captured via Smart Paste")
+                        showSmartPaste = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                ) { Text("Extract & Save") }
+            },
+            dismissButton = { TextButton(onClick = { showSmartPaste = false }) { Text("Cancel") } },
         )
     }
 }

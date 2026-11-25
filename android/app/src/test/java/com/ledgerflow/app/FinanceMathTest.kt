@@ -58,6 +58,12 @@ class FinanceMathTest {
         assertEquals(-320L, p2!!.amountMinor)
         assertEquals("EUR", p2.currency)
 
+        val p3 = NotificationParser.parseGooglePayNotification("Paid Rs. 240.50 at Zomato", "UPI Alert")
+        assertNotNull(p3)
+        assertEquals(-24050L, p3!!.amountMinor)
+        assertEquals("INR", p3.currency)
+        assertEquals("Zomato", p3.merchant)
+
         assertNull(NotificationParser.parseGooglePayNotification("Google Wallet", "Your weekly summary is ready"))
     }
 

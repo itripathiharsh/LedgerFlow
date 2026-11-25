@@ -13,7 +13,7 @@ import com.ledgerflow.app.data.remote.SupabaseSyncClient
 import com.ledgerflow.app.data.sync.LedgerSyncRepository
 import com.ledgerflow.app.data.sync.SyncOutcome
 import com.ledgerflow.app.security.VaultStore
-import com.ledgerflow.app.service.PayAndTrackNotificationListenerService
+import com.ledgerflow.app.service.PayAndTrackCapture
 import com.ledgerflow.app.util.NetworkMonitor
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -304,13 +304,13 @@ class SyncRepositoryIntegrationTest {
 
         val appDb = LedgerDatabase.getInstance(context)
         SeedData.ensureSeededIfEmpty(appDb, nowMs = 1_700_000_000_000L)
-        val firstCapture = PayAndTrackNotificationListenerService.capturePayment(
+        val firstCapture = PayAndTrackCapture.capturePayment(
             context = context,
             title = "Paid \$9.50 at Peet's Coffee",
             text = "Google Pay",
             forceForTest = false,
         )
-        val duplicateCapture = PayAndTrackNotificationListenerService.capturePayment(
+        val duplicateCapture = PayAndTrackCapture.capturePayment(
             context = context,
             title = "Paid \$9.50 at Peet's Coffee",
             text = "Google Pay",

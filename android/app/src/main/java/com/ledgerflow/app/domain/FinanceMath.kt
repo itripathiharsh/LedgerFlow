@@ -213,9 +213,9 @@ object MagicRuleEngine {
 
 object NotificationParser {
     private val paidPattern = Regex(
-        """(?i)(?:paid|spent|charged|purchase(?:d)?|sent)\s+(?:of\s+)?([€$£₹]|USD|EUR|GBP|INR)?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)"""
+        """(?i)(?:paid|spent|charged|purchase(?:d)?|sent|debited)\s+(?:by\s+|for\s+|of\s+)?(Rs\.?|RS\.?|[€$£₹]|USD|EUR|GBP|INR)?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)"""
     )
-    private val amountPattern = Regex("""([€$£₹]|USD|EUR|GBP|INR)\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)""")
+    private val amountPattern = Regex("""(Rs\.?|RS\.?|[€$£₹]|USD|EUR|GBP|INR)\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)""", RegexOption.IGNORE_CASE)
     private val merchantAtPattern = Regex(
         """(?i)\b(?:at|to)\s+([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s+(?:via|with|on|from|using|checking|card)\b|\s*[•|(\[]|$)"""
     )
@@ -233,7 +233,7 @@ object NotificationParser {
         if (combined.isBlank()) return null
 
         val match = paidPattern.find(combined) ?: amountPattern.find(combined) ?: return null
-        val symbol = match.groupValues[1].uppercase(Locale.US)
+        val symbol = match.groupValues[1].trim().uppercase(Locale.US)
         val rawNumber = match.groupValues[2].replace(",", "")
         val num = rawNumber.toDoubleOrNull() ?: return null
         if (num <= 0.0) return null
@@ -242,7 +242,7 @@ object NotificationParser {
             "$" -> "USD"
             "€" -> "EUR"
             "£" -> "GBP"
-            "₹" -> "INR"
+            "₹", "RS", "RS." -> "INR"
             "USD", "EUR", "GBP", "INR" -> symbol
             else -> defaultCurrency
         }

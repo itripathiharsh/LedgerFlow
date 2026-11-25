@@ -127,4 +127,19 @@
   - Installed & verified live on `ZD222KQP8M` (dark status bar icons, crisp Snackbar contrast, Back dismiss on `+` modal, zero empty ad stub, `0` crashes).
   - Direct APK Download (`v1.0.1`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.1/LedgerFlow-v1.0.1.apk`.
 
+---
+
+## Google Play Protect Sideload Fix (`v1.0.2`, `versionCode 3`)
+- **Root Cause**: Sideloading from Chrome/Files (`com.google.android.apps.nbu.files`) triggered Google Play Protect's Enhanced Fraud Protection hard block (`"App blocked to protect your device — This app can request access to sensitive data..."`) strictly because [AndroidManifest.xml](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/AndroidManifest.xml) declared `BIND_NOTIFICATION_LISTENER_SERVICE` on `PayAndTrackNotificationListenerService` (Play Protect blocks sideloaded APKs declaring `RECEIVE_SMS`, `READ_SMS`, `BIND_NOTIFICATION_LISTENER_SERVICE`, or `BIND_ACCESSIBILITY_SERVICE`, unlike Play Store installs).
+- **Resolution & Flavor Architecture**:
+  - Split `distribution` Gradle product flavors (`direct` default + `playStore`) in [build.gradle.kts](file:///D:/all%20farzi%20project/LedgerFlow/android/app/build.gradle.kts).
+  - Extracted shared parser, deduplication, and Room capture logic into [PayAndTrackCapture.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/service/PayAndTrackCapture.kt).
+  - Moved `PayAndTrackNotificationListenerService` + `BIND_NOTIFICATION_LISTENER_SERVICE` strictly into `src/playStore/` ([AndroidManifest.xml](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/playStore/AndroidManifest.xml), [PayAndTrackNotificationListenerService.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/playStore/java/com/ledgerflow/app/service/PayAndTrackNotificationListenerService.kt)).
+  - Added zero-permission **Share-to-Track** (`ACTION_SEND` `text/plain`) in [MainActivity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/MainActivity.kt), **Smart Paste** dialog in [AccountsHubScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AccountsHubScreen.kt), and `Rs.` / `INR` support in [FinanceMath.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/domain/FinanceMath.kt).
+- **Verification (`v1.0.2`)**:
+  - `testDirectDebugUnitTest`: **20 / 20 passed** (`0` failed, `0` skipped); `lintDirectDebug`: `0` errors (`26` warnings); `assembleDirectRelease` + `compilePlayStoreDebugKotlin` passed.
+  - Signed `LedgerFlow-v1.0.2.apk` (`4,333,857` bytes, SHA-256 `715ea43120769e09582e828339205b7ccf8a2f7851f7b2543e61ebb1d748a932`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`) verified **0** Play-Protect restricted permissions (`BIND_NOTIFICATION_LISTENER_SERVICE`, `RECEIVE_SMS`, `READ_SMS`, `BIND_ACCESSIBILITY_SERVICE`).
+  - Direct APK Download (`v1.0.2`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.2/LedgerFlow-v1.0.2.apk`.
+
+
 

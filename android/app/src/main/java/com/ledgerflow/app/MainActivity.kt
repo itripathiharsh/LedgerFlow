@@ -1,5 +1,6 @@
 package com.ledgerflow.app
 
+import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.view.WindowManager
@@ -106,6 +107,10 @@ class MainActivity : FragmentActivity() {
             ),
         )
 
+        if (savedInstanceState == null) {
+            handleIncomingShareIntent(intent)
+        }
+
         setContent {
             LedgerFlowTheme {
                 val vault by vm.vaultState.collectAsState()
@@ -170,6 +175,24 @@ class MainActivity : FragmentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingShareIntent(intent)
+    }
+
+    private fun handleIncomingShareIntent(intent: Intent?) {
+        intent ?: return
+        if (intent.action != Intent.ACTION_SEND) return
+        val launchedFromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        if (launchedFromHistory) return
+        val shared = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+        if (shared.isNotBlank() && !vm.isLocked.value) {
+            vm.capturePaymentAlertText(shared, originNote = "Captured via Share-to-Track")
+            intent.removeExtra(Intent.EXTRA_TEXT)
         }
     }
 

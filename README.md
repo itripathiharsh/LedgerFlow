@@ -8,25 +8,26 @@ Offline-first personal finance, expense tracking, budgeting, multi-account ledge
 
 Install the latest signed release directly on Android (`minSdk 26` / Android 8.0+):
 
-- **Direct APK Download (`v1.0.1`)**: [**Download `LedgerFlow-v1.0.1.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.1/LedgerFlow-v1.0.1.apk)
+- **Direct APK Download (`v1.0.2`)**: [**Download `LedgerFlow-v1.0.2.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.2/LedgerFlow-v1.0.2.apk)
 - **All Releases**: [github.com/itripathiharsh/LedgerFlow/releases/latest](https://github.com/itripathiharsh/LedgerFlow/releases/latest)
 
 | Artifact | Value |
 | --- | --- |
 | Application ID | `com.ledgerflow.app` |
-| Version | `1.0.1` (`versionCode: 2`) |
+| Version | `1.0.2` (`versionCode: 3`) |
+| Distribution Flavor | `direct` (Play Protect sideload-safe — zero SMS, Accessibility, or NotificationListener permissions) |
 | Min / Target SDK | `26` / `36` |
 | APK File Size | `4,333,857` bytes (~`4.13 MiB`) |
-| APK SHA-256 | `eef5a362002157adabd6dd70b008985fba27ff4c43513807a58210cb3a2f1652` |
+| APK SHA-256 | `715ea43120769e09582e828339205b7ccf8a2f7851f7b2543e61ebb1d748a932` |
 | Signing Cert SHA-256 (`v2` + `v3` RSA-2048) | `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0` |
 
 ### Verifying & Installing the APK
-1. Download [`LedgerFlow-v1.0.1.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.1/LedgerFlow-v1.0.1.apk) on your Android device.
+1. Download [`LedgerFlow-v1.0.2.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.2/LedgerFlow-v1.0.2.apk) on your Android device.
 2. When prompted, allow installing unknown apps for your browser or file manager.
 3. Optional checksum check before install:
    ```bash
-   sha256sum LedgerFlow-v1.0.1.apk
-   # Expected: eef5a362002157adabd6dd70b008985fba27ff4c43513807a58210cb3a2f1652
+   sha256sum LedgerFlow-v1.0.2.apk
+   # Expected: 715ea43120769e09582e828339205b7ccf8a2f7851f7b2543e61ebb1d748a932
    ```
 
 ---
@@ -34,7 +35,7 @@ Install the latest signed release directly on Android (`minSdk 26` / Android 8.0
 ## Key Architecture & Features
 
 - **Offline-First Core (`android/`)**: Local-first Room SQLite ledger with FTS4 transaction search, WorkManager background sync & update checks, and Clean Emerald Material 3 Compose UI across 7 screens.
-- **Pay & Track Auto-Capture**: Optional Android `NotificationListenerService` (`PayAndTrackNotificationListenerService.kt`) with user-configurable merchant/category rules.
+- **Pay & Track Auto-Capture**: Zero-permission **Share-to-Track** (`ACTION_SEND`) & **Smart Paste** UPI/card/GPay text parser (`PayAndTrackCapture.kt`) in the `direct` APK (plus optional `NotificationListenerService` in the `playStore` flavor), with user-configurable merchant/category auto-rules and 60s duplicate suppression.
 - **Security & Encrypted Storage**: AES-256-GCM `VaultStore` (`VaultSecurity.kt`), strict online-only AdMob gating (`OnlineAdBanner.kt`), and zero embedded backend service-role secrets.
 - **Verified In-App Auto-Updater**: Periodic WorkManager version checks (`UpdateCheckWorker.kt`), non-blocking modal dialog (**Update Now** / **Later** in `UpdateDialog.kt`), SHA-256 + signing certificate pinning verification (`AppUpdateManager.kt`, `AppUpdatePolicy.kt`), and `PackageInstaller` session restart flow (`UpdateInstallReceivers.kt`).
 - **Cloud Sync & Database (`supabase/`)**: Bidirectional incremental Supabase sync with Row-Level Security policies (`0001_ledgerflow_core.sql`, `0002_rls_policies.sql`).
