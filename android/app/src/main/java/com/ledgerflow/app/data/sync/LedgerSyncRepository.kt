@@ -70,10 +70,46 @@ class LedgerSyncRepository(
             db.holdingDao().getDirty().size +
             db.magicRuleDao().getDirty().size
 
+    fun restoreCachedFxRates() {
+        val state = vault.read()
+        val raw = state.cachedFxRatesJson ?: return
+        val map = runCatching {
+            remote.json.decodeFromString(
+                kotlinx.serialization.builtins.MapSerializer(
+                    kotlinx.serialization.serializer<String>(),
+                    kotlinx.serialization.serializer<Double>(),
+                ),
+                raw,
+            )
+        }.getOrNull() ?: return
+        val label = state.cachedFxDate?.takeIf { it.isNotBlank() }?.let { "ECB ($it)" } ?: "Cached ECB"
+        FxConverter.updateRatesFromUsdBase(map, sourceLabel = label)
+    }
+
     suspend fun refreshFxRatesIfOnline(): Boolean {
+        restoreCachedFxRates()
         if (!NetworkMonitor.isOnline(context)) return false
         val fx = remote.fetchLiveFxRatesOrNull("USD") ?: return false
-        FxConverter.updateRatesFromUsdBase(fx.rates)
+        if (fx.rates.isEmpty()) return false
+        val label = fx.date.takeIf { it.isNotBlank() }?.let { "ECB ($it)" } ?: "Live ECB"
+        FxConverter.updateRatesFromUsdBase(fx.rates, sourceLabel = label)
+        val serialized = runCatching {
+            remote.json.encodeToString(
+                kotlinx.serialization.builtins.MapSerializer(
+                    kotlinx.serialization.serializer<String>(),
+                    kotlinx.serialization.serializer<Double>(),
+                ),
+                fx.rates,
+            )
+        }.getOrNull()
+        if (!serialized.isNullOrBlank()) {
+            vault.update {
+                it.copy(
+                    cachedFxRatesJson = serialized,
+                    cachedFxDate = fx.date.ifBlank { it.cachedFxDate },
+                )
+            }
+        }
         return true
     }
 
@@ -83,8 +119,8 @@ class LedgerSyncRepository(
             return SyncOutcome.LocalOnly("Offline — changes saved locally", pending)
         }
 
-        // Refresh public FX rates quietly in background if available.
-        remote.fetchLiveFxRatesOrNull("USD")?.let { FxConverter.updateRatesFromUsdBase(it.rates) }
+        // Refresh public ECB FX rates quietly in background if available.
+        refreshFxRatesIfOnline()
 
         var state = vault.read()
         var token = state.accessToken

@@ -42,9 +42,17 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 object AdMobGate {
+    private const val SAMPLE_TEST_PREFIX = "ca-app-pub-3940256099942544"
     private val initMutex = Mutex()
     @Volatile
     private var initialized = false
+
+    fun isConfiguredAdUnit(): Boolean {
+        val unitId = BuildConfig.ADMOB_BANNER_UNIT_ID.trim()
+        if (unitId.isBlank()) return false
+        if (!BuildConfig.DEBUG && unitId.startsWith(SAMPLE_TEST_PREFIX)) return false
+        return true
+    }
 
     suspend fun ensureInitializedWhenOnline(context: Context): Boolean {
         if (!NetworkMonitor.isOnline(context)) return false
@@ -80,6 +88,9 @@ object AdMobGate {
 fun OnlineOnlyAdBanner(
     modifier: Modifier = Modifier,
 ) {
+    if (!AdMobGate.isConfiguredAdUnit()) {
+        return
+    }
     val context = LocalContext.current
     var isOnline by remember { mutableStateOf(false) }
     var sdkReady by remember { mutableStateOf(false) }

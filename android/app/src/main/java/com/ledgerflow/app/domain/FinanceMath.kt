@@ -75,15 +75,27 @@ object FxConverter {
     @Volatile
     private var usdRates: Map<String, Double> = defaultUsdRates
 
+    @Volatile
+    var lastRatesSource: String = "Offline baseline"
+        private set
+
     fun supportedCurrencies(): List<String> = defaultUsdRates.keys.toList()
 
-    fun updateRatesFromUsdBase(rates: Map<String, Double>) {
+    fun updateRatesFromUsdBase(rates: Map<String, Double>, sourceLabel: String? = null) {
         if (rates.isEmpty()) return
         val merged = defaultUsdRates.toMutableMap()
         rates.forEach { (k, v) ->
             if (v > 0.0) merged[k.uppercase(Locale.US)] = v
         }
         usdRates = merged
+        if (!sourceLabel.isNullOrBlank()) {
+            lastRatesSource = sourceLabel
+        }
+    }
+
+    internal fun resetToBaselineForTests() {
+        usdRates = defaultUsdRates
+        lastRatesSource = "Offline baseline"
     }
 
     fun convertMinor(amountMinor: Long, fromCurrency: String, toCurrency: String): Long {
@@ -252,7 +264,7 @@ object NotificationParser {
                 ?: merchantAtPattern.find(cleanText)
             )?.groupValues?.getOrNull(1)?.trim()
             ?: cleanTitle.takeIf { it.isNotBlank() && !it.contains("Google", ignoreCase = true) }
-            ?: "Google Pay Merchant"
+            ?: "Card / Wallet Payment"
 
         return ParsedPayment(
             merchant = merchant.take(64),
@@ -283,6 +295,7 @@ object AnalyticsCalculator {
 
     data class PortfolioSummary(
         val totalValueMinor: Long,
+        val totalCostMinor: Long,
         val gainMinor: Long,
         val gainPercent: Double,
         val stocksValueMinor: Long,
@@ -386,6 +399,7 @@ object AnalyticsCalculator {
         val gainPct = if (cost > 0) (gain.toDouble() / cost.toDouble()) * 100.0 else 0.0
         return PortfolioSummary(
             totalValueMinor = total,
+            totalCostMinor = cost,
             gainMinor = gain,
             gainPercent = gainPct,
             stocksValueMinor = stocks,

@@ -6,7 +6,6 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.room.withTransaction
 import com.ledgerflow.app.LedgerFlowApplication
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
@@ -15,7 +14,6 @@ import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.LedgerDatabase
 import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.PlannedPaymentEntity
-import com.ledgerflow.app.data.local.SeedData
 import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.data.remote.SupabaseSyncClient
 import com.ledgerflow.app.data.sync.LedgerSyncRepository
@@ -81,7 +79,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _recordsFilter = MutableStateFlow("ALL") // ALL, GPAY_AUTO, BANK_SYNC, PLANNED, MULTIFX
+    private val _recordsFilter = MutableStateFlow("ALL") // ALL, MANUAL, GPAY_AUTO, PLANNED, IMPORT, MULTIFX
     val recordsFilter: StateFlow<String> = _recordsFilter.asStateFlow()
 
     private val _statusMessage = MutableStateFlow<String?>(null)
@@ -117,9 +115,10 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         _vaultState,
     ) { list, filter, v ->
         when (filter) {
+            "MANUAL" -> list.filter { it.sourceTag == "MANUAL" }
             "GPAY_AUTO" -> list.filter { it.sourceTag == "GPAY_AUTO" }
-            "BANK_SYNC" -> list.filter { it.sourceTag == "BANK_SYNC" }
             "PLANNED" -> list.filter { it.sourceTag == "PLANNED" }
+            "IMPORT" -> list.filter { it.sourceTag == "IMPORT" }
             "MULTIFX" -> list.filter { it.currency != v.baseCurrency }
             else -> list
         }
@@ -446,78 +445,47 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun linkSandboxBank(providerCode: String, currency: String) {
-        viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            val response = if (isOnline.value) remote.connectSandboxBankOrNull(providerCode, currency) else null
-            val accountId = UUID.randomUUID().toString()
-            val accName = response?.accountName ?: "${providerCode.trim()} Checking"
-            val bal = response?.balanceMinor ?: 185_000L
-            val samples = response?.sampleTransactions.orEmpty()
-            val rules = db.magicRuleDao().getAllActive()
-            db.withTransaction {
-                db.accountDao().upsert(
-                    AccountEntity(
-                        id = accountId,
-                        name = accName,
-                        institution = "Open Banking (Sandbox)",
-                        accountType = "CHECKING",
-                        currency = currency.uppercase(),
-                        balanceMinor = bal,
-                        lastFour = (1000..9999).random().toString(),
-                        sourceType = "OPEN_BANKING",
-                        syncStatus = "OK",
-                        lastSyncedAtEpochMs = now,
-                        createdAtEpochMs = now,
-                        updatedAtEpochMs = now,
-                        pendingSync = true,
-                    )
-                )
-                for (s in samples) {
-                    val m = MagicRuleEngine.apply(s.merchant, "", rules)
-                    db.transactionDao().upsert(
-                        TransactionEntity(
-                            id = UUID.randomUUID().toString(),
-                            accountId = accountId,
-                            categoryId = m.categoryId,
-                            txType = s.txType,
-                            amountMinor = s.amountMinor,
-                            currency = s.currency,
-                            merchant = s.merchant,
-                            note = "Synced via Open Banking sandbox",
-                            labelsCsv = m.label.orEmpty(),
-                            sourceTag = "BANK_SYNC",
-                            autoRuleApplied = m.matched,
-                            occurredAtEpochMs = now - 3_600_000L,
-                            createdAtEpochMs = now,
-                            updatedAtEpochMs = now,
-                            pendingSync = true,
-                        )
-                    )
-                }
-            }
-            SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = if (response != null) {
-                "Linked $accName via Render Open Banking Sandbox"
-            } else {
-                "Linked $accName via offline sandbox"
-            }
-        }
-    }
-
-    fun reconnectAccount(accountId: String) {
+    fun deleteAccount(accountId: String) {
         viewModelScope.launch {
             val acc = db.accountDao().getById(accountId) ?: return@launch
+            if (acc.deletedAtEpochMs != null) return@launch
             val now = System.currentTimeMillis()
-            db.accountDao().upsert(
-                acc.copy(syncStatus = "OK", lastSyncedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true)
-            )
+            db.accountDao().upsert(acc.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
             SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = "${acc.name} reconnected"
+            _statusMessage.value = "Account \"${acc.name}\" removed"
         }
     }
 
-    fun addHolding(symbol: String, name: String, assetClass: String, exchange: String, quantity: Double, avgCostMinor: Long, currentPriceMinor: Long, currency: String) {
+    fun deleteBudget(budgetId: String) {
+        viewModelScope.launch {
+            val existing = budgets.value.firstOrNull { it.id == budgetId } ?: return@launch
+            val now = System.currentTimeMillis()
+            db.budgetDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "Budget deleted"
+        }
+    }
+
+    fun deletePlannedPayment(plannedId: String) {
+        viewModelScope.launch {
+            val existing = db.plannedPaymentDao().getById(plannedId) ?: return@launch
+            val now = System.currentTimeMillis()
+            db.plannedPaymentDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "Planned bill deleted"
+        }
+    }
+
+    fun addHolding(
+        symbol: String,
+        name: String,
+        assetClass: String,
+        exchange: String,
+        quantity: Double,
+        avgCostMinor: Long,
+        currentPriceMinor: Long,
+        currency: String,
+    ) {
         if (symbol.isBlank() || quantity <= 0.0 || currentPriceMinor <= 0L) {
             _statusMessage.value = "Enter valid asset symbol, quantity, and price"
             return
@@ -535,14 +503,44 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                     avgCostMinor = avgCostMinor.coerceAtLeast(1L),
                     currentPriceMinor = currentPriceMinor,
                     currency = currency.uppercase(),
-                    dayChangeBps = 45,
+                    dayChangeBps = 0,
                     createdAtEpochMs = now,
                     updatedAtEpochMs = now,
                     pendingSync = true,
                 )
             )
             SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = "Holding ${symbol.uppercase()} saved to Room cache"
+            _statusMessage.value = "Holding ${symbol.trim().uppercase()} saved"
+        }
+    }
+
+    fun updateHoldingPrice(holdingId: String, newPriceMinor: Long) {
+        if (newPriceMinor <= 0L) {
+            _statusMessage.value = "Enter a valid positive unit price"
+            return
+        }
+        viewModelScope.launch {
+            val existing = holdings.value.firstOrNull { it.id == holdingId } ?: return@launch
+            val now = System.currentTimeMillis()
+            db.holdingDao().upsert(
+                existing.copy(
+                    currentPriceMinor = newPriceMinor,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "${existing.symbol} price updated"
+        }
+    }
+
+    fun deleteHolding(holdingId: String) {
+        viewModelScope.launch {
+            val existing = holdings.value.firstOrNull { it.id == holdingId } ?: return@launch
+            val now = System.currentTimeMillis()
+            db.holdingDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "${existing.symbol} deleted"
         }
     }
 
@@ -562,30 +560,24 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                     pendingSync = true,
                 )
             )
-            _statusMessage.value = "Magic Rule saved"
+            _statusMessage.value = "Auto-rule saved"
         }
     }
 
-    fun simulateGooglePayTap() {
+    fun deleteMagicRule(ruleId: String) {
         viewModelScope.launch {
-            val captured = PayAndTrackCapture.capturePayment(
-                context = app,
-                title = "Paid \$14.25 at Sweetgreen",
-                text = "Tap to pay • Google Wallet",
-                forceForTest = true,
-            )
-            _statusMessage.value = if (captured) {
-                "Pay & Track captured \$14.25 at Sweetgreen locally"
-            } else {
-                "Could not capture sample notification"
-            }
+            val existing = magicRules.value.firstOrNull { it.id == ruleId } ?: return@launch
+            val now = System.currentTimeMillis()
+            db.magicRuleDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "Auto-rule deleted"
         }
     }
 
     fun capturePaymentAlertText(rawText: String, originNote: String = "Captured via Smart Paste") {
         val cleaned = rawText.trim()
         if (cleaned.isBlank()) {
-            _statusMessage.value = "Paste a payment alert (e.g. Paid \$14.25 at Sweetgreen)"
+            _statusMessage.value = "Paste a payment SMS or alert containing amount and merchant"
             return
         }
         viewModelScope.launch {
@@ -596,14 +588,14 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 context = app,
                 title = title,
                 text = body,
-                forceForTest = true,
+                manualEntry = true,
                 noteText = originNote,
             )
             _statusMessage.value = if (outcome.captured && outcome.merchant != null) {
                 val formatted = MoneyFormatter.formatMinor(outcome.amountMinor, outcome.currency)
                 "Captured $formatted at ${outcome.merchant}"
             } else {
-                "Could not find amount + merchant (try: Paid \$18 at Trader Joe's)"
+                "Could not extract an amount and merchant from that text"
             }
         }
     }
@@ -632,16 +624,11 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 _statusMessage.value = "Unable to read CSV (or file exceeds 2 MB limit)"
                 return@launch
             }
-            val targetId = accounts.value.firstOrNull()?.id ?: return@launch
-            val count = repo.importCsvOffline(csvText, targetId, _vaultState.value.baseCurrency)
-            if (count > 0) SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = if (count > 0) "Imported $count transactions locally" else "No valid CSV rows found"
-        }
-    }
-
-    fun importCsvSampleOrText(csvText: String) {
-        viewModelScope.launch {
-            val targetId = accounts.value.firstOrNull()?.id ?: return@launch
+            val targetId = accounts.value.firstOrNull()?.id
+            if (targetId == null) {
+                _statusMessage.value = "Create an account first before importing CSV"
+                return@launch
+            }
             val count = repo.importCsvOffline(csvText, targetId, _vaultState.value.baseCurrency)
             if (count > 0) SyncWorker.enqueueWhenOnline(app)
             _statusMessage.value = if (count > 0) "Imported $count transactions locally" else "No valid CSV rows found"
@@ -674,16 +661,6 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             _searchQuery.value = ""
             _recordsFilter.value = "ALL"
             _statusMessage.value = "Deleted all data — started fresh (${MoneyFormatter.formatMinor(0L, baseCur)})"
-        }
-    }
-
-    fun loadDemoData() {
-        viewModelScope.launch {
-            db.resetAndLoadDemoData()
-            _vaultState.value = vault.resetSyncAndCloudState()
-            _searchQuery.value = ""
-            _recordsFilter.value = "ALL"
-            _statusMessage.value = "Loaded sample demo data"
         }
     }
 

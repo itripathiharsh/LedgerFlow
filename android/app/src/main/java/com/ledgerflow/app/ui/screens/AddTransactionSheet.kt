@@ -134,7 +134,7 @@ fun AddTransactionScreen(
                 }
             }
 
-            StatusPill("Local E2EE", EmeraldSoft, EmeraldDark)
+            StatusPill("Offline First", EmeraldSoft, EmeraldDark)
         }
 
         Column(
@@ -214,7 +214,7 @@ fun AddTransactionScreen(
                     value = merchant,
                     onValueChange = { merchant = it },
                     label = { Text("Merchant / Payee") },
-                    placeholder = { Text("e.g. Coffee, Uber, Salary") },
+                    placeholder = { Text("Merchant or payee name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -222,14 +222,22 @@ fun AddTransactionScreen(
 
                 Text("Account", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
                 Spacer(Modifier.height(4.dp))
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    accounts.forEach { acc ->
-                        FilterChip(
-                            selected = selectedAccountId == acc.id,
-                            onClick = { selectedAccountId = acc.id },
-                            label = { Text("${acc.name} (${MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency)})", fontSize = 12.sp) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = EmeraldSoft, selectedLabelColor = EmeraldDark),
-                        )
+                if (accounts.isEmpty()) {
+                    Text(
+                        text = "No accounts available — add an account in the Hub tab.",
+                        fontSize = 12.sp,
+                        color = RoseOutflow,
+                    )
+                } else {
+                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        accounts.forEach { acc ->
+                            FilterChip(
+                                selected = selectedAccountId == acc.id,
+                                onClick = { selectedAccountId = acc.id },
+                                label = { Text("${acc.name} (${MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency)})", fontSize = 12.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = EmeraldSoft, selectedLabelColor = EmeraldDark),
+                            )
+                        }
                     }
                 }
 

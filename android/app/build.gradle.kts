@@ -27,14 +27,14 @@ android {
         applicationId = "com.ledgerflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 6
+        versionName = "1.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         val supabaseUrl = propOrDefault("SUPABASE_URL", "https://rzlenoldloktswymuooz.supabase.co")
         val supabaseKey = propOrDefault("SUPABASE_PUBLISHABLE_KEY", "")
-        val renderUrl = propOrDefault("RENDER_API_URL", "https://ledgerflow-api.onrender.com")
+        val renderUrl = propOrDefault("RENDER_API_URL", "")
         val updateManifestUrl = propOrDefault(
             "UPDATE_MANIFEST_URL",
             "https://github.com/itripathiharsh/LedgerFlow/releases/latest/download/update-manifest.json",
@@ -45,7 +45,7 @@ android {
         )
         val expectedSigningCertSha256 = propOrDefault("EXPECTED_SIGNING_CERT_SHA256", "")
         val admobAppId = propOrDefault("ADMOB_APP_ID", "ca-app-pub-3940256099942544~3347511713")
-        val admobBannerId = propOrDefault("ADMOB_BANNER_UNIT_ID", "ca-app-pub-3940256099942544/6300978111")
+        val admobBannerId = propOrDefault("ADMOB_BANNER_UNIT_ID", "")
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")

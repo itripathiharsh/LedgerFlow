@@ -1,6 +1,8 @@
 package com.ledgerflow.app
 
+import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.MagicRuleEntity
+import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.CalculatorEngine
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MagicRuleEngine
@@ -102,5 +104,52 @@ class FinanceMathTest {
         val hashB64 = java.util.Base64.getEncoder().encodeToString(hash)
         assertTrue(VaultCryptoEngine.verifyPin("2580", saltB64, hashB64))
         assertFalse(VaultCryptoEngine.verifyPin("9999", saltB64, hashB64))
+    }
+
+    @Test
+    fun analyticsCalculator_computesRealPortfolioGainAndZeroWhenEmpty() {
+        val empty = AnalyticsCalculator.computePortfolio(emptyList(), "USD")
+        assertEquals(0L, empty.totalValueMinor)
+        assertEquals(0L, empty.totalCostMinor)
+        assertEquals(0L, empty.gainMinor)
+        assertEquals(0.0, empty.gainPercent, 0.0001)
+
+        val holdings = listOf(
+            HoldingEntity(
+                id = "h1",
+                symbol = "VTI",
+                name = "Vanguard Total Stock",
+                assetClass = "STOCKS",
+                exchange = "NYSE",
+                quantity = 2.0,
+                avgCostMinor = 25_000L,
+                currentPriceMinor = 27_500L,
+                currency = "USD",
+                dayChangeBps = 0,
+                createdAtEpochMs = 1L,
+                updatedAtEpochMs = 1L,
+            ),
+            HoldingEntity(
+                id = "h2",
+                symbol = "ETH",
+                name = "Ether",
+                assetClass = "CRYPTO",
+                exchange = "SPOT",
+                quantity = 1.0,
+                avgCostMinor = 300_000L,
+                currentPriceMinor = 290_000L,
+                currency = "USD",
+                dayChangeBps = 0,
+                createdAtEpochMs = 1L,
+                updatedAtEpochMs = 1L,
+            ),
+        )
+        val summary = AnalyticsCalculator.computePortfolio(holdings, "USD")
+        assertEquals(345_000L, summary.totalValueMinor)
+        assertEquals(350_000L, summary.totalCostMinor)
+        assertEquals(-5_000L, summary.gainMinor)
+        assertEquals(55_000L, summary.stocksValueMinor)
+        assertEquals(290_000L, summary.cryptoValueMinor)
+        assertEquals(0L, summary.forexValueMinor)
     }
 }

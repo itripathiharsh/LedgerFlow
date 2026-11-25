@@ -1,17 +1,17 @@
 {
-  "versionCode": 5,
-  "versionName": "1.0.4",
+  "versionCode": 6,
+  "versionName": "1.0.5",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-26T03:25:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.4/LedgerFlow-v1.0.4.apk",
+  "releasedAt": "2026-11-26T03:53:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.5/LedgerFlow-v1.0.5.apk",
   "apkSizeBytes": 4333857,
-  "sha256": "413c55afbed2dddba564a67c4de770968ca492c7b107d5ad4574d6e596753175",
+  "sha256": "c901181b4cf83d97f1484fa2dfecdc3e11530ee1b55aff1dda5a5f297461f180",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Fixed automatic in-app update checks by serving update-manifest.json from GitHub Releases with a raw main branch fallback.",
-    "Every fresh app launch now checks for new versions silently when online without interrupting offline use.",
-    "Shows in-app What's New dialog with one-tap Update Now download, SHA-256 + RSA-2048 signature verification, and automatic app relaunch after installation.",
-    "Resumes pending update installation automatically after granting 'Install unknown apps' permission."
+    "Removed all demo seed data, sandbox bank mocks, test triggers, and pre-filled form defaults.",
+    "Investments now show strictly real portfolio totals, cost basis, and manual price updates with no fabricated charts or daily return figures.",
+    "Multi-currency conversions fetch live ECB rates directly from Frankfurter with offline encrypted vault caching.",
+    "Release builds hide AdMob completely unless production ad unit IDs are configured."
   ],
   "mandatory": false
 }

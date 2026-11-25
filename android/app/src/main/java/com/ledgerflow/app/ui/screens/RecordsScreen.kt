@@ -120,7 +120,7 @@ fun RecordsScreen(vm: LedgerViewModel) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Records", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                    StatusPill("${transactions.size} FTS4", EmeraldSoft, EmeraldDark)
+                    StatusPill("${transactions.size}", EmeraldSoft, EmeraldDark)
                 }
                 Row {
                     IconButton(onClick = { showRulesDialog = true }) {
@@ -162,9 +162,10 @@ fun RecordsScreen(vm: LedgerViewModel) {
         item {
             val filters = listOf(
                 "ALL" to "All",
+                "MANUAL" to "Manual",
                 "GPAY_AUTO" to "GPay Auto",
-                "BANK_SYNC" to "Bank Sync",
                 "PLANNED" to "Planned",
+                "IMPORT" to "Imported",
                 "MULTIFX" to "Multi-FX",
             )
             Row(
@@ -326,22 +327,42 @@ fun RecordsScreen(vm: LedgerViewModel) {
 
         AlertDialog(
             onDismissRequest = { showRulesDialog = false },
-            title = { Text("Magic Auto-Rules") },
+            title = { Text("Auto-Category Rules") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Automatically assign categories when matching merchants or Google Wallet taps.", fontSize = 12.sp, color = MutedSlate)
-                    magicRules.take(5).forEach { r ->
-                        Surface(shape = RoundedCornerShape(10.dp), color = SlateTint, modifier = Modifier.fillMaxWidth()) {
-                            Row(modifier = Modifier.padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("\"${r.matchPattern}\"", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = SlateInk)
-                                Text(catMap[r.targetCategoryId]?.name ?: "Rule", fontSize = 12.sp, color = EmeraldDark)
+                    Text("Automatically assign categories when merchant or note text matches keywords.", fontSize = 12.sp, color = MutedSlate)
+                    if (magicRules.isEmpty()) {
+                        Text("No rules saved yet.", fontSize = 12.sp, color = MutedSlate)
+                    } else {
+                        magicRules.take(5).forEach { r ->
+                            Surface(shape = RoundedCornerShape(10.dp), color = SlateTint, modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "\"${r.matchPattern}\" → ${catMap[r.targetCategoryId]?.name ?: "Rule"}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = SlateInk,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    IconButton(onClick = { vm.deleteMagicRule(r.id) }) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DeleteOutline,
+                                            contentDescription = "Delete rule",
+                                            tint = RoseOutflow,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                     OutlinedTextField(
                         value = newPattern,
                         onValueChange = { newPattern = it },
-                        label = { Text("Keyword (e.g. target|amazon)") },
+                        label = { Text("Keyword match (pipe-separated)") },
                         singleLine = true,
                     )
                     OutlinedTextField(
@@ -362,12 +383,13 @@ fun RecordsScreen(vm: LedgerViewModel) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (newPattern.isNotBlank()) {
+                TextButton(
+                    enabled = newPattern.isNotBlank(),
+                    onClick = {
                         vm.addMagicRule(newPattern, selectedCatId, newLabel)
                         showRulesDialog = false
-                    }
-                }) { Text("Save Rule", color = EmeraldPrimary, fontWeight = FontWeight.Bold) }
+                    },
+                ) { Text("Save Rule", color = EmeraldPrimary, fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
                 TextButton(onClick = { showRulesDialog = false }) { Text("Close") }

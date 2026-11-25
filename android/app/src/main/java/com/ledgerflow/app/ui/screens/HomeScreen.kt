@@ -30,22 +30,16 @@ import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,7 +52,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ledgerflow.app.data.local.SeedData
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
@@ -72,7 +65,6 @@ import com.ledgerflow.app.ui.components.SourceTagBadge
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.SyncBadge
 import com.ledgerflow.app.ui.theme.AlabasterBg
-import com.ledgerflow.app.ui.theme.AmberSoft
 import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
@@ -111,8 +103,6 @@ fun HomeScreen(
     val dayKey = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
     val monthStart = remember(dayKey) { vm.currentMonthStartEpochMs() }
     val monthFraction = remember(dayKey) { vm.currentMonthFraction() }
-    val hasDemoSeedData = remember(transactions) { transactions.any { it.id == SeedData.DEMO_STARTER_TX_ID } }
-    var showResetConfirm by remember { mutableStateOf(false) }
 
     val dashboard = remember(accounts, transactions, baseCurrency, monthStart) {
         AnalyticsCalculator.computeDashboard(accounts, transactions, baseCurrency, monthStart)
@@ -186,30 +176,7 @@ fun HomeScreen(
             }
         }
 
-        if (hasDemoSeedData) {
-            item {
-                CleanCard(
-                    containerColor = AmberSoft,
-                    borderColor = Color(0xFFFDE68A),
-                    padding = 14.dp,
-                    onClick = { showResetConfirm = true },
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Sample Demo Data Loaded", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                            Text("Tap to clear demo records & start fresh at zero", fontSize = 12.sp, color = AmberWarn)
-                        }
-                        StatusPill("Start Fresh", Color.White, RoseOutflow)
-                    }
-                }
-            }
-        }
-
-        // Hero Net Worth Card
+        // Hero Balance Card
         item {
             CleanCard(padding = 20.dp) {
                 Row(
@@ -225,7 +192,7 @@ fun HomeScreen(
                         letterSpacing = 0.5.sp,
                     )
                     Text(
-                        text = "Room WAL • AES-256",
+                        text = "Local Room Ledger",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = MutedSlate,
@@ -262,50 +229,54 @@ fun HomeScreen(
         // Accounts Carousel
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionHeader(title = "Connected Accounts", actionText = "See All", onActionClick = onOpenHub)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(accounts, key = { it.id }) { acc ->
-                        CleanCard(
-                            modifier = Modifier.width(178.dp),
-                            padding = 14.dp,
-                            onClick = onOpenHub,
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
+                SectionHeader(title = "Accounts", actionText = "See All", onActionClick = onOpenHub)
+                if (accounts.isEmpty()) {
+                    EmptyPlaceholder("No accounts yet", "Tap See All to add a wallet or bank account.")
+                } else {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(accounts, key = { it.id }) { acc ->
+                            CleanCard(
+                                modifier = Modifier.width(178.dp),
+                                padding = 14.dp,
+                                onClick = onOpenHub,
                             ) {
-                                CategoryIconBadge("bank", "#0284C7", size = 32.dp)
-                                StatusPill(
-                                    text = if (acc.syncStatus == "RECONNECT") "Reconnect" else acc.currency,
-                                    containerColor = if (acc.syncStatus == "RECONNECT") AmberSoft else SlateTint,
-                                    contentColor = if (acc.syncStatus == "RECONNECT") AmberWarn else MutedSlate,
-                                )
-                            }
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                text = acc.name,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = SlateInk,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency, masked = masked),
-                                style = TabularStyle,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateInk,
-                            )
-                            if (acc.currency != baseCurrency) {
-                                val fxVal = FxConverter.convertMinor(acc.balanceMinor, acc.currency, baseCurrency)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CategoryIconBadge("bank", "#0284C7", size = 32.dp)
+                                    StatusPill(
+                                        text = "${acc.accountType} • ${acc.currency}",
+                                        containerColor = SlateTint,
+                                        contentColor = MutedSlate,
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
                                 Text(
-                                    text = "≈ ${MoneyFormatter.formatMinor(fxVal, baseCurrency, masked = masked)}",
-                                    style = TabularStyle,
-                                    fontSize = 11.sp,
-                                    color = SkySync,
+                                    text = acc.name,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateInk,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
+                                Text(
+                                    text = MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency, masked = masked),
+                                    style = TabularStyle,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateInk,
+                                )
+                                if (acc.currency != baseCurrency) {
+                                    val fxVal = FxConverter.convertMinor(acc.balanceMinor, acc.currency, baseCurrency)
+                                    Text(
+                                        text = "≈ ${MoneyFormatter.formatMinor(fxVal, baseCurrency, masked = masked)}",
+                                        style = TabularStyle,
+                                        fontSize = 11.sp,
+                                        color = SkySync,
+                                    )
+                                }
                             }
                         }
                     }
@@ -442,30 +413,6 @@ fun HomeScreen(
             OnlineOnlyAdBanner()
         }
     }
-
-    if (showResetConfirm) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirm = false },
-            title = { Text("Clear Demo Data & Start Fresh?") },
-            text = {
-                Text(
-                    "Removes all sample demo transactions, accounts, budgets, bills, and holdings so your ledger starts cleanly at zero balance.",
-                    fontSize = 13.sp,
-                    color = MutedSlate,
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        vm.resetAllData()
-                        showResetConfirm = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
-                ) { Text("Clear & Start Fresh") }
-            },
-            dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") } },
-        )
-    }
 }
 
 @Composable
@@ -533,20 +480,26 @@ private fun WeeklyBarChart(inflows: List<Long>, outflows: List<Long>) {
             val gap = 6.dp.toPx()
             for (i in 0 until 4) {
                 val cx = i * slotW + slotW / 2f
-                val inH = ((inflows.getOrElse(i) { 0L } / maxVal) * (size.height - 8f)).coerceAtLeast(6f)
-                val outH = ((outflows.getOrElse(i) { 0L } / maxVal) * (size.height - 8f)).coerceAtLeast(6f)
-                drawRoundRect(
-                    color = EmeraldPrimary,
-                    topLeft = Offset(cx - barW - gap / 2f, size.height - inH),
-                    size = Size(barW, inH),
-                    cornerRadius = CornerRadius(6f, 6f),
-                )
-                drawRoundRect(
-                    color = Color(0xFFCBD5E1),
-                    topLeft = Offset(cx + gap / 2f, size.height - outH),
-                    size = Size(barW, outH),
-                    cornerRadius = CornerRadius(6f, 6f),
-                )
+                val rawIn = inflows.getOrElse(i) { 0L }
+                val rawOut = outflows.getOrElse(i) { 0L }
+                if (rawIn > 0L) {
+                    val inH = ((rawIn / maxVal) * (size.height - 8f)).coerceAtLeast(6f)
+                    drawRoundRect(
+                        color = EmeraldPrimary,
+                        topLeft = Offset(cx - barW - gap / 2f, size.height - inH),
+                        size = Size(barW, inH),
+                        cornerRadius = CornerRadius(6f, 6f),
+                    )
+                }
+                if (rawOut > 0L) {
+                    val outH = ((rawOut / maxVal) * (size.height - 8f)).coerceAtLeast(6f)
+                    drawRoundRect(
+                        color = Color(0xFFCBD5E1),
+                        topLeft = Offset(cx + gap / 2f, size.height - outH),
+                        size = Size(barW, outH),
+                        cornerRadius = CornerRadius(6f, 6f),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(4.dp))

@@ -14,42 +14,35 @@ export interface AppUpdateManifest {
   mandatory: boolean;
 }
 
-const DEFAULT_NOTES = [
-  "Offline-first Room SQLite vault with FTS4 instant search",
-  "Automatic Pay & Track notification capture and Magic Rules",
-  "Verified HTTPS updates with SHA-256 and APK signature checks",
-];
-
 function parseReleaseNotes(raw: string | undefined): string[] {
-  if (!raw || raw.trim().length === 0) return DEFAULT_NOTES;
+  if (!raw || raw.trim().length === 0) return [];
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      const cleaned = parsed.map((item) => String(item).trim()).filter(Boolean);
-      if (cleaned.length > 0) return cleaned;
+      return parsed.map((item) => String(item).trim()).filter(Boolean);
     }
   } catch {
-    const split = raw
+    return raw
       .split(/\r?\n|\|/)
       .map((item) => item.trim())
       .filter(Boolean);
-    if (split.length > 0) return split;
   }
-  return DEFAULT_NOTES;
+  return [];
 }
 
-export function buildAppUpdateManifest(env: NodeJS.ProcessEnv = process.env): AppUpdateManifest {
-  const versionCodeRaw = Number.parseInt(env.LATEST_VERSION_CODE ?? "1", 10);
-  const versionCode = Number.isFinite(versionCodeRaw) && versionCodeRaw >= 1 ? versionCodeRaw : 1;
+export function buildAppUpdateManifest(env: NodeJS.ProcessEnv = process.env): AppUpdateManifest | null {
+  const apkUrl = (env.LATEST_APK_URL ?? "").trim();
+  const sha256 = (env.LATEST_APK_SHA256 ?? "").trim().toLowerCase();
+  const versionName = (env.LATEST_VERSION_NAME ?? "").trim();
+  const versionCodeRaw = Number.parseInt(env.LATEST_VERSION_CODE ?? "", 10);
+
+  if (!apkUrl || !/^[0-9a-f]{64}$/.test(sha256) || !versionName || !Number.isFinite(versionCodeRaw) || versionCodeRaw < 1) {
+    return null;
+  }
 
   const minRaw = Number.parseInt(env.MIN_SUPPORTED_VERSION_CODE ?? "1", 10);
   const minSupportedVersionCode = Number.isFinite(minRaw) && minRaw >= 1 ? minRaw : 1;
-
-  const versionName = (env.LATEST_VERSION_NAME ?? "1.0.0").trim() || "1.0.0";
-  const releasedAt = (env.LATEST_RELEASED_AT ?? "2026-11-25T10:30:00Z").trim();
-  const apkUrl = (env.LATEST_APK_URL ?? "https://ledgerflow-api.onrender.com/v1/app/download/latest.apk").trim();
-
-  const sha256 = (env.LATEST_APK_SHA256 ?? "").trim().toLowerCase();
+  const releasedAt = (env.LATEST_RELEASED_AT ?? "").trim() || new Date().toISOString();
   const signingCertSha256 = (env.LATEST_SIGNING_CERT_SHA256 ?? "").trim().toLowerCase();
 
   let apkSizeBytes = Number.parseInt(env.LATEST_APK_SIZE_BYTES ?? "0", 10);
@@ -61,7 +54,7 @@ export function buildAppUpdateManifest(env: NodeJS.ProcessEnv = process.env): Ap
   }
 
   return {
-    versionCode,
+    versionCode: versionCodeRaw,
     versionName,
     minSupportedVersionCode,
     releasedAt,

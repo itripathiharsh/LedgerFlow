@@ -40,20 +40,20 @@ object PayAndTrackCapture {
         context: Context,
         title: String,
         text: String,
-        forceForTest: Boolean = false,
+        manualEntry: Boolean = false,
         noteText: String = "Captured via Pay & Track",
-    ): Boolean = capturePaymentDetailed(context, title, text, forceForTest, noteText).captured
+    ): Boolean = capturePaymentDetailed(context, title, text, manualEntry, noteText).captured
 
     suspend fun capturePaymentDetailed(
         context: Context,
         title: String,
         text: String,
-        forceForTest: Boolean = false,
+        manualEntry: Boolean = false,
         noteText: String = "Captured via Pay & Track",
     ): CaptureOutcome {
         val vault = VaultStore(context)
         val state = vault.read()
-        if (!forceForTest && !state.payAndTrackEnabled) return CaptureOutcome(false)
+        if (!manualEntry && !state.payAndTrackEnabled) return CaptureOutcome(false)
 
         val parsed = NotificationParser.parseGooglePayNotification(
             title = title,
@@ -63,7 +63,7 @@ object PayAndTrackCapture {
 
         val now = System.currentTimeMillis()
         val dedupeKey = "${parsed.merchant.lowercase()}_${parsed.amountMinor}_${parsed.currency}"
-        if (!forceForTest) {
+        if (!manualEntry) {
             if (recentDedupe.size > 64) {
                 val cutoff = now - 300_000L
                 recentDedupe.entries.removeIf { it.value < cutoff }

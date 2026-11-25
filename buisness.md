@@ -15,7 +15,7 @@
 - **No Paywalls / No Usage Caps**:
   - **No** "Pro" subscription tier at launch.
   - **No** limits on number of accounts, budgets, rules, multi-currency wallets, or CSV/JSON exports.
-  - **No** paywall on Pay & Track notification capture, Open Banking sandbox sync, or cloud backup.
+  - **No** paywall on Pay & Track capture, CSV import/export, or cloud sync.
 
 ---
 
@@ -32,10 +32,10 @@
 ## 4. Infrastructure & Cost Decisions (Near-Zero Operating Cost)
 - **Local Storage**: On-device Room SQLite + FTS4 (`$0/month`).
 - **Cloud Database & Auth**: **Supabase Free Tier** — provisioned live project `ledgerflow` (`rzlenoldloktswymuooz`, `ap-south-1` Mumbai, PostgreSQL + Auth + RLS across 8 tables, `$0/month`).
-- **Custom Backend APIs**: **Render Free Tier** Web Service blueprint [render.yaml](file:///D:/all%20farzi%20project/LedgerFlow/render.yaml) (`Node.js / TypeScript`) for stateless merchant enrichment, FX rates, CSV parsing, and Open Banking sandbox testing — `$0/month`, treated as optional enrichment so Render sleep delays never affect core UX.
+- **Custom Backend APIs**: Optional self-hosted Express blueprint [render.yaml](file:///D:/all%20farzi%20project/LedgerFlow/render.yaml) (`Node.js / TypeScript`) for optional merchant enrichment & CSV parsing — `$0` requirement because core FX (`api.frankfurter.dev`), room ledger, and updates work independently.
 - **Zero Paid External APIs**:
-  - Dropped legacy paid Open Banking aggregators (SaltEdge/Yodlee) and paid telemetry/marketing SDKs (Mixpanel/MoEngage/Facebook SDK), keeping release APK size at `4.08 MiB` (`4,280,594` bytes).
-  - **Zero-Cost In-App Self-Updating**: Uses our free Render `/v1/app/update` endpoint (or static HTTPS GitHub Releases JSON via `UPDATE_MANIFEST_URL`) + native Android `PackageInstaller` with SHA-256 and APK signing key verification instead of paid distribution/MDM/Firebase App Distribution services.
+  - Dropped legacy paid Open Banking aggregators and removed synthetic sandbox mocks so all accounts represent real user-managed or CSV-imported data.
+  - **Zero-Cost In-App Self-Updating**: Uses static HTTPS GitHub Releases `update-manifest.json` (`UPDATE_MANIFEST_URL`) + native Android `PackageInstaller` with SHA-256 and APK signing key verification instead of paid distribution services.
 
 ---
 

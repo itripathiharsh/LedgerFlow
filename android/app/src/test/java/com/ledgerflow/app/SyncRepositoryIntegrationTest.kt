@@ -285,7 +285,7 @@ class SyncRepositoryIntegrationTest {
 
     @Test
     fun importCsvOffline_handlesNegativeParensAtomicallyAndDeduplicatesPayAndTrack() = runTest {
-        SeedData.ensureSeededIfEmpty(db, nowMs = 1_700_000_000_000L)
+        SeedData.ensureMinimalSetup(db, nowMs = 1_700_000_000_000L)
         val checking = db.accountDao().getAllActive().first()
         val beforeBal = checking.balanceMinor
 
@@ -303,20 +303,38 @@ class SyncRepositoryIntegrationTest {
         assertFalse(NetworkMonitor.isOnline(context))
 
         val appDb = LedgerDatabase.getInstance(context)
-        SeedData.ensureSeededIfEmpty(appDb, nowMs = 1_700_000_000_000L)
+        SeedData.ensureMinimalSetup(appDb, nowMs = 1_700_000_000_000L)
         val firstCapture = PayAndTrackCapture.capturePayment(
             context = context,
             title = "Paid \$9.50 at Peet's Coffee",
             text = "Google Pay",
-            forceForTest = false,
+            manualEntry = false,
         )
         val duplicateCapture = PayAndTrackCapture.capturePayment(
             context = context,
             title = "Paid \$9.50 at Peet's Coffee",
             text = "Google Pay",
-            forceForTest = false,
+            manualEntry = false,
         )
         assertTrue(firstCapture)
         assertFalse(duplicateCapture)
+    }
+
+    @Test
+    fun syncRepository_restoresPersistedFxRatesIntoConverter() {
+        try {
+            vault.update {
+                it.copy(
+                    cachedFxRatesJson = """{"USD":1.0,"EUR":0.90,"INR":90.0}""",
+                    cachedFxDate = "2026-11-25",
+                )
+            }
+            val repo = LedgerSyncRepository(context, db, vault)
+            repo.restoreCachedFxRates()
+            assertEquals(9000L, com.ledgerflow.app.domain.FxConverter.convertMinor(10_000L, "USD", "EUR"))
+            assertEquals("ECB (2026-11-25)", com.ledgerflow.app.domain.FxConverter.lastRatesSource)
+        } finally {
+            com.ledgerflow.app.domain.FxConverter.resetToBaselineForTests()
+        }
     }
 }

@@ -1,6 +1,5 @@
 package com.ledgerflow.app.ui.screens
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -23,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,24 +29,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.util.Locale
+import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
@@ -67,6 +60,7 @@ import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.TabularStyle
+import java.util.Locale
 import kotlin.math.roundToLong
 
 @Composable
@@ -80,13 +74,14 @@ fun InvestScreen(vm: LedgerViewModel) {
         AnalyticsCalculator.computePortfolio(holdings, baseCurrency)
     }
 
-    var timeframeIdx by remember { mutableIntStateOf(2) } // 1M
     var showAddHolding by remember { mutableStateOf(false) }
+    var selectedHolding by remember { mutableStateOf<HoldingEntity?>(null) }
 
     val total = summary.totalValueMinor
     val stocksPct = if (total > 0L) ((summary.stocksValueMinor.toDouble() / total) * 100.0).toInt() else 0
     val cryptoPct = if (total > 0L) ((summary.cryptoValueMinor.toDouble() / total) * 100.0).toInt() else 0
     val forexPct = if (total > 0L) (100 - stocksPct - cryptoPct).coerceAtLeast(0) else 0
+    val activeClasses = listOf(summary.stocksValueMinor, summary.cryptoValueMinor, summary.forexValueMinor).count { it > 0L }
 
     LazyColumn(
         modifier = Modifier
@@ -103,7 +98,7 @@ fun InvestScreen(vm: LedgerViewModel) {
             ) {
                 Column {
                     Text("Investments", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                    Text("• Cached in Room • Offline Ready", fontSize = 11.sp, color = EmeraldDark, fontWeight = FontWeight.Medium)
+                    Text("• Tracked in Local Room • Tap position to update price", fontSize = 11.sp, color = EmeraldDark, fontWeight = FontWeight.Medium)
                 }
                 Surface(
                     onClick = { showAddHolding = true },
@@ -121,7 +116,7 @@ fun InvestScreen(vm: LedgerViewModel) {
             }
         }
 
-        // Hero Portfolio Card
+        // Hero Portfolio Card (strictly real numbers from Room holdings)
         item {
             CleanCard(padding = 18.dp) {
                 Text("Total Portfolio Value", fontSize = 12.sp, color = MutedSlate, fontWeight = FontWeight.Medium)
@@ -137,30 +132,26 @@ fun InvestScreen(vm: LedgerViewModel) {
                 val gainStr = MoneyFormatter.formatMinor(summary.gainMinor, baseCurrency, showPlus = true, masked = masked)
                 val pctStr = String.format(Locale.US, "%s%.2f%%", if (summary.gainPercent >= 0) "+" else "", summary.gainPercent)
                 StatusPill(
-                    text = "$gainStr ($pctStr) All Time",
-                    containerColor = if (summary.gainMinor >= 0) EmeraldSoft else RoseSoft,
-                    contentColor = if (summary.gainMinor >= 0) EmeraldDark else RoseOutflow,
+                    text = if (holdings.isEmpty()) "No holdings yet" else "$gainStr ($pctStr) vs Cost Basis",
+                    containerColor = when {
+                        holdings.isEmpty() -> SlateTint
+                        summary.gainMinor >= 0 -> EmeraldSoft
+                        else -> RoseSoft
+                    },
+                    contentColor = when {
+                        holdings.isEmpty() -> MutedSlate
+                        summary.gainMinor >= 0 -> EmeraldDark
+                        else -> RoseOutflow
+                    },
                 )
-                Spacer(Modifier.height(14.dp))
-                PortfolioAreaChart(timeframeIdx = timeframeIdx, isEmpty = holdings.isEmpty())
-                Spacer(Modifier.height(12.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    listOf("1D", "1W", "1M", "1Y", "ALL").forEachIndexed { idx, label ->
-                        val active = timeframeIdx == idx
-                        Surface(
-                            onClick = { timeframeIdx = idx },
-                            shape = RoundedCornerShape(999.dp),
-                            color = if (active) SlateInk else SlateTint,
-                        ) {
-                            Text(
-                                text = label,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (active) Color.White else MutedSlate,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                            )
-                        }
-                    }
+                if (holdings.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "Cost Basis: ${MoneyFormatter.formatMinor(summary.totalCostMinor, baseCurrency, masked = masked)}",
+                        style = TabularStyle,
+                        fontSize = 12.sp,
+                        color = MutedSlate,
+                    )
                 }
             }
         }
@@ -170,7 +161,7 @@ fun InvestScreen(vm: LedgerViewModel) {
             CleanCard(padding = 16.dp) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Allocation", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                    Text("3 Asset Classes", fontSize = 12.sp, color = MutedSlate)
+                    Text("$activeClasses Active Classes", fontSize = 12.sp, color = MutedSlate)
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(
@@ -191,7 +182,7 @@ fun InvestScreen(vm: LedgerViewModel) {
             }
         }
 
-        // Holdings List (zero ellipsis truncation!)
+        // Holdings List
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Holdings", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
@@ -204,7 +195,12 @@ fun InvestScreen(vm: LedgerViewModel) {
         } else {
             items(holdings, key = { it.id }) { h ->
                 val valLocal = (h.quantity * h.currentPriceMinor.toDouble()).roundToLong()
+                val costLocal = (h.quantity * h.avgCostMinor.toDouble()).roundToLong()
                 val valBase = FxConverter.convertMinor(valLocal, h.currency, baseCurrency)
+                val costBase = FxConverter.convertMinor(costLocal, h.currency, baseCurrency)
+                val pnlBase = valBase - costBase
+                val pnlPct = if (costBase > 0L) (pnlBase.toDouble() / costBase.toDouble()) * 100.0 else 0.0
+
                 val badgeBg = when (h.assetClass) {
                     "CRYPTO" -> SkySoft
                     "FOREX" -> SlateTint
@@ -215,7 +211,10 @@ fun InvestScreen(vm: LedgerViewModel) {
                     "FOREX" -> MutedSlate
                     else -> EmeraldDark
                 }
-                CleanCard(padding = 14.dp) {
+                CleanCard(
+                    padding = 14.dp,
+                    onClick = { selectedHolding = h },
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -253,13 +252,21 @@ fun InvestScreen(vm: LedgerViewModel) {
                                 )
                             }
                         }
-                        Text(
-                            text = String.format(Locale.US, "%s%.2f%%", if (h.dayChangeBps >= 0) "+" else "", h.dayChangeBps / 100.0),
-                            style = TabularStyle,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (h.dayChangeBps >= 0) EmeraldDark else RoseOutflow,
-                        )
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = MoneyFormatter.formatMinor(pnlBase, baseCurrency, showPlus = true, masked = masked),
+                                style = TabularStyle,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (pnlBase >= 0L) EmeraldDark else RoseOutflow,
+                            )
+                            Text(
+                                text = String.format(Locale.US, "%s%.2f%%", if (pnlPct >= 0.0) "+" else "", pnlPct),
+                                style = TabularStyle,
+                                fontSize = 11.sp,
+                                color = MutedSlate,
+                            )
+                        }
                     }
                 }
             }
@@ -267,11 +274,18 @@ fun InvestScreen(vm: LedgerViewModel) {
     }
 
     if (showAddHolding) {
-        var symbol by remember { mutableStateOf("AAPL") }
-        var name by remember { mutableStateOf("Apple Inc.") }
-        var qty by remember { mutableStateOf("5") }
-        var price by remember { mutableStateOf("230.00") }
+        var symbol by remember { mutableStateOf("") }
+        var name by remember { mutableStateOf("") }
+        var exchange by remember { mutableStateOf("") }
+        var qty by remember { mutableStateOf("") }
+        var avgCost by remember { mutableStateOf("") }
+        var currentPrice by remember { mutableStateOf("") }
         var assetClass by remember { mutableStateOf("STOCKS") }
+
+        val parsedQty = qty.toDoubleOrNull() ?: 0.0
+        val parsedCost = MoneyFormatter.parseDecimalToMinor(avgCost) ?: 0L
+        val parsedCur = MoneyFormatter.parseDecimalToMinor(currentPrice) ?: parsedCost
+        val canSubmit = symbol.isNotBlank() && parsedQty > 0.0 && parsedCur > 0L
 
         AlertDialog(
             onDismissRequest = { showAddHolding = false },
@@ -283,24 +297,116 @@ fun InvestScreen(vm: LedgerViewModel) {
                             FilterChip(selected = assetClass == c, onClick = { assetClass = c }, label = { Text(c, fontSize = 11.sp) })
                         }
                     }
-                    OutlinedTextField(value = symbol, onValueChange = { symbol = it }, label = { Text("Symbol") }, singleLine = true)
-                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true)
-                    OutlinedTextField(value = qty, onValueChange = { qty = it }, label = { Text("Quantity") }, singleLine = true)
-                    OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Unit Price ($baseCurrency)") }, singleLine = true)
+                    OutlinedTextField(
+                        value = symbol,
+                        onValueChange = { symbol = it },
+                        label = { Text("Symbol") },
+                        placeholder = { Text("Ticker / asset code") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Name (optional)") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = exchange,
+                        onValueChange = { exchange = it },
+                        label = { Text("Exchange / Wallet (optional)") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = qty,
+                        onValueChange = { qty = it },
+                        label = { Text("Quantity") },
+                        placeholder = { Text("0") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = avgCost,
+                        onValueChange = { avgCost = it },
+                        label = { Text("Avg Buy Price ($baseCurrency)") },
+                        placeholder = { Text("0.00") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = currentPrice,
+                        onValueChange = { currentPrice = it },
+                        label = { Text("Current Price ($baseCurrency, optional)") },
+                        placeholder = { Text("Defaults to buy price") },
+                        singleLine = true,
+                    )
                 }
             },
             confirmButton = {
                 Button(
+                    enabled = canSubmit,
                     onClick = {
-                        val q = qty.toDoubleOrNull() ?: 0.0
-                        val p = MoneyFormatter.parseDecimalToMinor(price) ?: 0L
-                        vm.addHolding(symbol, name, assetClass, assetClass, q, p, p, baseCurrency)
+                        val effectiveCost = if (parsedCost > 0L) parsedCost else parsedCur
+                        vm.addHolding(
+                            symbol = symbol,
+                            name = name,
+                            assetClass = assetClass,
+                            exchange = exchange.ifBlank { assetClass },
+                            quantity = parsedQty,
+                            avgCostMinor = effectiveCost,
+                            currentPriceMinor = parsedCur,
+                            currency = baseCurrency,
+                        )
                         showAddHolding = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                 ) { Text("Add") }
             },
             dismissButton = { TextButton(onClick = { showAddHolding = false }) { Text("Cancel") } },
+        )
+    }
+
+    selectedHolding?.let { holding ->
+        var priceText by remember(holding.id) {
+            mutableStateOf(String.format(Locale.US, "%.2f", holding.currentPriceMinor / 100.0))
+        }
+        val parsedNew = MoneyFormatter.parseDecimalToMinor(priceText) ?: 0L
+
+        AlertDialog(
+            onDismissRequest = { selectedHolding = null },
+            title = { Text("Update ${holding.symbol}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "${holding.name} • Avg Buy: ${MoneyFormatter.formatMinor(holding.avgCostMinor, holding.currency)}",
+                        fontSize = 12.sp,
+                        color = MutedSlate,
+                    )
+                    OutlinedTextField(
+                        value = priceText,
+                        onValueChange = { priceText = it },
+                        label = { Text("Current Unit Price (${holding.currency})") },
+                        singleLine = true,
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            vm.deleteHolding(holding.id)
+                            selectedHolding = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Delete Holding", color = RoseOutflow, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = parsedNew > 0L,
+                    onClick = {
+                        vm.updateHoldingPrice(holding.id, parsedNew)
+                        selectedHolding = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                ) { Text("Save Price") }
+            },
+            dismissButton = { TextButton(onClick = { selectedHolding = null }) { Text("Cancel") } },
         )
     }
 }
@@ -321,60 +427,5 @@ private fun AllocationRow(label: String, value: String, color: Color) {
             Text(label, fontSize = 13.sp, color = SlateInk)
         }
         Text(value, style = TabularStyle, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-    }
-}
-
-@Composable
-private fun PortfolioAreaChart(timeframeIdx: Int, isEmpty: Boolean = false) {
-    val curves = listOf(
-        listOf(0.55f, 0.58f, 0.56f, 0.61f, 0.64f, 0.68f),
-        listOf(0.45f, 0.49f, 0.52f, 0.50f, 0.60f, 0.72f),
-        listOf(0.32f, 0.42f, 0.44f, 0.56f, 0.62f, 0.85f),
-        listOf(0.20f, 0.35f, 0.48f, 0.44f, 0.70f, 0.90f),
-        listOf(0.15f, 0.25f, 0.38f, 0.55f, 0.75f, 0.94f),
-    )
-    val pts = if (isEmpty) List(6) { 0.15f } else curves.getOrElse(timeframeIdx) { curves[2] }
-    val strokeColor = if (isEmpty) MutedSlate.copy(alpha = 0.4f) else EmeraldPrimary
-    Canvas(modifier = Modifier.fillMaxWidth().height(92.dp)) {
-        val stepX = size.width / (pts.size - 1).coerceAtLeast(1)
-        val strokePath = Path()
-        val fillPath = Path()
-        pts.forEachIndexed { idx, p ->
-            val x = idx * stepX
-            val y = size.height * (1f - p)
-            if (idx == 0) {
-                strokePath.moveTo(x, y)
-                fillPath.moveTo(x, size.height)
-                fillPath.lineTo(x, y)
-            } else {
-                val prevX = (idx - 1) * stepX
-                val prevY = size.height * (1f - pts[idx - 1])
-                val cx = (prevX + x) / 2f
-                strokePath.cubicTo(cx, prevY, cx, y, x, y)
-                fillPath.cubicTo(cx, prevY, cx, y, x, y)
-            }
-            if (idx == pts.lastIndex) {
-                fillPath.lineTo(x, size.height)
-                fillPath.close()
-            }
-        }
-        if (!isEmpty) {
-            drawPath(
-                path = fillPath,
-                brush = Brush.verticalGradient(listOf(EmeraldPrimary.copy(alpha = 0.22f), Color.Transparent)),
-            )
-        }
-        drawPath(
-            path = strokePath,
-            color = strokeColor,
-            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
-        )
-        if (!isEmpty) {
-            drawCircle(
-                color = EmeraldPrimary,
-                radius = 5.dp.toPx(),
-                center = Offset(size.width, size.height * (1f - pts.last())),
-            )
-        }
     }
 }

@@ -164,8 +164,8 @@ fun BudgetsScreen(vm: LedgerViewModel) {
                         StatusPill(
                             text = when {
                                 progressList.isEmpty() -> "No active monthly budgets"
-                                allBudgetsOnTrack -> "Forecast: On pace with local SQLite"
-                                else -> "Forecast: Spending ahead of pace"
+                                allBudgetsOnTrack -> "Within monthly budget pace"
+                                else -> "Ahead of monthly budget pace"
                             },
                             containerColor = if (allBudgetsOnTrack || progressList.isEmpty()) EmeraldSoft else AmberSoft,
                             contentColor = if (allBudgetsOnTrack || progressList.isEmpty()) EmeraldDark else AmberWarn,
@@ -185,7 +185,7 @@ fun BudgetsScreen(vm: LedgerViewModel) {
                             color = MutedSlate,
                         )
                         Spacer(Modifier.height(12.dp))
-                        val sumAll = (totalSpent + totalPlanned + safeRemaining).coerceAtLeast(1L).toFloat()
+                        val sumAll = totalSpent + totalPlanned + safeRemaining
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -193,9 +193,11 @@ fun BudgetsScreen(vm: LedgerViewModel) {
                                 .clip(RoundedCornerShape(999.dp))
                                 .background(SlateTint),
                         ) {
-                            Box(Modifier.weight((totalSpent / sumAll).coerceAtLeast(0.05f)).fillMaxHeight().background(SlateInk))
-                            Box(Modifier.weight((totalPlanned / sumAll).coerceAtLeast(0.05f)).fillMaxHeight().background(SkySync))
-                            Box(Modifier.weight((safeRemaining / sumAll).coerceAtLeast(0.05f)).fillMaxHeight().background(EmeraldPrimary))
+                            if (sumAll > 0L) {
+                                if (totalSpent > 0L) Box(Modifier.weight(totalSpent.toFloat()).fillMaxHeight().background(SlateInk))
+                                if (totalPlanned > 0L) Box(Modifier.weight(totalPlanned.toFloat()).fillMaxHeight().background(SkySync))
+                                if (safeRemaining > 0L) Box(Modifier.weight(safeRemaining.toFloat()).fillMaxHeight().background(EmeraldPrimary))
+                            }
                         }
                         Spacer(Modifier.height(8.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -252,13 +254,28 @@ fun BudgetsScreen(vm: LedgerViewModel) {
                                 trackColor = SlateTint,
                             )
                             Spacer(Modifier.height(6.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 StatusPill(
                                     text = if (bp.onTrack) "On track" else "Ahead of pace",
                                     containerColor = if (bp.onTrack) EmeraldSoft else AmberSoft,
                                     contentColor = if (bp.onTrack) EmeraldDark else AmberWarn,
                                 )
-                                Text("Month progress: ${(monthFraction * 100).toInt()}%", fontSize = 11.sp, color = MutedSlate)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text("Month: ${(monthFraction * 100).toInt()}%", fontSize = 11.sp, color = MutedSlate)
+                                    TextButton(
+                                        onClick = { vm.deleteBudget(bp.budget.id) },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                    ) {
+                                        Text("Remove", fontSize = 11.sp, color = AmberWarn)
+                                    }
+                                }
                             }
                         }
                     }
@@ -334,12 +351,21 @@ fun BudgetsScreen(vm: LedgerViewModel) {
                                         color = SlateInk,
                                     )
                                     Spacer(Modifier.height(4.dp))
-                                    OutlinedButton(
-                                        onClick = { vm.payPlannedNow(p.id) },
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(28.dp),
-                                    ) {
-                                        Text("Record Now", fontSize = 11.sp, color = EmeraldPrimary)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        OutlinedButton(
+                                            onClick = { vm.payPlannedNow(p.id) },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp),
+                                        ) {
+                                            Text("Record", fontSize = 11.sp, color = EmeraldPrimary)
+                                        }
+                                        OutlinedButton(
+                                            onClick = { vm.deletePlannedPayment(p.id) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp),
+                                        ) {
+                                            Text("Del", fontSize = 11.sp, color = AmberWarn)
+                                        }
                                     }
                                 }
                             }
@@ -352,8 +378,9 @@ fun BudgetsScreen(vm: LedgerViewModel) {
 
     if (showNewBudget) {
         var name by remember { mutableStateOf("") }
-        var amount by remember { mutableStateOf("250") }
-        var selectedCatId by remember { mutableStateOf(categories.firstOrNull()?.id) }
+        var amount by remember { mutableStateOf("") }
+        var selectedCatId by remember { mutableStateOf(categories.firstOrNull { it.kind == "EXPENSE" }?.id ?: categories.firstOrNull()?.id) }
+        val parsedLimit = MoneyFormatter.parseDecimalToMinor(amount) ?: 0L
 
         AlertDialog(
             onDismissRequest = { showNewBudget = false },
@@ -361,7 +388,13 @@ fun BudgetsScreen(vm: LedgerViewModel) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Budget Name") }, singleLine = true)
-                    OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Limit ($baseCurrency)") }, singleLine = true)
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = { amount = it },
+                        label = { Text("Limit ($baseCurrency)") },
+                        placeholder = { Text("0.00") },
+                        singleLine = true,
+                    )
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         categories.filter { it.kind == "EXPENSE" }.forEach { c ->
                             FilterChip(selected = selectedCatId == c.id, onClick = { selectedCatId = c.id }, label = { Text(c.name, fontSize = 11.sp) })
@@ -371,9 +404,9 @@ fun BudgetsScreen(vm: LedgerViewModel) {
             },
             confirmButton = {
                 Button(
+                    enabled = parsedLimit > 0L,
                     onClick = {
-                        val minor = MoneyFormatter.parseDecimalToMinor(amount) ?: 0L
-                        vm.addBudget(name.ifBlank { catMap[selectedCatId]?.name ?: "Budget" }, selectedCatId, minor, baseCurrency)
+                        vm.addBudget(name.ifBlank { catMap[selectedCatId]?.name ?: "Budget" }, selectedCatId, parsedLimit, baseCurrency)
                         showNewBudget = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
@@ -385,8 +418,9 @@ fun BudgetsScreen(vm: LedgerViewModel) {
 
     if (showNewPlanned) {
         var title by remember { mutableStateOf("") }
-        var amount by remember { mutableStateOf("45") }
+        var amount by remember { mutableStateOf("") }
         var cadence by remember { mutableStateOf("MONTHLY") }
+        val parsedAmount = MoneyFormatter.parseDecimalToMinor(amount) ?: 0L
 
         AlertDialog(
             onDismissRequest = { showNewPlanned = false },
@@ -394,7 +428,13 @@ fun BudgetsScreen(vm: LedgerViewModel) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Bill Name") }, singleLine = true)
-                    OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount ($baseCurrency)") }, singleLine = true)
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = { amount = it },
+                        label = { Text("Amount ($baseCurrency)") },
+                        placeholder = { Text("0.00") },
+                        singleLine = true,
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("WEEKLY", "MONTHLY", "YEARLY").forEach { c ->
                             FilterChip(selected = cadence == c, onClick = { cadence = c }, label = { Text(c, fontSize = 11.sp) })
@@ -404,9 +444,9 @@ fun BudgetsScreen(vm: LedgerViewModel) {
             },
             confirmButton = {
                 Button(
+                    enabled = title.isNotBlank() && parsedAmount > 0L,
                     onClick = {
-                        val minor = MoneyFormatter.parseDecimalToMinor(amount) ?: 0L
-                        vm.addPlannedPayment(title, minor, baseCurrency, accounts.firstOrNull()?.id, categories.firstOrNull()?.id, cadence)
+                        vm.addPlannedPayment(title, parsedAmount, baseCurrency, accounts.firstOrNull()?.id, categories.firstOrNull()?.id, cadence)
                         showNewPlanned = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),

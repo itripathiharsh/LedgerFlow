@@ -42,6 +42,8 @@ data class VaultSessionState(
     val pendingUpdateVersionName: String? = null,
     val justUpdatedVersionName: String? = null,
     val pendingInstallResumeVersionCode: Long = 0L,
+    val cachedFxRatesJson: String? = null,
+    val cachedFxDate: String? = null,
 )
 
 interface VaultKeyProvider {

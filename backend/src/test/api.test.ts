@@ -44,7 +44,7 @@ test("buildFallbackRates returns normalized cross rates without internet", () =>
   assert.ok(eurBase.rates.USD > 1);
 });
 
-test("Express API endpoints respond cleanly with validation", async () => {
+test("Express API endpoints respond cleanly with validation and no fake sandbox endpoints", async () => {
   const app = createApp();
   const server = app.listen(0);
   const addr = server.address();
@@ -75,12 +75,17 @@ test("Express API endpoints respond cleanly with validation", async () => {
     assert.equal(enrichJson.count, 1);
     assert.equal(enrichJson.items[0].suggestedCategory, "Subscriptions");
 
+    // Unconfigured update manifest returns 503 instead of fake version metadata
     const updateRes = await fetch(`${baseUrl}/v1/app/update`);
-    assert.equal(updateRes.status, 200);
-    const updateJson = (await updateRes.json()) as { versionCode: number; versionName: string; releaseNotes: string[] };
-    assert.ok(updateJson.versionCode >= 1);
-    assert.ok(updateJson.versionName.length > 0);
-    assert.ok(Array.isArray(updateJson.releaseNotes) && updateJson.releaseNotes.length > 0);
+    assert.equal(updateRes.status, 503);
+
+    // Fake Open Banking sandbox route removed cleanly (404)
+    const removedSandbox = await fetch(`${baseUrl}/v1/open-banking/sandbox/connect`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ providerCode: "Test", currency: "USD" }),
+    });
+    assert.equal(removedSandbox.status, 404);
 
     const downloadMissing = await fetch(`${baseUrl}/v1/app/download/latest.apk`);
     assert.equal(downloadMissing.status, 404);
@@ -88,7 +93,7 @@ test("Express API endpoints respond cleanly with validation", async () => {
     // Rate-limit regression: verify sliding window triggers 429 cleanly after burst
     let sawRateLimit = false;
     for (let i = 0; i < 125; i++) {
-      const r = await fetch(`${baseUrl}/v1/app/update`);
+      const r = await fetch(`${baseUrl}/v1/app/download/latest.apk`);
       if (r.status === 429) {
         sawRateLimit = true;
         break;
@@ -100,7 +105,9 @@ test("Express API endpoints respond cleanly with validation", async () => {
   }
 });
 
-test("buildAppUpdateManifest parses release env metadata and pipe notes", () => {
+test("buildAppUpdateManifest requires valid config and parses release env metadata", () => {
+  assert.equal(buildAppUpdateManifest({}), null);
+
   const manifest = buildAppUpdateManifest({
     LATEST_VERSION_CODE: "4",
     LATEST_VERSION_NAME: "1.2.0",
@@ -111,6 +118,7 @@ test("buildAppUpdateManifest parses release env metadata and pipe notes", () => 
     LATEST_RELEASE_NOTES: "Improved sync|Vault security hardening",
     LATEST_UPDATE_MANDATORY: "false",
   });
+  assert.ok(manifest);
   assert.equal(manifest.versionCode, 4);
   assert.equal(manifest.versionName, "1.2.0");
   assert.equal(manifest.sha256, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");

@@ -146,13 +146,6 @@ abstract class LedgerDatabase : RoomDatabase() {
         }
     }
 
-    suspend fun resetAndLoadDemoData(nowMs: Long = System.currentTimeMillis()) {
-        withTransaction {
-            deleteAllRowsLocked()
-            SeedData.ensureSeededIfEmpty(this, nowMs = nowMs)
-        }
-    }
-
     companion object {
         fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long {
             val cal = Calendar.getInstance().apply { timeInMillis = currentDueMs }

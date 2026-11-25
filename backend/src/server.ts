@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import cors from "cors";
@@ -24,12 +23,6 @@ const enrichRequestSchema = z.object({
 const csvImportSchema = z.object({
   csv: z.string().min(1).max(500_000),
   defaultCurrency: z.string().length(3).optional().default("USD"),
-});
-
-const sandboxConnectSchema = z.object({
-  providerCode: z.string().min(2).max(60),
-  accountName: z.string().min(1).max(80).optional(),
-  currency: z.string().length(3).optional().default("USD"),
 });
 
 export function createApp() {
@@ -75,8 +68,13 @@ export function createApp() {
   });
 
   app.get("/v1/app/update", (_req, res) => {
+    const manifest = buildAppUpdateManifest();
+    if (!manifest) {
+      res.status(503).json({ error: "Update manifest not configured on this host" });
+      return;
+    }
     res.setHeader("Cache-Control", "no-store");
-    res.json(buildAppUpdateManifest());
+    res.json(manifest);
   });
 
   app.get("/v1/app/download/latest.apk", (_req, res) => {
@@ -119,45 +117,6 @@ export function createApp() {
     }
     const rows = parseCsvStatement(parsed.data.csv, parsed.data.defaultCurrency);
     res.json({ importedCount: rows.length, rows });
-  });
-
-  // Free-tier open-banking sandbox connector (zero paid aggregator API keys needed).
-  app.post("/v1/open-banking/sandbox/connect", (req, res) => {
-    const parsed = sandboxConnectSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid sandbox bank payload", details: parsed.error.flatten() });
-      return;
-    }
-    const now = new Date();
-    const fourDaysAgo = new Date(now.getTime() - 4 * 86_400_000).toISOString();
-    const yesterday = new Date(now.getTime() - 86_400_000).toISOString();
-    res.json({
-      connectionId: `sbx_${parsed.data.providerCode.toLowerCase()}_${now.getTime()}`,
-      providerCode: parsed.data.providerCode,
-      accountName: parsed.data.accountName ?? `${parsed.data.providerCode} Checking`,
-      currency: parsed.data.currency.toUpperCase(),
-      balanceMinor: 318000,
-      sampleTransactions: [
-        {
-          merchant: "Trader Joe's",
-          amountMinor: -4850,
-          txType: "EXPENSE",
-          currency: parsed.data.currency.toUpperCase(),
-          occurredAt: yesterday,
-          sourceTag: "BANK_SYNC",
-          suggestedCategory: "Groceries",
-        },
-        {
-          merchant: "Employer Direct Payroll",
-          amountMinor: 271000,
-          txType: "INCOME",
-          currency: parsed.data.currency.toUpperCase(),
-          occurredAt: fourDaysAgo,
-          sourceTag: "BANK_SYNC",
-          suggestedCategory: "Income",
-        },
-      ],
-    });
   });
 
   return app;

@@ -173,6 +173,23 @@
   - Signed `LedgerFlow-v1.0.4.apk` (`4,333,857` bytes, SHA-256 `413c55afbed2dddba564a67c4de770968ca492c7b107d5ad4574d6e596753175`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.0.4`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.4/LedgerFlow-v1.0.4.apk`.
 
+---
+
+## Strict Zero-Fake-Data & No-Hardcoding Cleanup (`v1.0.5`, `versionCode 6`)
+- **Removed All Demo Data, Sandbox Mocks, & Hardcoded UI Fakes**:
+  - Removed `SeedData.ensureSeededIfEmpty`, `LedgerDatabase.resetAndLoadDemoData()`, `LedgerViewModel.loadDemoData()`, `simulateGooglePayTap()`, `linkSandboxBank()`, and `reconnectAccount()` across [SeedData.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/local/SeedData.kt), [LedgerDatabase.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/local/LedgerDatabase.kt), [LedgerViewModel.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/LedgerViewModel.kt), [AccountsHubScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AccountsHubScreen.kt), [HomeScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/HomeScreen.kt), and [PrivacyVaultScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/PrivacyVaultScreen.kt).
+  - Removed the hardcoded `PortfolioAreaChart`, fake `1D..ALL` timeframe toggle, hardcoded `+0.45%` (`dayChangeBps = 45`), and pre-filled `"AAPL"` inputs from [InvestScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/InvestScreen.kt) & [LedgerViewModel.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/LedgerViewModel.kt); added real cost-basis vs current-price P&L, holding price update, and deletion.
+  - Cleared pre-filled budget/bill/smart-paste/account defaults across [BudgetsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/BudgetsScreen.kt), [AccountsHubScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AccountsHubScreen.kt), and [RecordsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/RecordsScreen.kt), and added full delete actions for accounts, budgets, planned bills, holdings, and auto-rules.
+  - Updated [SupabaseSyncClient.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/remote/SupabaseSyncClient.kt) and [LedgerSyncRepository.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/sync/LedgerSyncRepository.kt) to fetch live free ECB rates directly from `https://api.frankfurter.dev/v1/latest?base=USD` and cache them in [VaultSecurity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/security/VaultSecurity.kt).
+  - Gated [OnlineAdBanner.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/ads/OnlineAdBanner.kt) so release builds suppress Google sample test ad IDs unless production ad units are configured.
+  - Removed `/v1/open-banking/sandbox/connect` from [server.ts](file:///D:/all%20farzi%20project/LedgerFlow/backend/src/server.ts) and fake fallback manifest defaults from [updates.ts](file:///D:/all%20farzi%20project/LedgerFlow/backend/src/updates.ts) (`503` unless configured).
+- **Verification (`v1.0.5`)**:
+  - `npm run build && npm test`: **5 / 5 backend tests passed** (`0` failed).
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --no-daemon`: **25 / 25 Android unit & integration tests passed** (`0` skipped, `0` failures, `0` errors), `0` Lint errors (`26` warnings).
+  - Signed `LedgerFlow-v1.0.5.apk` (`4,333,857` bytes, SHA-256 `c901181b4cf83d97f1484fa2dfecdc3e11530ee1b55aff1dda5a5f297461f180`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.0.5`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.5/LedgerFlow-v1.0.5.apk`.
+
+
 
 
 

@@ -173,31 +173,11 @@ data class SupabaseMagicRuleDto(
 )
 
 @Serializable
-data class RenderFxResponse(
-    val base: String,
-    val source: String,
-    val rates: Map<String, Double>,
-)
-
-@Serializable
-data class RenderSandboxResponse(
-    val connectionId: String,
-    val providerCode: String,
-    val accountName: String,
-    val currency: String,
-    val balanceMinor: Long,
-    val sampleTransactions: List<RenderSandboxTx> = emptyList(),
-)
-
-@Serializable
-data class RenderSandboxTx(
-    val merchant: String,
-    val amountMinor: Long,
-    val txType: String,
-    val currency: String,
-    val occurredAt: String,
-    val sourceTag: String,
-    val suggestedCategory: String = "General",
+data class LiveFxResponse(
+    val base: String = "USD",
+    val date: String = "",
+    val source: String = "frankfurter",
+    val rates: Map<String, Double> = emptyMap(),
 )
 
 class SupabaseSyncClient(
@@ -353,37 +333,27 @@ class SupabaseSyncClient(
         200 to collected
     }
 
-    suspend fun fetchLiveFxRatesOrNull(base: String = "USD"): RenderFxResponse? = withContext(Dispatchers.IO) {
-        try {
-            val req = Request.Builder().url("$renderUrl/v1/fx/rates?base=$base").get().build()
-            renderClient.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) return@withContext null
-                val raw = res.body?.string() ?: return@withContext null
-                json.decodeFromString(RenderFxResponse.serializer(), raw)
-            }
-        } catch (_: Exception) {
-            null
+    suspend fun fetchLiveFxRatesOrNull(base: String = "USD"): LiveFxResponse? = withContext(Dispatchers.IO) {
+        val cleanBase = base.trim().uppercase().ifBlank { "USD" }
+        val candidates = buildList {
+            add("https://api.frankfurter.dev/v1/latest?base=$cleanBase")
+            if (renderUrl.isNotBlank()) add("$renderUrl/v1/fx/rates?base=$cleanBase")
         }
-    }
-
-    suspend fun connectSandboxBankOrNull(providerCode: String, currency: String): RenderSandboxResponse? =
-        withContext(Dispatchers.IO) {
+        for (url in candidates) {
             try {
-                val payload = """{"providerCode":${jsonString(providerCode)},"currency":${jsonString(currency)}}"""
-                val req = Request.Builder()
-                    .url("$renderUrl/v1/open-banking/sandbox/connect")
-                    .header("Content-Type", "application/json")
-                    .post(payload.toRequestBody(mediaJson))
-                    .build()
+                val req = Request.Builder().url(url).get().build()
                 renderClient.newCall(req).execute().use { res ->
-                    if (!res.isSuccessful) return@withContext null
-                    val raw = res.body?.string() ?: return@withContext null
-                    json.decodeFromString(RenderSandboxResponse.serializer(), raw)
+                    if (!res.isSuccessful) continue
+                    val raw = res.body?.string() ?: continue
+                    val decoded = json.decodeFromString(LiveFxResponse.serializer(), raw)
+                    if (decoded.rates.isNotEmpty()) return@withContext decoded
                 }
             } catch (_: Exception) {
-                null
+                // Try next FX source cleanly
             }
         }
+        null
+    }
 
     private fun jsonString(value: String): String =
         json.encodeToString(kotlinx.serialization.serializer<String>(), value)

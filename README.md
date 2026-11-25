@@ -8,39 +8,39 @@ Offline-first personal finance, expense tracking, budgeting, multi-account ledge
 
 Install the latest signed release directly on Android (`minSdk 26` / Android 8.0+):
 
-- **Direct APK Download (`v1.0.4`)**: [**Download `LedgerFlow-v1.0.4.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.4/LedgerFlow-v1.0.4.apk)
+- **Direct APK Download (`v1.0.5`)**: [**Download `LedgerFlow-v1.0.5.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.5/LedgerFlow-v1.0.5.apk)
 - **All Releases**: [github.com/itripathiharsh/LedgerFlow/releases/latest](https://github.com/itripathiharsh/LedgerFlow/releases/latest)
 - **Auto-Update Manifest**: [`update-manifest.json`](https://github.com/itripathiharsh/LedgerFlow/releases/latest/download/update-manifest.json)
 
 | Artifact | Value |
 | --- | --- |
 | Application ID | `com.ledgerflow.app` |
-| Version | `1.0.4` (`versionCode: 5`) |
+| Version | `1.0.5` (`versionCode: 6`) |
 | Distribution Flavor | `direct` (Play Protect sideload-safe — zero SMS, Accessibility, or NotificationListener permissions) |
 | Min / Target SDK | `26` / `36` |
 | APK File Size | `4,333,857` bytes (~`4.13 MiB`) |
-| APK SHA-256 | `413c55afbed2dddba564a67c4de770968ca492c7b107d5ad4574d6e596753175` |
+| APK SHA-256 | `c901181b4cf83d97f1484fa2dfecdc3e11530ee1b55aff1dda5a5f297461f180` |
 | Signing Cert SHA-256 (`v2` + `v3` RSA-2048) | `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0` |
 
 ### Verifying & Installing the APK
-1. Download [`LedgerFlow-v1.0.4.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.4/LedgerFlow-v1.0.4.apk) on your Android device (future updates are delivered and installed automatically in-app).
+1. Download [`LedgerFlow-v1.0.5.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.5/LedgerFlow-v1.0.5.apk) on your Android device (future updates are delivered and installed automatically in-app).
 2. When prompted, allow installing unknown apps for your browser or file manager.
 3. Optional checksum check before install:
    ```bash
-   sha256sum LedgerFlow-v1.0.4.apk
-   # Expected: 413c55afbed2dddba564a67c4de770968ca492c7b107d5ad4574d6e596753175
+   sha256sum LedgerFlow-v1.0.5.apk
+   # Expected: c901181b4cf83d97f1484fa2dfecdc3e11530ee1b55aff1dda5a5f297461f180
    ```
 
 ---
 
 ## Key Architecture & Features
 
-- **Offline-First Core (`android/`)**: Local-first Room SQLite ledger with FTS4 transaction search, WorkManager background sync & update checks, and Clean Emerald Material 3 Compose UI across 7 screens.
-- **Pay & Track Auto-Capture**: Zero-permission **Share-to-Track** (`ACTION_SEND`) & **Smart Paste** UPI/card/GPay text parser (`PayAndTrackCapture.kt`) in the `direct` APK (plus optional `NotificationListenerService` in the `playStore` flavor), with user-configurable merchant/category auto-rules and 60s duplicate suppression.
-- **Security & Encrypted Storage**: AES-256-GCM `VaultStore` (`VaultSecurity.kt`), strict online-only AdMob gating (`OnlineAdBanner.kt`), and zero embedded backend service-role secrets.
-- **Verified In-App Auto-Updater**: Periodic WorkManager version checks (`UpdateCheckWorker.kt`), non-blocking modal dialog (**Update Now** / **Later** in `UpdateDialog.kt`), SHA-256 + signing certificate pinning verification (`AppUpdateManager.kt`, `AppUpdatePolicy.kt`), and `PackageInstaller` session restart flow (`UpdateInstallReceivers.kt`).
+- **Offline-First Core (`android/`)**: Local-first Room SQLite ledger with FTS4 transaction search, WorkManager background sync & update checks, and Material 3 Compose UI across 7 screens starting cleanly at zero balance.
+- **Pay & Track Auto-Capture**: Zero-permission **Share-to-Track** (`ACTION_SEND`) & **Smart Paste** UPI/card/wallet text parser (`PayAndTrackCapture.kt`) in the `direct` APK (plus optional `NotificationListenerService` in the `playStore` flavor), with user-configurable merchant/category auto-rules and 60s duplicate suppression.
+- **Security & Encrypted Storage**: AES-256-GCM `VaultStore` (`VaultSecurity.kt`), live ECB FX caching (`api.frankfurter.dev`), strict release AdMob gating (`OnlineAdBanner.kt`), and zero embedded backend service-role secrets.
+- **Verified In-App Auto-Updater**: Checks on launch and every 12h via WorkManager (`UpdateCheckWorker.kt`), modal dialog (**Update Now** / **Later** in `UpdateDialog.kt`), SHA-256 + signing certificate pinning verification (`AppUpdateManager.kt`, `AppUpdatePolicy.kt`), and `PackageInstaller` session restart flow (`UpdateInstallReceivers.kt`).
 - **Cloud Sync & Database (`supabase/`)**: Bidirectional incremental Supabase sync with Row-Level Security policies (`0001_ledgerflow_core.sql`, `0002_rls_policies.sql`).
-- **Companion Backend (`backend/`, `render.yaml`)**: Node.js + TypeScript Express API deployed for Render free tier (`/health`, `/v1/app/update`, `/v1/app/download/latest.apk`, `/v1/fx/rates`, `/v1/enrich`, `/v1/import/csv`, `/v1/open-banking/sandbox/connect`).
+- **Companion Backend (`backend/`, `render.yaml`)**: Optional Node.js + TypeScript Express API (`/health`, `/v1/fx/rates`, `/v1/enrich`, `/v1/import/csv`, and env-configured `/v1/app/update`).
 
 ---
 
@@ -67,8 +67,7 @@ Configure optional overrides in `android/local.properties` (ignored by Git) or v
 ```properties
 SUPABASE_URL=https://rzlenoldloktswymuooz.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<your-publishable-key>
-RENDER_API_URL=https://ledgerflow-api.onrender.com
-UPDATE_MANIFEST_URL=https://ledgerflow-api.onrender.com/v1/app/update
+UPDATE_MANIFEST_URL=https://github.com/itripathiharsh/LedgerFlow/releases/latest/download/update-manifest.json
 EXPECTED_SIGNING_CERT_SHA256=40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0
 ADMOB_APP_ID=<your-admob-app-id>
 ADMOB_BANNER_UNIT_ID=<your-admob-banner-unit-id>
