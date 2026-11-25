@@ -156,6 +156,24 @@
   - Signed `LedgerFlow-v1.0.3.apk` (`4,333,857` bytes, SHA-256 `2b1a680bb277dfc7a2b72ab6780e79ba4a8d7af9088472447c088a3f77ae6c11`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.0.3`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.3/LedgerFlow-v1.0.3.apk`.
 
+---
+
+## Automatic In-App Update Reliability Fix (`v1.0.4`, `versionCode 5`)
+- **Root Cause Fixed**:
+  - `UPDATE_MANIFEST_URL` pointed to `https://ledgerflow-api.onrender.com/v1/app/update`, which returned `HTTP 404` because the Render backend was not live-serving the manifest/APK.
+  - Background update checks used a 4-hour gate across fresh launches, lacked `CacheControl.FORCE_NETWORK` and a fallback URL, risked double-launching the installer prompt, and lacked Android 14–16 `MODE_BACKGROUND_ACTIVITY_START_ALLOWED` relaunch handling plus resume-after-permission persistence.
+- **Changes Applied**:
+  - Updated [build.gradle.kts](file:///D:/all%20farzi%20project/LedgerFlow/android/app/build.gradle.kts) to `versionCode = 5`, `versionName = "1.0.4"`, `UPDATE_MANIFEST_URL = "https://github.com/itripathiharsh/LedgerFlow/releases/latest/download/update-manifest.json"`, `FALLBACK_UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/itripathiharsh/LedgerFlow/main/update-manifest.json"`, and pinned release `EXPECTED_SIGNING_CERT_SHA256`.
+  - Updated [AppUpdateManager.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/update/AppUpdateManager.kt) with `shouldCheckSilently()` (checks once per cold session + 30-minute foreground cooldown), `CacheControl.FORCE_NETWORK`, primary-to-fallback manifest resolution, and `UpdateEventBus.isForegroundActive`.
+  - Updated [UpdateInstallReceivers.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/update/UpdateInstallReceivers.kt), [MainActivity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/MainActivity.kt), [VaultSecurity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/security/VaultSecurity.kt), and [LedgerViewModel.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/LedgerViewModel.kt) to avoid duplicate installer confirmation prompts, persist/resume pending installs after granting `"Install unknown apps"`, and relaunch via `PendingIntent` with `ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED` on API 34+ (`ACTION_MY_PACKAGE_REPLACED`) plus notification fallback.
+  - Added [update-manifest.json](file:///D:/all%20farzi%20project/LedgerFlow/update-manifest.json) at the repo root and uploaded both APK and manifest assets to GitHub Releases.
+- **Verification (`v1.0.4`)**:
+  - Added `shouldCheckSilently_checksOncePerSessionAndRespectsCooldown` and `appReplacedReceiver_clearsPendingResumeAndRelaunchState` in [AppUpdateTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/AppUpdateTest.kt).
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --no-daemon`: **23 / 23 passed** (`0` skipped, `0` failures, `0` errors), `0` Lint errors (`26` warnings).
+  - Signed `LedgerFlow-v1.0.4.apk` (`4,333,857` bytes, SHA-256 `413c55afbed2dddba564a67c4de770968ca492c7b107d5ad4574d6e596753175`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.0.4`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.4/LedgerFlow-v1.0.4.apk`.
+
+
 
 
 

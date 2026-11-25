@@ -41,6 +41,7 @@ data class VaultSessionState(
     val pendingUpdateRelaunch: Boolean = false,
     val pendingUpdateVersionName: String? = null,
     val justUpdatedVersionName: String? = null,
+    val pendingInstallResumeVersionCode: Long = 0L,
 )
 
 interface VaultKeyProvider {

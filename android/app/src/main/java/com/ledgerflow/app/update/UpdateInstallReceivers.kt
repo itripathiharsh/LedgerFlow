@@ -1,6 +1,7 @@
 package com.ledgerflow.app.update
 
 import android.Manifest
+import android.app.ActivityOptions
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -28,7 +29,9 @@ class UpdateInstallStatusReceiver : BroadcastReceiver() {
                 if (confirmIntent != null) {
                     confirmIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     UpdateEventBus.emit(UpdateInstallEvent.UserConfirmationRequired(confirmIntent))
-                    runCatching { context.startActivity(confirmIntent) }
+                    if (!UpdateEventBus.isForegroundActive) {
+                        runCatching { context.startActivity(confirmIntent) }
+                    }
                 }
             }
             PackageInstaller.STATUS_SUCCESS -> {
@@ -65,6 +68,7 @@ class AppReplacedReceiver : BroadcastReceiver() {
             it.copy(
                 pendingUpdateRelaunch = false,
                 pendingUpdateVersionName = null,
+                pendingInstallResumeVersionCode = 0L,
                 justUpdatedVersionName = updatedVersion,
                 cachedUpdateJson = null,
                 dismissedUpdateVersionCode = 0L,
@@ -81,10 +85,31 @@ class AppReplacedReceiver : BroadcastReceiver() {
             putExtra(EXTRA_UPDATED_VERSION, updatedVersion)
         } ?: return
 
-        // Post an optional fallback tap-to-open notification for devices with strict background-launch restrictions;
-        // MainActivity.onResume cancels it immediately if auto-reopen succeeds cleanly.
         postFallbackReopenNotification(context, updatedVersion, launchIntent)
-        runCatching { context.startActivity(launchIntent) }
+
+        val launchedViaPendingIntent = runCatching {
+            val pi = PendingIntent.getActivity(
+                context,
+                AppUpdateManager.UPDATE_NOTIFICATION_ID + 1,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val opts = ActivityOptions.makeBasic()
+                    .setPendingIntentBackgroundActivityStartMode(
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                    )
+                    .toBundle()
+                pi.send(context, 0, null, null, null, null, opts)
+                true
+            } else {
+                false
+            }
+        }.getOrDefault(false)
+
+        if (!launchedViaPendingIntent) {
+            runCatching { context.startActivity(launchIntent) }
+        }
     }
 
     private fun postFallbackReopenNotification(

@@ -27,15 +27,22 @@ android {
         applicationId = "com.ledgerflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         val supabaseUrl = propOrDefault("SUPABASE_URL", "https://rzlenoldloktswymuooz.supabase.co")
         val supabaseKey = propOrDefault("SUPABASE_PUBLISHABLE_KEY", "")
         val renderUrl = propOrDefault("RENDER_API_URL", "https://ledgerflow-api.onrender.com")
-        val updateManifestUrl = propOrDefault("UPDATE_MANIFEST_URL", "${renderUrl.trimEnd('/')}/v1/app/update")
+        val updateManifestUrl = propOrDefault(
+            "UPDATE_MANIFEST_URL",
+            "https://github.com/itripathiharsh/LedgerFlow/releases/latest/download/update-manifest.json",
+        )
+        val fallbackManifestUrl = propOrDefault(
+            "FALLBACK_UPDATE_MANIFEST_URL",
+            "https://raw.githubusercontent.com/itripathiharsh/LedgerFlow/main/update-manifest.json",
+        )
         val expectedSigningCertSha256 = propOrDefault("EXPECTED_SIGNING_CERT_SHA256", "")
         val admobAppId = propOrDefault("ADMOB_APP_ID", "ca-app-pub-3940256099942544~3347511713")
         val admobBannerId = propOrDefault("ADMOB_BANNER_UNIT_ID", "ca-app-pub-3940256099942544/6300978111")
@@ -44,6 +51,7 @@ android {
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabaseKey\"")
         buildConfigField("String", "RENDER_API_URL", "\"$renderUrl\"")
         buildConfigField("String", "UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
+        buildConfigField("String", "FALLBACK_UPDATE_MANIFEST_URL", "\"$fallbackManifestUrl\"")
         buildConfigField("String", "EXPECTED_SIGNING_CERT_SHA256", "\"$expectedSigningCertSha256\"")
         buildConfigField("String", "ADMOB_BANNER_UNIT_ID", "\"$admobBannerId\"")
         manifestPlaceholders["admobAppId"] = admobAppId
@@ -51,6 +59,11 @@ android {
 
     buildTypes {
         release {
+            val releaseCert = propOrDefault(
+                "EXPECTED_SIGNING_CERT_SHA256",
+                "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
+            )
+            buildConfigField("String", "EXPECTED_SIGNING_CERT_SHA256", "\"$releaseCert\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

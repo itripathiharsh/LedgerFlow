@@ -26,6 +26,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.CacheControl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -59,6 +60,9 @@ object UpdateEventBus {
     private val _events = MutableSharedFlow<UpdateInstallEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<UpdateInstallEvent> = _events.asSharedFlow()
 
+    @Volatile
+    var isForegroundActive: Boolean = false
+
     fun emit(event: UpdateInstallEvent) {
         _events.tryEmit(event)
     }
@@ -68,18 +72,28 @@ class AppUpdateManager(
     private val context: Context,
     private val vault: VaultStore,
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
         .build(),
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val checkMutex = Mutex()
     private val installMutex = Mutex()
+    @Volatile
+    private var checkedThisSession = false
+
+    fun shouldCheckSilently(
+        lastUpdateCheckEpochMs: Long,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Boolean {
+        if (!checkedThisSession) return true
+        return (nowMs - lastUpdateCheckEpochMs) >= MIN_BACKGROUND_CHECK_INTERVAL_MS
+    }
 
     companion object {
         private const val MAX_APK_BYTES = 150L * 1024L * 1024L
-        const val MIN_BACKGROUND_CHECK_INTERVAL_MS = 4L * 3_600_000L
+        const val MIN_BACKGROUND_CHECK_INTERVAL_MS = 30L * 60_000L
         const val UPDATE_NOTIFICATION_ID = 9042
 
         fun installedVersionCode(context: Context): Long {
@@ -188,9 +202,12 @@ class AppUpdateManager(
         if (!NetworkMonitor.isOnline(context)) {
             return@withContext UpdateCheckOutcome.Offline
         }
-        val manifestUrl = BuildConfig.UPDATE_MANIFEST_URL.trim()
-        if (!AppUpdatePolicy.isAllowedUpdateUrl(manifestUrl, allowCleartextLocal = BuildConfig.DEBUG)) {
-            return@withContext UpdateCheckOutcome.Error("Update manifest URL must use HTTPS")
+        val candidateUrls = listOf(
+            BuildConfig.UPDATE_MANIFEST_URL.trim(),
+            BuildConfig.FALLBACK_UPDATE_MANIFEST_URL.trim(),
+        ).filter { it.isNotBlank() }.distinct()
+        if (candidateUrls.isEmpty()) {
+            return@withContext UpdateCheckOutcome.Error("No update manifest URL configured")
         }
 
         val state = vault.read()
@@ -198,28 +215,40 @@ class AppUpdateManager(
         val installedName = installedVersionName(context)
         val installedCerts = getInstalledSigningCertDigests(context)
 
-        val request = Request.Builder()
-            .url(manifestUrl)
-            .header("Accept", "application/json")
-            .header("X-App-Package", context.packageName)
-            .header("X-App-Version-Code", installedCode.toString())
-            .get()
-            .build()
-
-        val manifest = try {
-            http.newCall(request).execute().use { resp ->
-                if (!AppUpdatePolicy.isAllowedUpdateUrl(resp.request.url.toString(), allowCleartextLocal = BuildConfig.DEBUG)) {
-                    return@withContext UpdateCheckOutcome.Error("Blocked insecure update redirect")
-                }
-                if (!resp.isSuccessful) {
-                    return@withContext UpdateCheckOutcome.Error("Update check returned HTTP ${resp.code}")
-                }
-                val body = resp.body?.string().orEmpty()
-                json.decodeFromString(UpdateManifest.serializer(), body)
+        var fetchedManifest: UpdateManifest? = null
+        var lastError = "Unable to reach update server"
+        for (manifestUrl in candidateUrls) {
+            if (!AppUpdatePolicy.isAllowedUpdateUrl(manifestUrl, allowCleartextLocal = BuildConfig.DEBUG)) {
+                lastError = "Update manifest URL must use HTTPS"
+                continue
             }
-        } catch (t: Throwable) {
-            return@withContext UpdateCheckOutcome.Error(t.message ?: "Unable to reach update server")
+            val request = Request.Builder()
+                .url(manifestUrl)
+                .cacheControl(CacheControl.FORCE_NETWORK)
+                .header("Accept", "application/json")
+                .header("X-App-Package", context.packageName)
+                .header("X-App-Version-Code", installedCode.toString())
+                .get()
+                .build()
+
+            try {
+                http.newCall(request).execute().use { resp ->
+                    if (!AppUpdatePolicy.isAllowedUpdateUrl(resp.request.url.toString(), allowCleartextLocal = BuildConfig.DEBUG)) {
+                        lastError = "Blocked insecure update redirect"
+                    } else if (!resp.isSuccessful) {
+                        lastError = "Update check returned HTTP ${resp.code}"
+                    } else {
+                        val body = resp.body?.string().orEmpty()
+                        fetchedManifest = json.decodeFromString(UpdateManifest.serializer(), body)
+                    }
+                }
+            } catch (t: Throwable) {
+                lastError = t.message ?: "Unable to reach update server"
+            }
+            if (fetchedManifest != null) break
         }
+        val manifest = fetchedManifest ?: return@withContext UpdateCheckOutcome.Error(lastError)
+        checkedThisSession = true
 
         val nowMs = System.currentTimeMillis()
         when (

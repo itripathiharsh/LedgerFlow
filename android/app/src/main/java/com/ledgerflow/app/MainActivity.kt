@@ -89,6 +89,7 @@ import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.update.AppUpdateManager
+import com.ledgerflow.app.update.UpdateEventBus
 import com.ledgerflow.app.update.UpdateInstallProgress
 
 class MainActivity : FragmentActivity() {
@@ -203,10 +204,12 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        UpdateEventBus.isForegroundActive = true
         vm.onAppForegrounded()
     }
 
     override fun onStop() {
+        UpdateEventBus.isForegroundActive = false
         super.onStop()
         vm.onAppBackgrounded()
     }

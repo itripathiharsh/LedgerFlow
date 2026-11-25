@@ -299,9 +299,9 @@ class AppUpdateRobolectricTest {
         val vault = VaultStore(context)
         val json = Json { encodeDefaults = true }
         val manifest = UpdateManifest(
-            versionCode = 5L,
-            versionName = "1.5.0",
-            apkUrl = "https://releases.ledgerflow.app/v5.apk",
+            versionCode = 99L,
+            versionName = "1.9.9",
+            apkUrl = "https://releases.ledgerflow.app/v99.apk",
             apkSizeBytes = 4_200_000L,
             sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             releaseNotes = listOf("Automatic updater"),
@@ -314,11 +314,82 @@ class AppUpdateRobolectricTest {
         }
 
         val updater = AppUpdateManager(context, vault)
-        assertEquals(5L, updater.loadCachedEligibleManifest(ignoreDismissed = false)?.versionCode)
+        assertEquals(99L, updater.loadCachedEligibleManifest(ignoreDismissed = false)?.versionCode)
 
-        vault.update { it.copy(dismissedUpdateVersionCode = 5L) }
+        vault.update { it.copy(dismissedUpdateVersionCode = 99L) }
         assertNull(updater.loadCachedEligibleManifest(ignoreDismissed = false))
-        assertEquals(5L, updater.loadCachedEligibleManifest(ignoreDismissed = true)?.versionCode)
+        assertEquals(99L, updater.loadCachedEligibleManifest(ignoreDismissed = true)?.versionCode)
+    }
+
+    @Test
+    fun shouldCheckSilently_checksOncePerSessionAndRespectsCooldown() = runTest {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        cm.activeNetwork?.let { activeNet ->
+            val validated = ShadowNetworkCapabilities.newInstance()
+            shadowOf(validated).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            shadowOf(validated).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            shadowOf(cm).setNetworkCapabilities(activeNet, validated)
+        }
+
+        val manifestJson = Json.encodeToString(
+            UpdateManifest.serializer(),
+            UpdateManifest(
+                versionCode = 1L,
+                versionName = "1.0.0",
+                apkUrl = "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.0/LedgerFlow-v1.0.0.apk",
+                apkSizeBytes = 1024L,
+                sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            ),
+        )
+        val mockClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                okhttp3.Response.Builder()
+                    .request(chain.request())
+                    .protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(
+                        okhttp3.ResponseBody.create(
+                            null,
+                            manifestJson.toByteArray(),
+                        ),
+                    )
+                    .build()
+            }
+            .build()
+
+        val updater = AppUpdateManager(context, VaultStore(context), mockClient)
+        val now = 2_000_000_000L
+        org.junit.Assert.assertTrue(updater.shouldCheckSilently(now - 60_000L, now))
+
+        updater.checkForUpdate(ignoreDismissed = false)
+
+        assertFalse(updater.shouldCheckSilently(now - 60_000L, now))
+        org.junit.Assert.assertTrue(
+            updater.shouldCheckSilently(now - AppUpdateManager.MIN_BACKGROUND_CHECK_INTERVAL_MS, now),
+        )
+    }
+
+    @Test
+    fun appReplacedReceiver_clearsPendingResumeAndRelaunchState() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val vault = VaultStore(context)
+        vault.update {
+            it.copy(
+                pendingUpdateRelaunch = true,
+                pendingInstallResumeVersionCode = 5L,
+            )
+        }
+
+        com.ledgerflow.app.update.AppReplacedReceiver().onReceive(
+            context,
+            android.content.Intent(android.content.Intent.ACTION_MY_PACKAGE_REPLACED),
+        )
+
+        val updated = vault.read()
+        assertFalse(updated.pendingUpdateRelaunch)
+        assertEquals(0L, updated.pendingInstallResumeVersionCode)
     }
 }
 

@@ -826,6 +826,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 _isLocked.value = true
             }
         }
+        resumePendingInstallIfPermitted()
         maybeCheckForUpdatesSilently()
     }
 
@@ -835,8 +836,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun maybeCheckForUpdatesSilently() {
         if (!NetworkMonitor.isOnline(app)) return
-        val elapsed = System.currentTimeMillis() - _vaultState.value.lastUpdateCheckEpochMs
-        if (elapsed < AppUpdateManager.MIN_BACKGROUND_CHECK_INTERVAL_MS) {
+        if (!updater.shouldCheckSilently(_vaultState.value.lastUpdateCheckEpochMs)) {
             return
         }
         checkForUpdates(manual = false)
@@ -905,20 +905,44 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         _vaultState.value = vault.update {
-            it.copy(dismissedUpdateVersionCode = maxOf(it.dismissedUpdateVersionCode, current.versionCode))
+            it.copy(
+                dismissedUpdateVersionCode = maxOf(it.dismissedUpdateVersionCode, current.versionCode),
+                pendingInstallResumeVersionCode = 0L,
+            )
         }
         _availableUpdate.value = null
         _updateInstallState.value = null
     }
 
     fun markInstallPermissionLaunched() {
+        val pendingCode = _availableUpdate.value?.versionCode ?: 0L
+        if (pendingCode > 0L) {
+            _vaultState.value = vault.update {
+                it.copy(pendingInstallResumeVersionCode = pendingCode)
+            }
+        }
         _updateInstallState.value = null
+    }
+
+    fun resumePendingInstallIfPermitted() {
+        val pendingCode = _vaultState.value.pendingInstallResumeVersionCode
+        if (pendingCode <= 0L || pendingCode <= installedVersionCode()) return
+        if (!AppUpdateManager.canRequestPackageInstalls(app)) return
+        _vaultState.value = vault.update { it.copy(pendingInstallResumeVersionCode = 0L) }
+        if (_availableUpdate.value == null) {
+            _availableUpdate.value = updater.loadCachedEligibleManifest(ignoreDismissed = true)
+        }
+        if (_availableUpdate.value != null) {
+            startUpdateNow()
+        }
     }
 
     fun onInstallPermissionResult(granted: Boolean) {
         if (granted) {
+            _vaultState.value = vault.update { it.copy(pendingInstallResumeVersionCode = 0L) }
             startUpdateNow()
         } else {
+            _vaultState.value = vault.update { it.copy(pendingInstallResumeVersionCode = 0L) }
             _updateInstallState.value = UpdateInstallProgress.Failed(
                 "Enable 'Install unknown apps' to install verified updates."
             )
