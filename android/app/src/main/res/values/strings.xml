@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">LedgerFlow</string>
+    <string name="pay_track_service_label">LedgerFlow Pay &amp; Track</string>
+</resources>
