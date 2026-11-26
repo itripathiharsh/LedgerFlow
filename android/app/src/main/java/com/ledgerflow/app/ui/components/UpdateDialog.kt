@@ -45,6 +45,7 @@ import com.ledgerflow.app.ui.theme.RoseOutflow
 import com.ledgerflow.app.ui.theme.RoseSoft
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
+import com.ledgerflow.app.ui.theme.SurfaceCard
 import com.ledgerflow.app.update.UpdateInstallProgress
 import java.util.Locale
 
@@ -73,7 +74,7 @@ fun AppUpdateDialog(
             dismissOnBackPress = !busy && !awaitingConfirmation,
             dismissOnClickOutside = false,
         ),
-        containerColor = Color.White,
+        containerColor = SurfaceCard,
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -133,7 +134,7 @@ fun AppUpdateDialog(
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = EmeraldSoft,
-                    border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                    border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.35f)),
                 ) {
                     Row(
                         modifier = Modifier

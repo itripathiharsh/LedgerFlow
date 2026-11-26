@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Category
@@ -25,7 +26,6 @@ import androidx.compose.material.icons.outlined.DirectionsTransit
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MedicalServices
 import androidx.compose.material.icons.outlined.Payments
-import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -45,6 +45,7 @@ import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
+import com.ledgerflow.app.ui.theme.LedgerThemeColors
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.SkySoft
 import com.ledgerflow.app.ui.theme.SkySync
@@ -140,10 +141,11 @@ fun SyncBadge(
 
 @Composable
 fun SourceTagBadge(sourceTag: String) {
+    val palette = LedgerThemeColors
     val (label, bg, fg) = when (sourceTag) {
         "GPAY_AUTO" -> Triple("GPay Auto", SkySoft, SkySync)
         "BANK_SYNC" -> Triple("Bank Sync", EmeraldSoft, EmeraldDark)
-        "PLANNED" -> Triple("Planned", Color(0xFFEEF2FF), Color(0xFF4338CA))
+        "PLANNED" -> Triple("Planned", palette.indigoSoft, palette.indigoStrong)
         "IMPORT" -> Triple("Imported", AmberSoft, AmberWarn)
         else -> Triple("Manual", SlateTint, MutedSlate)
     }
@@ -159,7 +161,7 @@ fun categoryIcon(iconKey: String): ImageVector = when (iconKey) {
     "payments" -> Icons.Outlined.Payments
     "medical_services" -> Icons.Outlined.MedicalServices
     "credit_card" -> Icons.Outlined.CreditCard
-    "loan" -> Icons.Outlined.ReceiptLong
+    "loan" -> Icons.AutoMirrored.Outlined.ReceiptLong
     "bank" -> Icons.Outlined.AccountBalance
     else -> Icons.Outlined.Category
 }
@@ -170,12 +172,18 @@ fun CategoryIconBadge(
     tintHex: String = "#059669",
     size: Dp = 40.dp,
 ) {
-    val color = runCatching { Color(tintHex.toColorInt()) }.getOrDefault(EmeraldPrimary)
+    val isDark = LedgerThemeColors.isDark
+    val rawColor = runCatching { Color(tintHex.toColorInt()) }.getOrDefault(EmeraldPrimary)
+    val color = if (isDark && (tintHex.equals("#475569", ignoreCase = true) || tintHex.equals("#64748B", ignoreCase = true))) {
+        Color(0xFF94A3B8)
+    } else {
+        rawColor
+    }
     Box(
         modifier = Modifier
             .size(size)
             .clip(RoundedCornerShape(12.dp))
-            .background(color.copy(alpha = 0.12f)),
+            .background(color.copy(alpha = if (isDark) 0.22f else 0.12f)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

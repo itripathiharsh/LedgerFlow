@@ -1,16 +1,16 @@
 {
-  "versionCode": 12,
-  "versionName": "1.1.1",
+  "versionCode": 13,
+  "versionName": "1.2.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T01:45:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.1.1/LedgerFlow-v1.1.1.apk",
+  "releasedAt": "2026-11-27T02:16:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.2.0/LedgerFlow-v1.2.0.apk",
   "apkSizeBytes": 4436351,
-  "sha256": "e1c592f8ef7969175282c50789327ecff9b27cb486ba9b3486748b7b35e37294",
+  "sha256": "e07912d867ae729a0a70551937a1ea6cdf9c7566bafecea33e55b4e7776b55f2",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Added explicit Debit Card, Credit Card, and Loan account types with debt/asset net-worth accounting and one-tap Card/Loan repayments.",
-    "Fixed Scheduled & Planned Payments math (monthly calendar upcoming occurrences instead of double-counting paid/yearly bills, and + vs - formatting for scheduled income).",
-    "Implemented real Auto-Pay catch-up execution on due dates, Skip bill action, Overdue/Due Today status pills, and Account/Category/Start-Date controls."
+    "Added full Dark Mode support (DarkLedgerPalette + dark Material 3 color scheme) across every screen, modal, calculator keypad, and dialog.",
+    "Added System / Light / Dark appearance controls in Settings plus a one-tap theme toggle on Home.",
+    "Added dark-adapted Spend Heatmap colors, Donut Charts, Weekly Cash Flow bars, and system status/navigation bar edge-to-edge theming."
   ],
   "mandatory": false
 }

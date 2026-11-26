@@ -77,6 +77,7 @@ import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
+import com.ledgerflow.app.ui.theme.LedgerThemeColors
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
 import com.ledgerflow.app.ui.theme.RoseSoft
@@ -314,7 +315,11 @@ fun AccountsScreen(
 
         // Pay & Track Capture Card
         item {
-            CleanCard(containerColor = SkySoft, borderColor = Color(0xFFBAE6FD), padding = 16.dp) {
+            CleanCard(
+                containerColor = SkySoft,
+                borderColor = if (LedgerThemeColors.isDark) SkySync.copy(alpha = 0.35f) else Color(0xFFBAE6FD),
+                padding = 16.dp,
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

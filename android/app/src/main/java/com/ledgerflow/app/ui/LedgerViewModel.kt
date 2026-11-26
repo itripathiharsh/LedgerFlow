@@ -260,6 +260,20 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         _vaultState.value = vault.update { it.copy(hideBalances = !it.hideBalances) }
     }
 
+    fun setThemeMode(mode: String) {
+        val clean = when (mode.trim().uppercase()) {
+            "DARK" -> "DARK"
+            "LIGHT" -> "LIGHT"
+            else -> "SYSTEM"
+        }
+        _vaultState.value = vault.update { it.copy(themeMode = clean) }
+    }
+
+    fun toggleDarkLightMode(currentlyDark: Boolean) {
+        val next = if (currentlyDark) "LIGHT" else "DARK"
+        setThemeMode(next)
+    }
+
     fun setBaseCurrency(code: String) {
         val clean = code.trim().uppercase()
         if (clean.length != 3) return

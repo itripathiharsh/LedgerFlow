@@ -59,10 +59,13 @@ import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
+import com.ledgerflow.app.ui.theme.LedgerThemeColors
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
+import com.ledgerflow.app.ui.theme.RoseSoft
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
+import com.ledgerflow.app.ui.theme.SurfaceCard
 import com.ledgerflow.app.ui.theme.TabularStyle
 import java.util.Locale
 
@@ -135,7 +138,7 @@ fun AddTransactionScreen(
                         Surface(
                             onClick = { txType = key },
                             shape = RoundedCornerShape(999.dp),
-                            color = if (active) SlateInk else Color.Transparent,
+                            color = if (active) EmeraldPrimary else Color.Transparent,
                         ) {
                             Text(
                                 text = title,
@@ -202,7 +205,7 @@ fun AddTransactionScreen(
                     Surface(
                         onClick = { expr = "0" },
                         shape = RoundedCornerShape(999.dp),
-                        color = Color(0xFFFFF1F2),
+                        color = RoseSoft,
                     ) {
                         Text("Clear", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = RoseOutflow, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
                     }
@@ -405,7 +408,7 @@ private fun CalculatorPad(onKey: (String) -> Unit) {
                             .height(42.dp)
                             .clickable { onKey(key) },
                         shape = RoundedCornerShape(12.dp),
-                        color = if (isOp) Color(0xFFE0E7FF) else Color.White,
+                        color = if (isOp) LedgerThemeColors.calcOpContainer else SurfaceCard,
                         border = BorderStroke(1.dp, BorderSubtle),
                     ) {
                         Box(contentAlignment = Alignment.Center) {

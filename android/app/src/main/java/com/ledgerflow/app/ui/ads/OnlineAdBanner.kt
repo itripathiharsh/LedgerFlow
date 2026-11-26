@@ -32,6 +32,7 @@ import com.google.android.gms.ads.MobileAds
 import com.ledgerflow.app.BuildConfig
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.MutedSlate
+import com.ledgerflow.app.ui.theme.SurfaceCard
 import com.ledgerflow.app.util.NetworkMonitor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -141,7 +142,7 @@ fun OnlineOnlyAdBanner(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = if (adLoaded) Color.White else Color.Transparent,
+        color = if (adLoaded) SurfaceCard else Color.Transparent,
         border = if (adLoaded) BorderStroke(1.dp, BorderSubtle) else null,
     ) {
         Column(

@@ -16,6 +16,8 @@ import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.NotificationParser
 import com.ledgerflow.app.security.VaultCryptoEngine
 import com.ledgerflow.app.security.VaultKeyProvider
+import com.ledgerflow.app.security.VaultSessionState
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -350,5 +352,18 @@ class FinanceMathTest {
             3_000L,
             AnalyticsCalculator.computeMonthlyPlannedExpenseMinor(planned, "INR", novStart, novEnd),
         )
+    }
+
+    @Test
+    fun vaultSessionState_themeModeDefaultsSystemAndRoundTrips() {
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val legacyJson = """{"baseCurrency":"INR","onboardingCompleted":true}"""
+        val decoded = json.decodeFromString(VaultSessionState.serializer(), legacyJson)
+        assertEquals("SYSTEM", decoded.themeMode)
+
+        val dark = decoded.copy(themeMode = "DARK")
+        val encoded = json.encodeToString(VaultSessionState.serializer(), dark)
+        val decodedDark = json.decodeFromString(VaultSessionState.serializer(), encoded)
+        assertEquals("DARK", decodedDark.themeMode)
     }
 }

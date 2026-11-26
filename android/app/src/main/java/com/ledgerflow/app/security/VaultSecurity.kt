@@ -46,6 +46,7 @@ data class VaultSessionState(
     val cachedFxDate: String? = null,
     val onboardingCompleted: Boolean = false,
     val userName: String = "",
+    val themeMode: String = "SYSTEM", // SYSTEM, LIGHT, DARK
 )
 
 interface VaultKeyProvider {

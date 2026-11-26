@@ -43,13 +43,16 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.MoneyFormatter
+import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
+import com.ledgerflow.app.ui.theme.LedgerThemeColors
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
+import com.ledgerflow.app.ui.theme.SurfaceCard
 import com.ledgerflow.app.ui.theme.TabularStyle
 import java.util.Locale
 
@@ -61,7 +64,7 @@ data class PieChartSlice(
     val ratio: Float,
 )
 
-fun parseSliceColor(hex: String, fallback: Color = EmeraldPrimary): Color =
+fun parseSliceColor(hex: String, fallback: Color = Color(0xFF059669)): Color =
     runCatching { Color(hex.toColorInt()) }.getOrDefault(fallback)
 
 @Composable
@@ -214,14 +217,6 @@ fun CategoryDonutChart(
     }
 }
 
-private val heatmapPalette = listOf(
-    Color(0xFFF1F5F9), // Level 0: Zero spend
-    Color(0xFFD1FAE5), // Level 1: Low spend
-    Color(0xFF6EE7B7), // Level 2: Moderate spend
-    Color(0xFF10B981), // Level 3: High spend
-    Color(0xFF047857), // Level 4: Peak spend
-)
-
 @Composable
 fun SpendHeatmapCard(
     monthlyData: AnalyticsCalculator.MonthlyHeatmapData,
@@ -231,6 +226,8 @@ fun SpendHeatmapCard(
     allowModeSwitch: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    val heatmapPalette = LedgerThemeColors.heatmapLevels
+    val futureCellBg = AlabasterBg
     var mode by remember { mutableIntStateOf(0) } // 0 = Monthly Calendar, 1 = 12-Week GitHub Grid
     var selectedCellDayStart by remember(monthlyData, rollingData, mode) {
         val defaultCell = if (mode == 0) {
@@ -275,7 +272,7 @@ fun SpendHeatmapCard(
                             Surface(
                                 onClick = { mode = idx },
                                 shape = RoundedCornerShape(8.dp),
-                                color = if (active) Color.White else Color.Transparent,
+                                color = if (active) SurfaceCard else Color.Transparent,
                             ) {
                                 Text(
                                     text = label,
@@ -323,7 +320,7 @@ fun SpendHeatmapCard(
                             if (cell == null) {
                                 Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
                             } else {
-                                val bg = if (cell.isFuture) Color(0xFFF8FAFC) else heatmapPalette[cell.level.coerceIn(0, 4)]
+                                val bg = if (cell.isFuture) futureCellBg else heatmapPalette[cell.level.coerceIn(0, 4)]
                                 val isToday = cell.dayOfMonth == monthlyData.todayDayOfMonth
                                 val isSelected = cell.dayStartMs == selectedCellDayStart
                                 Box(
@@ -385,7 +382,7 @@ fun SpendHeatmapCard(
                             for (d in 0 until 7) {
                                 val cell = rollingData.cells.getOrNull(w * 7 + d)
                                 if (cell != null) {
-                                    val bg = if (cell.isFuture) Color(0xFFF8FAFC) else heatmapPalette[cell.level.coerceIn(0, 4)]
+                                    val bg = if (cell.isFuture) futureCellBg else heatmapPalette[cell.level.coerceIn(0, 4)]
                                     val isSelected = cell.dayStartMs == selectedCellDayStart
                                     Box(
                                         modifier = Modifier

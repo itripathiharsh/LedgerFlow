@@ -87,20 +87,23 @@ fun InvestScreen(
 
     val total = summary.totalValueMinor
     val activeClasses = listOf(summary.stocksValueMinor, summary.cryptoValueMinor, summary.forexValueMinor).count { it > 0L }
-    val allocationSlices = remember(summary) {
+    val stocksColor = EmeraldPrimary
+    val cryptoColor = SkySync
+    val forexColor = MutedSlate
+    val allocationSlices = remember(summary, stocksColor, cryptoColor, forexColor) {
         if (summary.totalValueMinor <= 0L) {
             emptyList()
         } else {
             val sum = summary.totalValueMinor.toFloat()
             listOfNotNull(
                 summary.stocksValueMinor.takeIf { it > 0L }?.let {
-                    PieChartSlice("stocks", "Stocks", it, EmeraldPrimary, it / sum)
+                    PieChartSlice("stocks", "Stocks", it, stocksColor, it / sum)
                 },
                 summary.cryptoValueMinor.takeIf { it > 0L }?.let {
-                    PieChartSlice("crypto", "Crypto", it, SkySync, it / sum)
+                    PieChartSlice("crypto", "Crypto", it, cryptoColor, it / sum)
                 },
                 summary.forexValueMinor.takeIf { it > 0L }?.let {
-                    PieChartSlice("forex", "Forex Cash", it, MutedSlate, it / sum)
+                    PieChartSlice("forex", "Forex Cash", it, forexColor, it / sum)
                 },
             )
         }

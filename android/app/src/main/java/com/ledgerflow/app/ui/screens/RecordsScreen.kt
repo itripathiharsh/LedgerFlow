@@ -187,7 +187,7 @@ fun RecordsScreen(
                         onClick = { vm.setRecordsFilter(key) },
                         label = { Text(label, fontSize = 12.sp) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = SlateInk,
+                            selectedContainerColor = EmeraldPrimary,
                             selectedLabelColor = Color.White,
                         ),
                     )

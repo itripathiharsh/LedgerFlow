@@ -79,6 +79,8 @@ import com.ledgerflow.app.ui.theme.SkySoft
 import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
+import com.ledgerflow.app.ui.theme.SurfaceCard
+import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.TabularStyle
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -196,7 +198,7 @@ fun BudgetsScreen(
                             onClick = { selectedTab = idx },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp),
-                            color = if (active) Color.White else Color.Transparent,
+                            color = if (active) SurfaceCard else Color.Transparent,
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(vertical = 8.dp)) {
                                 Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (active) SlateInk else MutedSlate)
@@ -380,13 +382,14 @@ fun BudgetsScreen(
                         AnalyticsCalculator.computeCategoryBreakdown(transactions, categories, baseCurrency, monthStart)
                     }
                     val totalCatSpend = slices.sumOf { it.amountMinor }
-                    val pieSlices = remember(slices) {
+                    val defaultSliceColor = EmeraldPrimary
+                    val pieSlices = remember(slices, defaultSliceColor) {
                         slices.map { s ->
                             PieChartSlice(
                                 id = s.categoryId ?: s.name,
                                 label = s.name,
                                 valueMinor = s.amountMinor,
-                                color = parseSliceColor(s.colorHex, EmeraldPrimary),
+                                color = parseSliceColor(s.colorHex, defaultSliceColor),
                                 ratio = s.ratio,
                             )
                         }

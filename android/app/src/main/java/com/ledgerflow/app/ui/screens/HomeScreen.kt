@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SwapHoriz
@@ -74,6 +76,7 @@ import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
+import com.ledgerflow.app.ui.theme.LedgerThemeColors
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
 import com.ledgerflow.app.ui.theme.RoseSoft
@@ -82,6 +85,7 @@ import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.TabularStyle
+import com.ledgerflow.app.ui.theme.resolveIsDarkTheme
 import java.util.Calendar
 import kotlin.math.abs
 import kotlin.math.max
@@ -154,6 +158,14 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    val isDark = resolveIsDarkTheme(vault.themeMode)
+                    IconButton(onClick = { vm.toggleDarkLightMode(isDark) }) {
+                        Icon(
+                            imageVector = if (isDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
+                            contentDescription = if (isDark) "Switch to Light mode" else "Switch to Dark mode",
+                            tint = SlateInk,
+                        )
+                    }
                     IconButton(onClick = { vm.toggleHideBalances() }) {
                         Icon(
                             imageVector = if (masked) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
@@ -319,7 +331,7 @@ fun HomeScreen(
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         LegendDot("Inflow", EmeraldPrimary)
-                        LegendDot("Outflow", Color(0xFFCBD5E1))
+                        LegendDot("Outflow", LedgerThemeColors.outflowBar)
                     }
                     Text(
                         text = "${if (dashboard.savingsRatePercent > 0) "+" else ""}${dashboard.savingsRatePercent}% Savings Rate",
@@ -348,13 +360,14 @@ fun HomeScreen(
         if (categorySlices.isNotEmpty()) {
             item {
                 val totalCatSpend = categorySlices.sumOf { it.amountMinor }
-                val pieSlices = remember(categorySlices) {
+                val defaultSliceColor = EmeraldPrimary
+                val pieSlices = remember(categorySlices, defaultSliceColor) {
                     categorySlices.map { s ->
                         PieChartSlice(
                             id = s.categoryId ?: s.name,
                             label = s.name,
                             valueMinor = s.amountMinor,
-                            color = parseSliceColor(s.colorHex, EmeraldPrimary),
+                            color = parseSliceColor(s.colorHex, defaultSliceColor),
                             ratio = s.ratio,
                         )
                     }
@@ -521,6 +534,8 @@ private fun CashPill(
 @Composable
 private fun WeeklyBarChart(inflows: List<Long>, outflows: List<Long>) {
     val maxVal = max(inflows.maxOrNull() ?: 1L, outflows.maxOrNull() ?: 1L).coerceAtLeast(1L).toFloat()
+    val inflowColor = EmeraldPrimary
+    val outflowColor = LedgerThemeColors.outflowBar
     Column {
         Canvas(
             modifier = Modifier
@@ -537,7 +552,7 @@ private fun WeeklyBarChart(inflows: List<Long>, outflows: List<Long>) {
                 if (rawIn > 0L) {
                     val inH = ((rawIn / maxVal) * (size.height - 8f)).coerceAtLeast(6f)
                     drawRoundRect(
-                        color = EmeraldPrimary,
+                        color = inflowColor,
                         topLeft = Offset(cx - barW - gap / 2f, size.height - inH),
                         size = Size(barW, inH),
                         cornerRadius = CornerRadius(6f, 6f),
@@ -546,7 +561,7 @@ private fun WeeklyBarChart(inflows: List<Long>, outflows: List<Long>) {
                 if (rawOut > 0L) {
                     val outH = ((rawOut / maxVal) * (size.height - 8f)).coerceAtLeast(6f)
                     drawRoundRect(
-                        color = Color(0xFFCBD5E1),
+                        color = outflowColor,
                         topLeft = Offset(cx + gap / 2f, size.height - outH),
                         size = Size(barW, outH),
                         cornerRadius = CornerRadius(6f, 6f),

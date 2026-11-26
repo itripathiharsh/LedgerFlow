@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.SystemUpdate
@@ -130,6 +131,50 @@ fun SettingsScreen(
                     contentColor = if (vault.appLockEnabled) EmeraldDark else MutedSlate,
                     dotColor = if (vault.appLockEnabled) EmeraldPrimary else null,
                 )
+            }
+        }
+
+        // 0. Appearance / Theme
+        item {
+            Text("APPEARANCE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+            Spacer(Modifier.height(6.dp))
+            CleanCard(padding = 14.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Outlined.DarkMode, contentDescription = null, tint = EmeraldDark)
+                        Column {
+                            Text("App Theme", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                            Text("Switch between Light, Dark, or follow system", fontSize = 12.sp, color = MutedSlate)
+                        }
+                    }
+                    StatusPill(
+                        text = vault.themeMode.lowercase().replaceFirstChar { it.uppercase() },
+                        containerColor = EmeraldSoft,
+                        contentColor = EmeraldDark,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("SYSTEM" to "System", "LIGHT" to "Light", "DARK" to "Dark").forEach { (key, label) ->
+                        FilterChip(
+                            selected = vault.themeMode.equals(key, ignoreCase = true),
+                            onClick = { vm.setThemeMode(key) },
+                            label = { Text(label, fontSize = 12.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = EmeraldSoft,
+                                selectedLabelColor = EmeraldDark,
+                            ),
+                        )
+                    }
+                }
             }
         }
 
