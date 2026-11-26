@@ -122,6 +122,9 @@ class AppUpdateManager(
                 Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 "package:${context.packageName}".toUri(),
             ),
+            Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS),
+            Intent(Settings.ACTION_SECURITY_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS),
         )
 
         fun getInstalledSigningCertDigests(context: Context): Set<String> {

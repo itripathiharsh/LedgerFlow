@@ -347,7 +347,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         recurringMonthly: Boolean,
         fallbackCategoryId: String? = null,
     ): Boolean {
-        val magnitudeMinor = CalculatorEngine.evaluateToMinor(amountExpr)
+        val magnitudeMinor = CalculatorEngine.evaluateToMinor(amountExpr, currency)
         if (magnitudeMinor == null || magnitudeMinor <= 0L) {
             _statusMessage.value = "Enter a valid non-zero amount"
             return false
@@ -506,7 +506,8 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun addAccount(name: String, institution: String, type: String, currency: String, balanceMinor: Long, lastFour: String) {
-        if (name.isBlank()) {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
             _statusMessage.value = "Account name required"
             return
         }
@@ -515,7 +516,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             db.accountDao().upsert(
                 AccountEntity(
                     id = UUID.randomUUID().toString(),
-                    name = name.trim(),
+                    name = cleanName,
                     institution = institution.trim(),
                     accountType = type,
                     currency = currency.uppercase(),
@@ -530,7 +531,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 )
             )
             SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = "Account \"$name\" created"
+            _statusMessage.value = "Account \"$cleanName\" created"
         }
     }
 
@@ -575,7 +576,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         currentPriceMinor: Long,
         currency: String,
     ) {
-        if (symbol.isBlank() || quantity <= 0.0 || currentPriceMinor <= 0L) {
+        if (symbol.isBlank() || !quantity.isFinite() || quantity <= 0.0 || quantity > 1_000_000_000.0 || currentPriceMinor <= 0L) {
             _statusMessage.value = "Enter valid asset symbol, quantity, and price"
             return
         }

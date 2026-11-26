@@ -6,7 +6,6 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -94,6 +94,14 @@ import com.ledgerflow.app.update.UpdateInstallProgress
 class MainActivity : FragmentActivity() {
     private val vm: LedgerViewModel by viewModels()
 
+    // Register at Activity lifecycle level rather than inside Compose DisposableEffect so
+    // Settings / install-permission jumps cannot fail due to uninitialized Compose holders.
+    private val installPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        vm.onInstallPermissionResult(AppUpdateManager.canRequestPackageInstalls(this))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -119,27 +127,10 @@ class MainActivity : FragmentActivity() {
                 val availableUpdate by vm.availableUpdate.collectAsState()
                 val updateInstallState by vm.updateInstallState.collectAsState()
 
-                val installPermissionLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.StartActivityForResult(),
-                ) {
-                    vm.onInstallPermissionResult(AppUpdateManager.canRequestPackageInstalls(this))
-                }
-
                 LaunchedEffect(updateInstallState) {
                     when (val st = updateInstallState) {
                         is UpdateInstallProgress.NeedsInstallPermission -> {
-                            val launched = AppUpdateManager
-                                .unknownSourcesSettingsIntents(this@MainActivity)
-                                .any { candidate ->
-                                    runCatching { installPermissionLauncher.launch(candidate) }.isSuccess
-                                }
-                            if (launched) {
-                                vm.markInstallPermissionLaunched()
-                            } else {
-                                vm.onInstallPermissionLaunchFailed(
-                                    "Could not open Android 'Install unknown apps' Settings automatically. Enable it for LedgerFlow in system Settings, then tap Retry."
-                                )
-                            }
+                            launchUnknownSourcesSettings()
                         }
                         is UpdateInstallProgress.AwaitingUserConfirmation -> {
                             val foregroundIntent = Intent(st.intent).apply {
@@ -230,6 +221,9 @@ class MainActivity : FragmentActivity() {
                                     vm.startUpdateNow()
                                 }
                             },
+                            onOpenInstallSettings = { launchUnknownSourcesSettings() },
+                            showOpenInstallSettings = updateInstallState is UpdateInstallProgress.Failed &&
+                                !AppUpdateManager.canRequestPackageInstalls(this@MainActivity),
                             onLater = { vm.dismissUpdateForLater() },
                         )
                     }
@@ -273,6 +267,33 @@ class MainActivity : FragmentActivity() {
         vm.onAppBackgrounded()
     }
 
+    internal fun launchUnknownSourcesSettings() {
+        val intents = AppUpdateManager.unknownSourcesSettingsIntents(this)
+        var lastError: Throwable? = null
+        val launched = intents.any { candidate ->
+            runCatching {
+                installPermissionLauncher.launch(Intent(candidate))
+                true
+            }.recoverCatching { err ->
+                lastError = err
+                startActivity(Intent(candidate))
+                true
+            }.recoverCatching { err ->
+                lastError = err
+                startActivity(Intent(candidate).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }.getOrDefault(false)
+        }
+        if (launched) {
+            vm.markInstallPermissionLaunched()
+        } else {
+            val detail = lastError?.let { " (${it.javaClass.simpleName})" }.orEmpty()
+            vm.onInstallPermissionLaunchFailed(
+                "Could not open Android 'Install unknown apps' Settings automatically$detail. Open Settings > Apps > LedgerFlow > Install unknown apps, then tap Retry."
+            )
+        }
+    }
+
     private fun promptBiometric() {
         val bm = BiometricManager.from(this)
         val canAuth = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
@@ -307,6 +328,7 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
 
     var showAddModal by remember { mutableStateOf(false) }
     var addInitialType by remember { mutableStateOf("EXPENSE") }
+    var budgetsInitialTab by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(statusMsg) {
         statusMsg?.let { msg ->
@@ -391,6 +413,7 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                                 navigateTab("records")
                             }
                             BottomNavTab("Budgets", Icons.Outlined.PieChart, currentRoute == "budgets") {
+                                budgetsInitialTab = 0
                                 navigateTab("budgets")
                             }
                             BottomNavTab("Invest", Icons.AutoMirrored.Outlined.TrendingUp, currentRoute == "invest") {
@@ -420,7 +443,14 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                         showAddModal = true
                     },
                     onOpenRecords = { navigateTab("records") },
-                    onOpenBudgets = { navigateTab("budgets") },
+                    onOpenBudgets = {
+                        budgetsInitialTab = 0
+                        navigateTab("budgets")
+                    },
+                    onOpenAnalytics = {
+                        budgetsInitialTab = 1
+                        navigateTab("budgets")
+                    },
                     onOpenAccounts = { navigateTab("accounts") },
                     onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
                 )
@@ -434,6 +464,7 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
             composable("budgets") {
                 BudgetsScreen(
                     vm = vm,
+                    initialTab = budgetsInitialTab,
                     onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
                 )
             }

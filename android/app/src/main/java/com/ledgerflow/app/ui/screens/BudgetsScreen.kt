@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -52,10 +53,14 @@ import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
+import com.ledgerflow.app.ui.components.CategoryDonutChart
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
+import com.ledgerflow.app.ui.components.PieChartSlice
+import com.ledgerflow.app.ui.components.SpendHeatmapCard
 import com.ledgerflow.app.ui.components.StatusPill
+import com.ledgerflow.app.ui.components.parseSliceColor
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.AmberSoft
 import com.ledgerflow.app.ui.theme.AmberWarn
@@ -79,6 +84,7 @@ import kotlin.math.abs
 @Composable
 fun BudgetsScreen(
     vm: LedgerViewModel,
+    initialTab: Int = 0,
     onOpenSettings: () -> Unit,
 ) {
     val budgets by vm.budgets.collectAsState()
@@ -116,7 +122,10 @@ fun BudgetsScreen(
     val catMap = remember(categories) { categories.associateBy { it.id } }
     val dateFmt = remember { SimpleDateFormat("MMM d", Locale.US) }
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0=Budgets, 1=Analytics, 2=Planned
+    var selectedTab by remember { mutableIntStateOf(initialTab.coerceIn(0, 2)) } // 0=Budgets, 1=Analytics, 2=Planned
+    LaunchedEffect(initialTab) {
+        selectedTab = initialTab.coerceIn(0, 2)
+    }
     var showNewBudget by remember { mutableStateOf(false) }
     var showNewPlanned by remember { mutableStateOf(false) }
 
@@ -330,40 +339,57 @@ fun BudgetsScreen(
             }
 
             1 -> {
-                // Analytics Category Breakdown
+                // GitHub-style Daily Spend Heatmap + Category Pie Breakdown
                 item {
-                    val expensesByCat = remember(transactions, categories, baseCurrency, monthStart) {
-                        transactions
-                            .filter { it.txType == "EXPENSE" && it.occurredAtEpochMs >= monthStart }
-                            .groupBy { catMap[it.categoryId]?.name ?: "Other" }
-                            .mapValues { (_, list) -> list.sumOf { abs(FxConverter.convertMinor(it.amountMinor, it.currency, baseCurrency)) } }
-                            .entries
-                            .sortedByDescending { it.value }
+                    val monthlyHeatmap = remember(transactions, baseCurrency, dayKey) {
+                        AnalyticsCalculator.computeMonthlySpendHeatmap(transactions, baseCurrency)
                     }
-                    val maxCatSpend = (expensesByCat.firstOrNull()?.value ?: 1L).coerceAtLeast(1L).toFloat()
+                    val rollingHeatmap = remember(transactions, baseCurrency, dayKey) {
+                        AnalyticsCalculator.computeRollingSpendHeatmap(transactions, baseCurrency, weeks = 12)
+                    }
+                    SpendHeatmapCard(
+                        monthlyData = monthlyHeatmap,
+                        rollingData = rollingHeatmap,
+                        currency = baseCurrency,
+                        masked = masked,
+                        allowModeSwitch = true,
+                    )
+                }
+
+                item {
+                    val slices = remember(transactions, categories, baseCurrency, monthStart) {
+                        AnalyticsCalculator.computeCategoryBreakdown(transactions, categories, baseCurrency, monthStart)
+                    }
+                    val totalCatSpend = slices.sumOf { it.amountMinor }
+                    val pieSlices = remember(slices) {
+                        slices.map { s ->
+                            PieChartSlice(
+                                id = s.categoryId ?: s.name,
+                                label = s.name,
+                                valueMinor = s.amountMinor,
+                                color = parseSliceColor(s.colorHex, EmeraldPrimary),
+                                ratio = s.ratio,
+                            )
+                        }
+                    }
 
                     CleanCard(padding = 16.dp) {
-                        Text("Spending by Category (This Month)", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                        Spacer(Modifier.height(12.dp))
-                        if (expensesByCat.isEmpty()) {
-                            Text("No expense records this month.", color = MutedSlate, fontSize = 13.sp)
-                        } else {
-                            expensesByCat.forEach { (catName, amount) ->
-                                Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text(catName, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-                                        Text(MoneyFormatter.formatMinor(amount, baseCurrency, masked = masked), style = TabularStyle, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                                    }
-                                    Spacer(Modifier.height(4.dp))
-                                    LinearProgressIndicator(
-                                        progress = { (amount / maxCatSpend).coerceIn(0f, 1f) },
-                                        modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(999.dp)),
-                                        color = EmeraldPrimary,
-                                        trackColor = SlateTint,
-                                    )
-                                }
-                            }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Spending Breakdown", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                            StatusPill("This Month", SlateTint, MutedSlate)
                         }
+                        Spacer(Modifier.height(12.dp))
+                        CategoryDonutChart(
+                            slices = pieSlices,
+                            totalMinor = totalCatSpend,
+                            currency = baseCurrency,
+                            masked = masked,
+                            centerSubtitle = "This Month",
+                        )
                     }
                 }
             }
@@ -453,7 +479,7 @@ fun BudgetsScreen(
                     )
                     OutlinedTextField(
                         value = amount,
-                        onValueChange = { amount = sanitizePositiveDecimalInput(it, baseCurrency) },
+                        onValueChange = { amount = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
                         label = { Text("Limit ($baseCurrency)") },
                         placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -519,7 +545,7 @@ fun BudgetsScreen(
                     OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Bill Name") }, singleLine = true)
                     OutlinedTextField(
                         value = amount,
-                        onValueChange = { amount = sanitizePositiveDecimalInput(it, baseCurrency) },
+                        onValueChange = { amount = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
                         label = { Text("Amount ($baseCurrency)") },
                         placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -545,27 +571,4 @@ fun BudgetsScreen(
             dismissButton = { TextButton(onClick = { showNewPlanned = false }) { Text("Cancel") } },
         )
     }
-}
-
-private fun sanitizePositiveDecimalInput(raw: String, currency: String): String {
-    val maxDecimals = if (currency.equals("JPY", ignoreCase = true)) 0 else 2
-    val sb = StringBuilder()
-    var seenDot = false
-    var decimals = 0
-    for (ch in raw) {
-        when {
-            ch.isDigit() -> {
-                if (!seenDot || decimals < maxDecimals) {
-                    sb.append(ch)
-                    if (seenDot) decimals++
-                }
-            }
-            ch == '.' && maxDecimals > 0 && !seenDot -> {
-                if (sb.isEmpty()) sb.append('0')
-                sb.append('.')
-                seenDot = true
-            }
-        }
-    }
-    return sb.toString()
 }

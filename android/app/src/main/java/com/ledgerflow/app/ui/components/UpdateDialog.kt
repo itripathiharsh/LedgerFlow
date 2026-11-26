@@ -56,6 +56,8 @@ fun AppUpdateDialog(
     installState: UpdateInstallProgress?,
     onUpdateNow: () -> Unit,
     onOpenSystemInstaller: () -> Unit = {},
+    onOpenInstallSettings: () -> Unit = {},
+    showOpenInstallSettings: Boolean = false,
     onLater: () -> Unit,
 ) {
     val busy = installState is UpdateInstallProgress.CheckingPermission ||
@@ -186,17 +188,31 @@ fun AppUpdateDialog(
                         ProgressStatusBlock("Checking install permission...", progress = null)
                     }
                     is UpdateInstallProgress.NeedsInstallPermission -> {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = SlateTint,
-                            border = BorderStroke(1.dp, BorderSubtle),
-                        ) {
-                            Text(
-                                text = "Grant 'Install unknown apps' permission in Android Settings to install verified LedgerFlow updates.",
-                                fontSize = 12.sp,
-                                color = SlateInk,
-                                modifier = Modifier.padding(10.dp),
-                            )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = SlateTint,
+                                border = BorderStroke(1.dp, BorderSubtle),
+                            ) {
+                                Text(
+                                    text = "Grant 'Install unknown apps' permission in Android Settings to install verified LedgerFlow updates.",
+                                    fontSize = 12.sp,
+                                    color = SlateInk,
+                                    modifier = Modifier.padding(10.dp),
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onOpenInstallSettings,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text(
+                                    text = "Open Settings",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = EmeraldDark,
+                                )
+                            }
                         }
                     }
                     is UpdateInstallProgress.Downloading -> {
@@ -233,18 +249,34 @@ fun AppUpdateDialog(
                         }
                     }
                     is UpdateInstallProgress.Failed -> {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = RoseSoft,
-                        ) {
-                            Text(
-                                text = installState.message,
-                                fontSize = 12.sp,
-                                color = RoseOutflow,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                            )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = RoseSoft,
+                            ) {
+                                Text(
+                                    text = installState.message,
+                                    fontSize = 12.sp,
+                                    color = RoseOutflow,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                )
+                            }
+                            if (showOpenInstallSettings) {
+                                OutlinedButton(
+                                    onClick = onOpenInstallSettings,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                ) {
+                                    Text(
+                                        text = "Open Install Permission Settings",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = EmeraldDark,
+                                    )
+                                }
+                            }
                         }
                     }
                     null -> Unit

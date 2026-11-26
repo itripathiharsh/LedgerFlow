@@ -15,3 +15,5 @@
 -keep class com.ledgerflow.app.data.sync.LedgerVaultBackup { *; }
 -keep class com.ledgerflow.app.data.remote.Supabase** { *; }
 -keep class androidx.core.content.FileProvider { *; }
+-keep class androidx.activity.result.** { *; }
+-keep class androidx.activity.compose.** { *; }

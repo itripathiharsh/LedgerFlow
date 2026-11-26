@@ -26,32 +26,61 @@ fun rememberDataImportPicker(
     }
 
     return {
+        var lastError: Throwable? = null
         val openDocOk = runCatching {
             openDocLauncher.launch(arrayOf("*/*"))
             true
-        }.getOrDefault(false)
+        }.getOrElse {
+            lastError = it
+            false
+        }
 
         if (!openDocOk) {
             val getContentOk = runCatching {
                 getContentLauncher.launch("*/*")
                 true
-            }.getOrDefault(false)
+            }.getOrElse {
+                lastError = it
+                false
+            }
 
             if (!getContentOk) {
-                val chooserIntent = Intent.createChooser(
+                val openableChooser = Intent.createChooser(
                     Intent(Intent.ACTION_GET_CONTENT).apply {
                         type = "*/*"
                         addCategory(Intent.CATEGORY_OPENABLE)
                     },
                     "Select CSV, TSV, or JSON file",
                 )
-                val chooserOk = runCatching {
-                    chooserLauncher.launch(chooserIntent)
+                val openableOk = runCatching {
+                    chooserLauncher.launch(openableChooser)
                     true
-                }.getOrDefault(false)
+                }.getOrElse {
+                    lastError = it
+                    false
+                }
 
-                if (!chooserOk) {
-                    onLaunchFailed("No file picker app found on this device to open CSV or JSON files.")
+                if (!openableOk) {
+                    val genericChooser = Intent.createChooser(
+                        Intent(Intent.ACTION_GET_CONTENT).apply {
+                            type = "*/*"
+                        },
+                        "Select CSV, TSV, or JSON file",
+                    )
+                    val genericOk = runCatching {
+                        chooserLauncher.launch(genericChooser)
+                        true
+                    }.getOrElse {
+                        lastError = it
+                        false
+                    }
+
+                    if (!genericOk) {
+                        val detail = lastError?.let { " (${it.javaClass.simpleName})" }.orEmpty()
+                        onLaunchFailed(
+                            "No file picker app could be opened$detail. Share/send the file to LedgerFlow or use Smart Paste."
+                        )
+                    }
                 }
             }
         }

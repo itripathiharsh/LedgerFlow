@@ -57,12 +57,16 @@ import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.ads.OnlineOnlyAdBanner
+import com.ledgerflow.app.ui.components.CategoryDonutChart
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
+import com.ledgerflow.app.ui.components.PieChartSlice
 import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.SourceTagBadge
+import com.ledgerflow.app.ui.components.SpendHeatmapCard
 import com.ledgerflow.app.ui.components.StatusPill
+import com.ledgerflow.app.ui.components.parseSliceColor
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
@@ -86,6 +90,7 @@ fun HomeScreen(
     onOpenQuickAdd: (initialType: String) -> Unit,
     onOpenRecords: () -> Unit,
     onOpenBudgets: () -> Unit,
+    onOpenAnalytics: () -> Unit = onOpenBudgets,
     onOpenAccounts: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -111,6 +116,15 @@ fun HomeScreen(
         AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction)
     }
     val categoryMap = remember(categories) { categories.associateBy { it.id } }
+    val monthlyHeatmap = remember(transactions, baseCurrency, dayKey) {
+        AnalyticsCalculator.computeMonthlySpendHeatmap(transactions, baseCurrency)
+    }
+    val rollingHeatmap = remember(transactions, baseCurrency, dayKey) {
+        AnalyticsCalculator.computeRollingSpendHeatmap(transactions, baseCurrency, weeks = 12)
+    }
+    val categorySlices = remember(transactions, categories, baseCurrency, monthStart) {
+        AnalyticsCalculator.computeCategoryBreakdown(transactions, categories, baseCurrency, monthStart)
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -288,6 +302,55 @@ fun HomeScreen(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = if (dashboard.savingsRatePercent >= 0) EmeraldDark else RoseOutflow,
+                    )
+                }
+            }
+        }
+
+        // Daily Spend Heatmap (GitHub-style monthly map) + Category Breakdown Pie
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SectionHeader(title = "Spend Insights", actionText = "Analytics", onActionClick = onOpenAnalytics)
+                SpendHeatmapCard(
+                    monthlyData = monthlyHeatmap,
+                    rollingData = rollingHeatmap,
+                    currency = baseCurrency,
+                    masked = masked,
+                    allowModeSwitch = true,
+                )
+            }
+        }
+
+        if (categorySlices.isNotEmpty()) {
+            item {
+                val totalCatSpend = categorySlices.sumOf { it.amountMinor }
+                val pieSlices = remember(categorySlices) {
+                    categorySlices.map { s ->
+                        PieChartSlice(
+                            id = s.categoryId ?: s.name,
+                            label = s.name,
+                            valueMinor = s.amountMinor,
+                            color = parseSliceColor(s.colorHex, EmeraldPrimary),
+                            ratio = s.ratio,
+                        )
+                    }
+                }
+                CleanCard(padding = 16.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Category Breakdown", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                        StatusPill("This Month", SlateTint, MutedSlate)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    CategoryDonutChart(
+                        slices = pieSlices,
+                        totalMinor = totalCatSpend,
+                        currency = baseCurrency,
+                        masked = masked,
+                        centerSubtitle = "This Month",
                     )
                 }
             }

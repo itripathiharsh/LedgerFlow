@@ -1,16 +1,17 @@
 {
-  "versionCode": 10,
-  "versionName": "1.0.9",
+  "versionCode": 11,
+  "versionName": "1.1.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T00:52:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.9/LedgerFlow-v1.0.9.apk",
-  "apkSizeBytes": 4387105,
-  "sha256": "605a8b569d6fffae6c429de5f16be85dbce62342980c1ebd27791a5ea6671b83",
+  "releasedAt": "2026-11-27T01:22:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.1.0/LedgerFlow-v1.1.0.apk",
+  "apkSizeBytes": 4419967,
+  "sha256": "9d00fc31f9944e8486c75281ff81c9d562de6520b4d703f56bb97f851d1b21d8",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Fixed integer overflow wrap-around and negative input in MoneyFormatter.parseDecimalToMinor and Create Monthly Budget dialog.",
-    "Added All Categories budget scope, existing monthly spend preview inside Create Monthly Budget, and clear over-budget status instead of '-₹... left'.",
-    "Prevented double-counted spend across overlapping budgets and synced Add Transaction default category selection with Budgets."
+    "Fixed ActivityResult / Fragment (<1.3.0) bug blocking Android 'Install unknown apps' Settings & file import pickers.",
+    "Moved updater Settings launcher to Activity-level registerForActivityResult with expanded system Settings fallbacks and direct Open Settings button.",
+    "Added Spend Heatmap (Month & 12-week rolling grid) and Category/Allocation Donut Charts across Home, Budgets, and Invest.",
+    "Fixed integer overflow, zero-decimal (JPY) scaling, calculator double-dot/operator bugs, and portfolio allocation rounding."
   ],
   "mandatory": false
 }

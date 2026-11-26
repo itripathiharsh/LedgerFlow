@@ -1,6 +1,7 @@
 package com.ledgerflow.app
 
 import com.ledgerflow.app.data.local.BudgetEntity
+import com.ledgerflow.app.data.local.CategoryEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.TransactionEntity
@@ -222,5 +223,67 @@ class FinanceMathTest {
         )
         assertEquals(40_000L, totalSpent)
         assertEquals(100_000L, AnalyticsCalculator.computeTotalBudgetLimit(listOf(overallBudget, diningBudget), "INR"))
+    }
+
+    @Test
+    fun analyticsCalculator_buildsMonthlyHeatmapRollingMatrixAndCategoryPieSlices() {
+        val nov27 = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 27, 14, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val nov25 = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 25, 10, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val novStart = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 1, 0, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val cats = listOf(
+            CategoryEntity("cat_d", "Dining", "EXPENSE", "cafe", "#D97706", novStart, novStart),
+            CategoryEntity("cat_g", "Groceries", "EXPENSE", "shopping_cart", "#059669", novStart, novStart),
+        )
+        val txs = listOf(
+            TransactionEntity("t1", "acc1", categoryId = "cat_d", txType = "EXPENSE", amountMinor = -100_000L, currency = "INR", merchant = "Dinner", occurredAtEpochMs = nov27, createdAtEpochMs = nov27, updatedAtEpochMs = nov27),
+            TransactionEntity("t2", "acc1", categoryId = "cat_g", txType = "EXPENSE", amountMinor = -25_000L, currency = "INR", merchant = "Mart", occurredAtEpochMs = nov25, createdAtEpochMs = nov25, updatedAtEpochMs = nov25),
+            TransactionEntity("t3", "acc1", categoryId = null, txType = "INCOME", amountMinor = 500_000L, currency = "INR", merchant = "Salary", occurredAtEpochMs = nov27, createdAtEpochMs = nov27, updatedAtEpochMs = nov27),
+        )
+
+        val heatmap = AnalyticsCalculator.computeMonthlySpendHeatmap(
+            transactions = txs,
+            baseCurrency = "INR",
+            year = 2026,
+            monthZeroBased = java.util.Calendar.NOVEMBER,
+            nowMs = nov27,
+        )
+        assertEquals(30, heatmap.cells.size)
+        assertEquals(6, heatmap.firstDayWeekdayOffset) // Nov 1, 2026 was Sunday -> offset 6 (Mon=0..Sun=6)
+        assertEquals(2, heatmap.activeDays)
+        assertEquals(125_000L, heatmap.totalMonthMinor)
+        assertEquals(4, heatmap.cells[26].level) // Nov 27 peak spend -> level 4
+        assertEquals(1, heatmap.cells[24].level) // Nov 25 is 25% of peak -> level 1
+        assertEquals(0, heatmap.cells[0].level)
+
+        val rolling = AnalyticsCalculator.computeRollingSpendHeatmap(txs, "INR", weeks = 12, nowMs = nov27)
+        assertEquals(84, rolling.cells.size)
+        assertEquals(125_000L, rolling.totalPeriodMinor)
+
+        val slices = AnalyticsCalculator.computeCategoryBreakdown(txs, cats, "INR", novStart)
+        assertEquals(2, slices.size)
+        assertEquals("Dining", slices[0].name)
+        assertEquals(0.8f, slices[0].ratio, 0.001f)
+        assertEquals("Groceries", slices[1].name)
+        assertEquals(0.2f, slices[1].ratio, 0.001f)
+    }
+
+    @Test
+    fun moneyFormatterAndCalculator_sanitizeDecimalsAndProtectOverflow() {
+        assertEquals("123.45", MoneyFormatter.sanitizeDecimalInput("-123.456", "USD", allowNegative = false))
+        assertEquals("-123.45", MoneyFormatter.sanitizeDecimalInput("-123.456", "USD", allowNegative = true))
+        assertEquals("500", MoneyFormatter.sanitizeDecimalInput("500.75", "JPY", allowNegative = false))
+        assertEquals(1500L, CalculatorEngine.evaluateToMinor("1000+500", "JPY"))
+        assertNull(CalculatorEngine.evaluateToMinor("9999999999999999999"))
+        assertEquals(0L, AnalyticsCalculator.safeMultiplyMinor(Double.POSITIVE_INFINITY, 100L))
     }
 }

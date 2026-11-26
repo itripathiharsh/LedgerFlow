@@ -401,13 +401,32 @@ class AppUpdateRobolectricTest {
     fun unknownSourcesSettingsIntents_providesOrderedFallbacks() {
         val context: Context = ApplicationProvider.getApplicationContext()
         val intents = AppUpdateManager.unknownSourcesSettingsIntents(context)
-        assertTrue(intents.size >= 3)
+        assertTrue(intents.size >= 6)
         assertEquals(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, intents[0].action)
         assertEquals("package:${context.packageName}", intents[0].dataString)
         assertEquals(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, intents[1].action)
         assertNull(intents[1].data)
         assertEquals(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, intents[2].action)
         assertEquals("package:${context.packageName}", intents[2].dataString)
+        assertEquals(android.provider.Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS, intents[3].action)
+        assertEquals(android.provider.Settings.ACTION_SECURITY_SETTINGS, intents[4].action)
+        assertEquals(android.provider.Settings.ACTION_SETTINGS, intents[5].action)
+    }
+
+    @Test
+    fun mainActivity_launchUnknownSourcesSettings_usesActivityResultRegistryWithoutComposeDelay() {
+        val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        activity.launchUnknownSourcesSettings()
+
+        val started = shadowOf(activity).nextStartedActivityForResult
+        assertNotNull(started)
+        assertEquals(
+            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            started!!.intent.action,
+        )
+        assertEquals("package:${activity.packageName}", started.intent.dataString)
+        controller.pause().stop().destroy()
     }
 
     @Test

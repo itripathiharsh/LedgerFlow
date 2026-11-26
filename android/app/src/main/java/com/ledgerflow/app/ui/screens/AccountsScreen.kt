@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Contactless
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -49,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -358,7 +360,8 @@ fun AccountsScreen(
 
         val isCash = accountType == "CASH"
         val isCard = accountType == "CARD"
-        val canSave = if (isCash) true else name.isNotBlank()
+        val parsedBalance = if (balance.isBlank()) 0L else MoneyFormatter.parseDecimalToMinor(balance, baseCurrency)
+        val canSave = (if (isCash) true else name.isNotBlank()) && parsedBalance != null
 
         AlertDialog(
             onDismissRequest = { showAddAccount = false },
@@ -372,7 +375,10 @@ fun AccountsScreen(
                         listOf("CASH", "CHECKING", "SAVINGS", "CARD").forEach { t ->
                             FilterChip(
                                 selected = accountType == t,
-                                onClick = { accountType = t },
+                                onClick = {
+                                    accountType = t
+                                    balance = MoneyFormatter.sanitizeDecimalInput(balance, baseCurrency, allowNegative = (t == "CARD"))
+                                },
                                 label = { Text(t, fontSize = 11.sp) },
                             )
                         }
@@ -383,9 +389,10 @@ fun AccountsScreen(
                     if (isCash) {
                         OutlinedTextField(
                             value = balance,
-                            onValueChange = { balance = it },
+                            onValueChange = { balance = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
                             label = { Text("Cash Amount ($baseCurrency)") },
-                            placeholder = { Text("0.00") },
+                            placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                         )
                         OutlinedTextField(
@@ -413,14 +420,16 @@ fun AccountsScreen(
                                 value = lastFour,
                                 onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) lastFour = it },
                                 label = { Text("Last 4 digits (optional)") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
                             )
                         }
                         OutlinedTextField(
                             value = balance,
-                            onValueChange = { balance = it },
+                            onValueChange = { balance = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = isCard) },
                             label = { Text("Opening Balance ($baseCurrency)") },
-                            placeholder = { Text("0.00") },
+                            placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                         )
                     }
@@ -430,7 +439,7 @@ fun AccountsScreen(
                 Button(
                     enabled = canSave,
                     onClick = {
-                        val minor = MoneyFormatter.parseDecimalToMinor(balance) ?: 0L
+                        val minor = parsedBalance ?: 0L
                         val finalName = if (isCash) name.ifBlank { "Cash Wallet" } else name
                         vm.addAccount(
                             name = finalName,

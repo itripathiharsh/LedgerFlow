@@ -86,7 +86,7 @@ fun AddTransactionScreen(
     var label by remember { mutableStateOf("") }
     var recurring by remember { mutableStateOf(false) }
 
-    val evaluatedMinor = remember(expr) { CalculatorEngine.evaluateToMinor(expr) ?: 0L }
+    val evaluatedMinor = remember(expr, lockedCurrency) { CalculatorEngine.evaluateToMinor(expr, lockedCurrency) ?: 0L }
     val autoMatch = remember(merchant, note, rules) { MagicRuleEngine.apply(merchant, note, rules) }
     val selectableCategories = remember(categories, txType) {
         val filtered = categories.filter { it.kind == txType || it.name.equals("General", ignoreCase = true) }
@@ -178,11 +178,12 @@ fun AddTransactionScreen(
                 Spacer(Modifier.height(10.dp))
                 val sym = MoneyFormatter.currencySymbol(lockedCurrency)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val divisor = if (lockedCurrency.equals("JPY", ignoreCase = true)) 1.0 else 100.0
                     listOf("10", "25", "50", "100").forEach { inc ->
                         Surface(
                             onClick = {
-                                val next = (evaluatedMinor / 100.0) + inc.toDouble()
-                                expr = if (next % 1.0 == 0.0) next.toInt().toString() else String.format(Locale.US, "%.2f", next)
+                                val next = (evaluatedMinor / divisor) + inc.toDouble()
+                                expr = if (next % 1.0 == 0.0) next.toLong().toString() else String.format(Locale.US, "%.2f", next)
                             },
                             shape = RoundedCornerShape(999.dp),
                             color = SlateTint,
@@ -308,9 +309,25 @@ fun AddTransactionScreen(
         Spacer(Modifier.height(8.dp))
         CalculatorPad(
             onKey = { key ->
-                expr = when (key) {
-                    "DEL" -> if (expr.length <= 1) "0" else expr.dropLast(1)
-                    else -> if (expr == "0" && key.first().isDigit()) key else expr + key
+                val ops = setOf("÷", "×", "-", "+")
+                expr = when {
+                    key == "DEL" -> if (expr.length <= 1) "0" else expr.dropLast(1)
+                    key == "." -> {
+                        val lastSegment = expr.split('÷', '×', '-', '+').lastOrNull().orEmpty()
+                        when {
+                            lastSegment.contains('.') -> expr
+                            expr.lastOrNull()?.toString() in ops -> "${expr}0."
+                            else -> "$expr."
+                        }
+                    }
+                    key in ops -> {
+                        when {
+                            expr.lastOrNull()?.toString() in ops -> expr.dropLast(1) + key
+                            else -> expr + key
+                        }
+                    }
+                    expr == "0" -> key
+                    else -> expr + key
                 }
             },
         )

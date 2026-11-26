@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,8 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
@@ -41,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,8 +49,10 @@ import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
+import com.ledgerflow.app.ui.components.CategoryDonutChart
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
+import com.ledgerflow.app.ui.components.PieChartSlice
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.EmeraldDark
@@ -65,7 +67,6 @@ import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.TabularStyle
 import java.util.Locale
-import kotlin.math.roundToLong
 
 @Composable
 fun InvestScreen(
@@ -85,10 +86,25 @@ fun InvestScreen(
     var selectedHolding by remember { mutableStateOf<HoldingEntity?>(null) }
 
     val total = summary.totalValueMinor
-    val stocksPct = if (total > 0L) ((summary.stocksValueMinor.toDouble() / total) * 100.0).toInt() else 0
-    val cryptoPct = if (total > 0L) ((summary.cryptoValueMinor.toDouble() / total) * 100.0).toInt() else 0
-    val forexPct = if (total > 0L) (100 - stocksPct - cryptoPct).coerceAtLeast(0) else 0
     val activeClasses = listOf(summary.stocksValueMinor, summary.cryptoValueMinor, summary.forexValueMinor).count { it > 0L }
+    val allocationSlices = remember(summary) {
+        if (summary.totalValueMinor <= 0L) {
+            emptyList()
+        } else {
+            val sum = summary.totalValueMinor.toFloat()
+            listOfNotNull(
+                summary.stocksValueMinor.takeIf { it > 0L }?.let {
+                    PieChartSlice("stocks", "Stocks", it, EmeraldPrimary, it / sum)
+                },
+                summary.cryptoValueMinor.takeIf { it > 0L }?.let {
+                    PieChartSlice("crypto", "Crypto", it, SkySync, it / sum)
+                },
+                summary.forexValueMinor.takeIf { it > 0L }?.let {
+                    PieChartSlice("forex", "Forex Cash", it, MutedSlate, it / sum)
+                },
+            )
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -171,29 +187,21 @@ fun InvestScreen(
             }
         }
 
-        // Asset Allocation Card
+        // Asset Allocation Donut Chart Card
         item {
             CleanCard(padding = 16.dp) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Allocation", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                     Text("$activeClasses Active Classes", fontSize = 12.sp, color = MutedSlate)
                 }
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(10.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(SlateTint),
-                ) {
-                    if (summary.stocksValueMinor > 0) Box(Modifier.weight(summary.stocksValueMinor.toFloat()).fillMaxHeight().background(EmeraldPrimary))
-                    if (summary.cryptoValueMinor > 0) Box(Modifier.weight(summary.cryptoValueMinor.toFloat()).fillMaxHeight().background(SkySync))
-                    if (summary.forexValueMinor > 0) Box(Modifier.weight(summary.forexValueMinor.toFloat()).fillMaxHeight().background(MutedSlate))
-                }
                 Spacer(Modifier.height(12.dp))
-                AllocationRow("Stocks", "$stocksPct% (${MoneyFormatter.formatMinor(summary.stocksValueMinor, baseCurrency, masked = masked)})", EmeraldPrimary)
-                AllocationRow("Crypto", "$cryptoPct% (${MoneyFormatter.formatMinor(summary.cryptoValueMinor, baseCurrency, masked = masked)})", SkySync)
-                AllocationRow("Forex Cash", "$forexPct% (${MoneyFormatter.formatMinor(summary.forexValueMinor, baseCurrency, masked = masked)})", MutedSlate)
+                CategoryDonutChart(
+                    slices = allocationSlices,
+                    totalMinor = total,
+                    currency = baseCurrency,
+                    masked = masked,
+                    centerSubtitle = "Portfolio",
+                )
             }
         }
 
@@ -209,8 +217,8 @@ fun InvestScreen(
             item { EmptyPlaceholder("No holdings tracked", "Tap + Add Holding to track stocks, crypto, or FX reserves.") }
         } else {
             items(holdings, key = { it.id }) { h ->
-                val valLocal = (h.quantity * h.currentPriceMinor.toDouble()).roundToLong()
-                val costLocal = (h.quantity * h.avgCostMinor.toDouble()).roundToLong()
+                val valLocal = AnalyticsCalculator.safeMultiplyMinor(h.quantity, h.currentPriceMinor)
+                val costLocal = AnalyticsCalculator.safeMultiplyMinor(h.quantity, h.avgCostMinor)
                 val valBase = FxConverter.convertMinor(valLocal, h.currency, baseCurrency)
                 val costBase = FxConverter.convertMinor(costLocal, h.currency, baseCurrency)
                 val pnlBase = valBase - costBase
@@ -297,10 +305,10 @@ fun InvestScreen(
         var currentPrice by remember { mutableStateOf("") }
         var assetClass by remember { mutableStateOf("STOCKS") }
 
-        val parsedQty = qty.toDoubleOrNull() ?: 0.0
-        val parsedCost = MoneyFormatter.parseDecimalToMinor(avgCost) ?: 0L
-        val parsedCur = MoneyFormatter.parseDecimalToMinor(currentPrice) ?: parsedCost
-        val canSubmit = symbol.isNotBlank() && parsedQty > 0.0 && parsedCur > 0L
+        val parsedQty = qty.toDoubleOrNull()?.takeIf { it.isFinite() } ?: 0.0
+        val parsedCost = MoneyFormatter.parseDecimalToMinor(avgCost, baseCurrency) ?: 0L
+        val parsedCur = MoneyFormatter.parseDecimalToMinor(currentPrice, baseCurrency) ?: parsedCost
+        val canSubmit = symbol.isNotBlank() && parsedQty > 0.0 && parsedQty <= 1_000_000_000.0 && parsedCur > 0L
 
         AlertDialog(
             onDismissRequest = { showAddHolding = false },
@@ -333,23 +341,26 @@ fun InvestScreen(
                     )
                     OutlinedTextField(
                         value = qty,
-                        onValueChange = { qty = it },
+                        onValueChange = { qty = MoneyFormatter.sanitizeDecimalInput(it, maxDecimalsOverride = 6) },
                         label = { Text("Quantity") },
                         placeholder = { Text("0") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                     )
                     OutlinedTextField(
                         value = avgCost,
-                        onValueChange = { avgCost = it },
+                        onValueChange = { avgCost = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency) },
                         label = { Text("Avg Buy Price ($baseCurrency)") },
-                        placeholder = { Text("0.00") },
+                        placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                     )
                     OutlinedTextField(
                         value = currentPrice,
-                        onValueChange = { currentPrice = it },
+                        onValueChange = { currentPrice = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency) },
                         label = { Text("Current Price ($baseCurrency, optional)") },
                         placeholder = { Text("Defaults to buy price") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                     )
                 }
@@ -380,9 +391,15 @@ fun InvestScreen(
 
     selectedHolding?.let { holding ->
         var priceText by remember(holding.id) {
-            mutableStateOf(String.format(Locale.US, "%.2f", holding.currentPriceMinor / 100.0))
+            mutableStateOf(
+                if (holding.currency.equals("JPY", ignoreCase = true)) {
+                    holding.currentPriceMinor.toString()
+                } else {
+                    String.format(Locale.US, "%.2f", holding.currentPriceMinor / 100.0)
+                }
+            )
         }
-        val parsedNew = MoneyFormatter.parseDecimalToMinor(priceText) ?: 0L
+        val parsedNew = MoneyFormatter.parseDecimalToMinor(priceText, holding.currency) ?: 0L
 
         AlertDialog(
             onDismissRequest = { selectedHolding = null },
@@ -396,8 +413,9 @@ fun InvestScreen(
                     )
                     OutlinedTextField(
                         value = priceText,
-                        onValueChange = { priceText = it },
+                        onValueChange = { priceText = MoneyFormatter.sanitizeDecimalInput(it, holding.currency) },
                         label = { Text("Current Unit Price (${holding.currency})") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                     )
                     OutlinedButton(
@@ -427,20 +445,3 @@ fun InvestScreen(
 }
 
 private fun formatQty(q: Double): String = if (q % 1.0 == 0.0) q.toInt().toString() else String.format(Locale.US, "%.3f", q).trimEnd('0').trimEnd('.')
-
-@Composable
-private fun AllocationRow(label: String, value: String, color: Color) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-            Text(label, fontSize = 13.sp, color = SlateInk)
-        }
-        Text(value, style = TabularStyle, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-    }
-}
