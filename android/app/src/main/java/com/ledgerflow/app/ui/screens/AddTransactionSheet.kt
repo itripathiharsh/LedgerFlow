@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Backspace
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -53,6 +54,7 @@ import com.ledgerflow.app.domain.MoneyFormatter
 import kotlin.math.abs
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CleanCard
+import com.ledgerflow.app.ui.components.CreateCategoryDialog
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.BorderSubtle
@@ -91,7 +93,10 @@ fun AddTransactionScreen(
         )
     }
     var transferTargetId by remember(accounts) { mutableStateOf(accounts.getOrNull(1)?.id ?: accounts.firstOrNull()?.id ?: "") }
-    var selectedCategoryId by remember { mutableStateOf<String?>(null) }
+    var multiSelectMode by remember { mutableStateOf(false) }
+    var selectedCategoryIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var activeParentId by remember { mutableStateOf<String?>(null) }
+    var showCreateCategoryDialog by remember { mutableStateOf(false) }
     var merchant by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
@@ -103,11 +108,19 @@ fun AddTransactionScreen(
         val filtered = categories.filter { it.kind == txType || it.name.equals("General", ignoreCase = true) }
         filtered.ifEmpty { categories }
     }
+    val parentCategories = remember(selectableCategories) {
+        selectableCategories.filter { it.parentCategoryId == null }
+    }
+    val childrenByParent = remember(selectableCategories) {
+        selectableCategories.filter { it.parentCategoryId != null }.groupBy { it.parentCategoryId!! }
+    }
+    val catById = remember(categories) { categories.associateBy { it.id } }
     val defaultCategoryId = remember(selectableCategories, txType) {
         selectableCategories.firstOrNull { it.name.equals("General", ignoreCase = true) }?.id
             ?: selectableCategories.firstOrNull()?.id
     }
-    val effectiveCatId = selectedCategoryId ?: autoMatch.categoryId ?: defaultCategoryId
+    val effectivePrimaryId = selectedCategoryIds.firstOrNull() ?: autoMatch.categoryId ?: defaultCategoryId
+    val effectiveCatIds = if (selectedCategoryIds.isNotEmpty()) selectedCategoryIds.toSet() else setOfNotNull(effectivePrimaryId)
 
     Column(
         modifier = Modifier
@@ -136,7 +149,13 @@ fun AddTransactionScreen(
                     listOf("EXPENSE" to "Expense", "INCOME" to "Income", "TRANSFER" to "Transfer").forEach { (key, title) ->
                         val active = txType == key
                         Surface(
-                            onClick = { txType = key },
+                            onClick = {
+                                if (txType != key) {
+                                    txType = key
+                                    selectedCategoryIds = emptyList()
+                                    activeParentId = null
+                                }
+                            },
                             shape = RoundedCornerShape(999.dp),
                             color = if (active) EmeraldPrimary else Color.Transparent,
                         ) {
@@ -265,22 +284,131 @@ fun AddTransactionScreen(
                     }
                 } else {
                     Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Category", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
-                        if (selectedCategoryId == null && autoMatch.matched) {
-                            StatusPill("Auto-Rule Suggested", EmeraldSoft, EmeraldDark)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = if (selectedCategoryIds.size > 1) "Categories (${selectedCategoryIds.size})" else "Category",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MutedSlate,
+                            )
+                            if (selectedCategoryIds.isEmpty() && autoMatch.matched) {
+                                StatusPill("Auto-Rule", EmeraldSoft, EmeraldDark)
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                onClick = {
+                                    multiSelectMode = !multiSelectMode
+                                    if (!multiSelectMode && selectedCategoryIds.size > 1) {
+                                        selectedCategoryIds = listOf(selectedCategoryIds.first())
+                                    }
+                                },
+                                shape = RoundedCornerShape(999.dp),
+                                color = if (multiSelectMode) EmeraldSoft else SlateTint,
+                                border = BorderStroke(1.dp, if (multiSelectMode) EmeraldPrimary else BorderSubtle),
+                            ) {
+                                Text(
+                                    text = if (multiSelectMode) "Multi: ON" else "Multi",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (multiSelectMode) EmeraldDark else MutedSlate,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                )
+                            }
+                            Surface(
+                                onClick = { showCreateCategoryDialog = true },
+                                shape = RoundedCornerShape(999.dp),
+                                color = SlateTint,
+                                border = BorderStroke(1.dp, BorderSubtle),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                ) {
+                                    Icon(Icons.Outlined.Add, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(13.dp))
+                                    Text("New", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
+                                }
+                            }
                         }
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        selectableCategories.forEach { cat ->
+                        parentCategories.forEach { cat ->
+                            val hasSelectedChild = childrenByParent[cat.id].orEmpty().any { it.id in effectiveCatIds }
+                            val isSelected = cat.id in effectiveCatIds || (activeParentId == cat.id && hasSelectedChild)
                             FilterChip(
-                                selected = effectiveCatId == cat.id,
-                                onClick = { selectedCategoryId = cat.id },
+                                selected = isSelected,
+                                onClick = {
+                                    activeParentId = cat.id
+                                    selectedCategoryIds = if (multiSelectMode) {
+                                        if (cat.id in selectedCategoryIds) selectedCategoryIds - cat.id
+                                        else selectedCategoryIds + cat.id
+                                    } else {
+                                        listOf(cat.id)
+                                    }
+                                },
                                 label = { Text(cat.name, fontSize = 12.sp) },
                                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = EmeraldSoft, selectedLabelColor = EmeraldDark),
                             )
                         }
+                    }
+
+                    val branchParentId = activeParentId
+                        ?: selectedCategoryIds.firstOrNull()?.let { catById[it]?.parentCategoryId ?: it }
+                        ?: effectivePrimaryId?.let { catById[it]?.parentCategoryId ?: it }
+                    val branchSubs = branchParentId?.let { childrenByParent[it] }.orEmpty()
+                    if (branchSubs.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        val parentTitle = branchParentId?.let { catById[it]?.name }.orEmpty()
+                        Text(
+                            text = if (parentTitle.isNotBlank()) "Subcategories • $parentTitle" else "Subcategories",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MutedSlate,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            branchSubs.forEach { sub ->
+                                val subSelected = sub.id in effectiveCatIds
+                                FilterChip(
+                                    selected = subSelected,
+                                    onClick = {
+                                        selectedCategoryIds = if (multiSelectMode) {
+                                            if (sub.id in selectedCategoryIds) {
+                                                selectedCategoryIds - sub.id
+                                            } else {
+                                                val trimmed = branchParentId?.let { selectedCategoryIds - it } ?: selectedCategoryIds
+                                                trimmed + sub.id
+                                            }
+                                        } else {
+                                            if (sub.id in selectedCategoryIds && branchParentId != null) {
+                                                listOf(branchParentId)
+                                            } else {
+                                                listOf(sub.id)
+                                            }
+                                        }
+                                    },
+                                    label = { Text(sub.name, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = EmeraldSoft, selectedLabelColor = EmeraldDark),
+                                )
+                            }
+                        }
+                    }
+
+                    if (multiSelectMode && selectedCategoryIds.size > 1) {
+                        Spacer(Modifier.height(4.dp))
+                        val names = selectedCategoryIds.mapNotNull { catById[it]?.name }.joinToString(", ")
+                        Text(
+                            text = "Split evenly: $names",
+                            fontSize = 11.sp,
+                            color = EmeraldDark,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
 
@@ -357,12 +485,13 @@ fun AddTransactionScreen(
                     currency = lockedCurrency,
                     accountId = selectedAccountId,
                     transferAccountId = transferTargetId,
-                    manualCategoryId = selectedCategoryId,
+                    manualCategoryId = selectedCategoryIds.firstOrNull(),
                     merchant = merchant,
                     note = note,
                     labelsCsv = label,
                     recurringMonthly = recurring,
                     fallbackCategoryId = if (txType == "TRANSFER") null else defaultCategoryId,
+                    selectedCategoryIds = if (txType == "TRANSFER") emptyList() else selectedCategoryIds,
                 )
                 if (ok) onDismiss()
             },
@@ -386,6 +515,37 @@ fun AddTransactionScreen(
                 fontSize = 15.sp,
             )
         }
+    }
+
+    if (showCreateCategoryDialog) {
+        CreateCategoryDialog(
+            initialKind = if (txType == "INCOME") "INCOME" else "EXPENSE",
+            parentCategories = categories.filter { it.parentCategoryId == null && it.deletedAtEpochMs == null },
+            initialParentId = activeParentId,
+            onDismiss = { showCreateCategoryDialog = false },
+            onCreate = { name, kind, parentId, iconKey, colorHex ->
+                vm.addCategory(
+                    name = name,
+                    kind = kind,
+                    parentCategoryId = parentId,
+                    iconKey = iconKey,
+                    colorHex = colorHex,
+                    onCreated = { created ->
+                        if (created.kind == txType) {
+                            selectedCategoryIds = if (multiSelectMode) {
+                                (selectedCategoryIds + created.id).distinct()
+                            } else {
+                                listOf(created.id)
+                            }
+                            if (created.parentCategoryId != null) {
+                                activeParentId = created.parentCategoryId
+                            }
+                        }
+                    },
+                )
+                showCreateCategoryDialog = false
+            },
+        )
     }
 }
 

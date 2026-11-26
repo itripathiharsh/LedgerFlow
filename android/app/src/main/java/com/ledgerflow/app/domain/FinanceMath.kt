@@ -438,14 +438,26 @@ object AnalyticsCalculator {
         baseCurrency: String,
         monthStartEpochMs: Long,
         dayOfMonthFraction: Float,
+        categories: List<CategoryEntity> = emptyList(),
     ): List<BudgetProgress> {
+        val catMap = categories.associateBy { it.id }
         val monthExpenses = transactions.filter {
             it.deletedAtEpochMs == null && it.txType == "EXPENSE" && it.occurredAtEpochMs >= monthStartEpochMs
         }
         return budgets.filter { it.deletedAtEpochMs == null }.map { budget ->
-            val spent = monthExpenses
-                .filter { budget.categoryId == null || it.categoryId == budget.categoryId }
-                .sumOf { abs(FxConverter.convertMinor(it.amountMinor, it.currency, budget.currency)) }
+            val spent = monthExpenses.sumOf { tx ->
+                val txMag = abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, budget.currency))
+                if (budget.categoryId == null) {
+                    txMag
+                } else {
+                    val assigned = with(CategoryHierarchy) { tx.allAssignedCategoryIds() }
+                    val shares = CategoryHierarchy.allocateAcrossIds(txMag, assigned)
+                    shares.sumOf { (cid, share) ->
+                        val matches = cid != null && (cid == budget.categoryId || catMap[cid]?.parentCategoryId == budget.categoryId)
+                        if (matches) share else 0L
+                    }
+                }
+            }
             val limit = budget.limitMinor.coerceAtLeast(1L)
             val ratio = (spent.toFloat() / limit.toFloat()).coerceAtLeast(0f)
             val convertedSpent = FxConverter.convertMinor(spent, budget.currency, baseCurrency)
@@ -462,21 +474,36 @@ object AnalyticsCalculator {
 
     /**
      * Computes monthly expenses covered by active budgets without double-counting transactions
-     * when overall (categoryId == null) and per-category budgets coexist.
+     * when overall (categoryId == null) and per-category budgets coexist, rolling subcategories up cleanly.
      */
     fun computeTotalBudgetedSpent(
         budgets: List<BudgetEntity>,
         transactions: List<TransactionEntity>,
         baseCurrency: String,
         monthStartEpochMs: Long,
+        categories: List<CategoryEntity> = emptyList(),
     ): Long {
         val activeBudgets = budgets.filter { it.deletedAtEpochMs == null }
         if (activeBudgets.isEmpty()) return 0L
+        val catMap = categories.associateBy { it.id }
+        val hasOverall = activeBudgets.any { it.categoryId == null }
+        val budgetedCatIds = activeBudgets.mapNotNull { it.categoryId }.toSet()
         return transactions
             .asSequence()
             .filter { it.deletedAtEpochMs == null && it.txType == "EXPENSE" && it.occurredAtEpochMs >= monthStartEpochMs }
-            .filter { tx -> activeBudgets.any { b -> b.categoryId == null || b.categoryId == tx.categoryId } }
-            .sumOf { tx -> abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, baseCurrency)) }
+            .sumOf { tx ->
+                val mag = abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, baseCurrency))
+                if (hasOverall) {
+                    mag
+                } else {
+                    val assigned = with(CategoryHierarchy) { tx.allAssignedCategoryIds() }
+                    val shares = CategoryHierarchy.allocateAcrossIds(mag, assigned)
+                    shares.sumOf { (cid, share) ->
+                        val matches = cid != null && (cid in budgetedCatIds || catMap[cid]?.parentCategoryId in budgetedCatIds)
+                        if (matches) share else 0L
+                    }
+                }
+            }
     }
 
     fun computeTotalBudgetLimit(
@@ -546,13 +573,24 @@ object AnalyticsCalculator {
     ): List<CategorySpendSlice> {
         val catMap = categories.associateBy { it.id }
         val fallbackColors = listOf("#059669", "#0284C7", "#D97706", "#6366F1", "#E11D48", "#0D9488", "#64748B")
-        val grouped = transactions
-            .filter { it.deletedAtEpochMs == null && it.txType == "EXPENSE" && it.occurredAtEpochMs >= monthStartEpochMs }
-            .groupBy { it.categoryId }
+        val rawSums = HashMap<String?, Long>()
+        val rawCounts = HashMap<String?, Int>()
 
-        val rawTotals = grouped.map { (catId, list) ->
-            val sum = list.sumOf { abs(FxConverter.convertMinor(it.amountMinor, it.currency, baseCurrency)) }
-            Triple(catId, list.size, sum)
+        for (tx in transactions) {
+            if (tx.deletedAtEpochMs != null || tx.txType != "EXPENSE" || tx.occurredAtEpochMs < monthStartEpochMs) continue
+            val mag = abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, baseCurrency))
+            if (mag <= 0L) continue
+            val assigned = with(CategoryHierarchy) { tx.allAssignedCategoryIds() }
+            val topIds = assigned.mapNotNull { CategoryHierarchy.resolveTopLevelCategory(it, catMap)?.id }.distinct()
+            val shares = CategoryHierarchy.allocateAcrossIds(mag, topIds)
+            for ((cid, share) in shares) {
+                rawSums[cid] = (rawSums[cid] ?: 0L) + share
+                rawCounts[cid] = (rawCounts[cid] ?: 0) + 1
+            }
+        }
+
+        val rawTotals = rawSums.map { (catId, sum) ->
+            Triple(catId, rawCounts[catId] ?: 0, sum)
         }.filter { it.third > 0L }.sortedByDescending { it.third }
 
         val grandTotal = rawTotals.sumOf { it.third }.coerceAtLeast(1L)

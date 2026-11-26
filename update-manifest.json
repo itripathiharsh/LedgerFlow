@@ -1,16 +1,16 @@
 {
-  "versionCode": 13,
-  "versionName": "1.2.0",
+  "versionCode": 14,
+  "versionName": "1.3.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T02:16:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.2.0/LedgerFlow-v1.2.0.apk",
-  "apkSizeBytes": 4436351,
-  "sha256": "e07912d867ae729a0a70551937a1ea6cdf9c7566bafecea33e55b4e7776b55f2",
+  "releasedAt": "2026-11-27T03:05:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.3.0/LedgerFlow-v1.3.0.apk",
+  "apkSizeBytes": 4657336,
+  "sha256": "f2ec86efdc1900ca4b20b09485bc61d22e2dc8b17c69111c32d33c95891e9acd",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Added full Dark Mode support (DarkLedgerPalette + dark Material 3 color scheme) across every screen, modal, calculator keypad, and dialog.",
-    "Added System / Light / Dark appearance controls in Settings plus a one-tap theme toggle on Home.",
-    "Added dark-adapted Spend Heatmap colors, Donut Charts, Weekly Cash Flow bars, and system status/navigation bar edge-to-edge theming."
+    "Added Premium Black (pure OLED #000000) as a third theme alongside Light and Flow Dark (Green), with visual swatches and clean reorganized sections in Settings.",
+    "Expanded daily-life categories & 28 subcategories (Fuel & Vehicle, Shopping, Entertainment, Education, Travel, Personal Care, EMI & Debt, Salary, Freelance, Refunds), custom category/subcategory creation, and multi-select split tagging.",
+    "Added a dedicated multi-section Analytics & Reports hub (Overview, Cash Flow, Spending, Credit & Debt, Reports) with Weeks/Months/Custom date range, balance trend & forecast, planned timeline, period comparison, credit utilization & DTI, and downloadable CSV reports."
   ],
   "mandatory": false
 }

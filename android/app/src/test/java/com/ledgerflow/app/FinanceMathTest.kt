@@ -6,17 +6,23 @@ import com.ledgerflow.app.data.local.CategoryEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.PlannedPaymentEntity
+import com.ledgerflow.app.data.local.SeedData
 import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
+import com.ledgerflow.app.domain.AnalyticsEngine
+import com.ledgerflow.app.domain.AnalyticsRangePreset
 import com.ledgerflow.app.domain.CalculatorEngine
+import com.ledgerflow.app.domain.CategoryHierarchy
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.NotificationParser
+import com.ledgerflow.app.domain.ReportExporter
 import com.ledgerflow.app.security.VaultCryptoEngine
 import com.ledgerflow.app.security.VaultKeyProvider
 import com.ledgerflow.app.security.VaultSessionState
+import com.ledgerflow.app.ui.theme.ThemeModes
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -247,8 +253,8 @@ class FinanceMathTest {
         }.timeInMillis
 
         val cats = listOf(
-            CategoryEntity("cat_d", "Dining", "EXPENSE", "cafe", "#D97706", novStart, novStart),
-            CategoryEntity("cat_g", "Groceries", "EXPENSE", "shopping_cart", "#059669", novStart, novStart),
+            CategoryEntity("cat_d", "Dining", "EXPENSE", "cafe", "#D97706", null, novStart, novStart),
+            CategoryEntity("cat_g", "Groceries", "EXPENSE", "shopping_cart", "#059669", null, novStart, novStart),
         )
         val txs = listOf(
             TransactionEntity("t1", "acc1", categoryId = "cat_d", txType = "EXPENSE", amountMinor = -100_000L, currency = "INR", merchant = "Dinner", occurredAtEpochMs = nov27, createdAtEpochMs = nov27, updatedAtEpochMs = nov27),
@@ -361,9 +367,120 @@ class FinanceMathTest {
         val decoded = json.decodeFromString(VaultSessionState.serializer(), legacyJson)
         assertEquals("SYSTEM", decoded.themeMode)
 
-        val dark = decoded.copy(themeMode = "DARK")
+        val dark = decoded.copy(themeMode = ThemeModes.FLOW_DARK)
         val encoded = json.encodeToString(VaultSessionState.serializer(), dark)
         val decodedDark = json.decodeFromString(VaultSessionState.serializer(), encoded)
-        assertEquals("DARK", decodedDark.themeMode)
+        assertEquals(ThemeModes.FLOW_DARK, decodedDark.themeMode)
+
+        assertEquals(ThemeModes.FLOW_DARK, ThemeModes.normalize("DARK"))
+        assertEquals(ThemeModes.PREMIUM_DARK, ThemeModes.normalize("BLACK"))
+        assertEquals("Premium Black", ThemeModes.displayLabel(ThemeModes.PREMIUM_DARK))
+        assertEquals("Flow Dark", ThemeModes.displayLabel(ThemeModes.FLOW_DARK))
+    }
+
+    @Test
+    fun analyticsEngineAndReports_computeBalancesCashFlowUtilizationDtiAndCsv() {
+        val nowCal = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 20, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val nowMs = nowCal.timeInMillis
+        val nov5 = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 5, 10, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val nov12 = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 12, 14, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val oct12PrevPeriod = Calendar.getInstance().apply {
+            set(2026, Calendar.OCTOBER, 12, 14, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val nov25Scheduled = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 25, 9, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val categories = SeedData.starterCategories(nowMs)
+        val accounts = listOf(
+            AccountEntity("a_bank", "Salary Bank", accountType = "BANK", currency = "INR", balanceMinor = 500_000L, createdAtEpochMs = 1L, updatedAtEpochMs = 1L),
+            AccountEntity("a_card", "SBI Cashback", accountType = "CREDIT_CARD", currency = "INR", balanceMinor = -100_000L, lastFour = "4321", creditLimitMinor = 500_000L, createdAtEpochMs = 1L, updatedAtEpochMs = 1L),
+            AccountEntity("a_loan", "Bike Loan", accountType = "LOAN", currency = "INR", balanceMinor = -200_000L, createdAtEpochMs = 1L, updatedAtEpochMs = 1L),
+        )
+        val transactions = listOf(
+            TransactionEntity("t_sal", "a_bank", categoryId = SeedData.CAT_SALARY, txType = "INCOME", amountMinor = 1_000_000L, currency = "INR", merchant = "Employer", occurredAtEpochMs = nov5, createdAtEpochMs = nov5, updatedAtEpochMs = nov5),
+            // Multi-category expense split across Petrol/Diesel (Fuel parent) and Entertainment -> equals 100_000 total (50k Need, 50k Want)
+            TransactionEntity("t_multi", "a_card", categoryId = SeedData.SUB_PETROL_DIESEL, categoryIdsCsv = "${SeedData.SUB_PETROL_DIESEL},${SeedData.CAT_ENTERTAINMENT}", txType = "EXPENSE", amountMinor = -100_000L, currency = "INR", merchant = "Shell & PVR", labelsCsv = "weekend", occurredAtEpochMs = nov12, createdAtEpochMs = nov12, updatedAtEpochMs = nov12),
+            // Repayment transfer from Bank to Loan (counted under debt repayment / savings)
+            TransactionEntity("t_repay", "a_bank", transferAccountId = "a_loan", categoryId = null, txType = "TRANSFER", amountMinor = -50_000L, currency = "INR", merchant = "Loan EMI", occurredAtEpochMs = nov12, createdAtEpochMs = nov12, updatedAtEpochMs = nov12),
+            // Prior period spend for period-to-period delta
+            TransactionEntity("t_prev", "a_bank", categoryId = SeedData.CAT_DINING, txType = "EXPENSE", amountMinor = -200_000L, currency = "INR", merchant = "Old Bistro", occurredAtEpochMs = oct12PrevPeriod, createdAtEpochMs = oct12PrevPeriod, updatedAtEpochMs = oct12PrevPeriod),
+        )
+        val planned = listOf(
+            PlannedPaymentEntity("p_emi", "a_bank", SeedData.CAT_EMI_DEBT, "Home EMI", 150_000L, "INR", "EXPENSE", "MONTHLY", nov25Scheduled, false, nowMs, nowMs),
+        )
+        val holdings = listOf(
+            HoldingEntity("h_nifty", "NIFTY", "Nifty 50 ETF", "STOCKS", "NSE", 10.0, 20_000L, 25_000L, "INR", 0, nowMs, nowMs),
+        )
+
+        val range = AnalyticsEngine.buildDateRange(AnalyticsRangePreset.MONTH_1, nowMs = nowMs)
+        val bundle = AnalyticsEngine.computeFullAnalytics(accounts, categories, transactions, planned, holdings, "INR", range, nowMs = nowMs)
+
+        assertEquals(1_000_000L, bundle.periodInflowMinor)
+        assertEquals(100_000L, bundle.periodOutflowMinor)
+        assertEquals(900_000L, bundle.periodNetMinor)
+        assertEquals(90, bundle.periodSavingsRatePct)
+
+        // Multi-category split conserves total across Needs (50k) and Wants (50k) without double counting
+        assertEquals(50_000L, bundle.spendingNature.needsMinor)
+        assertEquals(50_000L, bundle.spendingNature.wantsMinor)
+        assertEquals(50_000L, bundle.spendingNature.savingsAndDebtMinor)
+        assertEquals(150_000L, bundle.spendingNature.totalClassifiedMinor)
+
+        // Parent rollup rolls SUB_PETROL_DIESEL under Fuel & Vehicle without inflating 100k spend
+        val fuelParent = bundle.spendingByParentCategory.firstOrNull { it.id == SeedData.CAT_FUEL }
+        assertEquals(50_000L, fuelParent?.amountMinor)
+        assertEquals(100_000L, bundle.spendingByParentCategory.sumOf { it.amountMinor })
+
+        // Label breakdown detects #weekend
+        assertEquals(100_000L, bundle.spendingByLabels.firstOrNull()?.amountMinor)
+
+        // Credit card utilization: 100k owed / 500k limit = 20%
+        assertEquals(20.0f, bundle.creditAndDebt.overallUtilizationPct ?: -1f, 0.1f)
+        assertEquals(1, bundle.creditAndDebt.cards.size)
+        // Monthly debt service = max(150k scheduled EMI, 50k loan repayment) = 150k / 1000k income = 15%
+        assertNotNull(bundle.creditAndDebt.debtToIncomePct)
+        assertEquals(15.0f, bundle.creditAndDebt.debtToIncomePct!!, 0.2f)
+
+        // Planned timeline shows nov25Home EMI and projected net worth drops by 150k (from 200k to 50k)
+        assertEquals(1, bundle.balanceForecast.timeline.size)
+        assertEquals(50_000L, bundle.balanceForecast.projectedEndBalanceMinor)
+
+        // Prior period comparison (Oct 1 - Oct 20 vs Nov 1 - Nov 20)
+        assertEquals(200_000L, bundle.periodComparison.previousOutflowMinor)
+        assertEquals(-50.0f, bundle.periodComparison.outflowDeltaPct ?: 0f, 0.5f)
+
+        // Financial health includes Liquid (500k) + Holdings (250k) - Debt (300k) = 450k net worth
+        assertEquals(500_000L, bundle.financialHealth.liquidAssetsMinor)
+        assertEquals(250_000L, bundle.financialHealth.investmentValueMinor)
+        assertEquals(450_000L, bundle.financialHealth.netWorthMinor)
+
+        // CSV reports serialize real metrics cleanly without empty gaps
+        val cfCsv = ReportExporter.buildCashFlowReportCsv(bundle, "INR")
+        assertTrue(cfCsv.contains("Total Inflow,10000.00"))
+        val ieCsv = ReportExporter.buildIncomeExpenseReportCsv(bundle, transactions, categories, accounts, "INR")
+        assertTrue(ieCsv.contains("Shell & PVR"))
+        val assetsCsv = ReportExporter.buildFinancialAssetsReportCsv(bundle, holdings, "INR")
+        assertTrue(assetsCsv.contains("NIFTY"))
+
+        // Subcategory budget rollup in FinanceMath sums child SUB_PETROL_DIESEL spend into CAT_FUEL budget
+        val fuelBudget = BudgetEntity("b_fuel", SeedData.CAT_FUEL, "Fuel", 200_000L, "INR", "MONTHLY", nov5, nov5)
+        val evaluatedBudgets = AnalyticsCalculator.computeBudgets(listOf(fuelBudget), transactions, "INR", nov5 - 1000L, 0.5f, categories)
+        assertEquals(50_000L, evaluatedBudgets.single().spentMinor)
+
+        // Allocation conservation test for odd minor amounts
+        val splitOdd = CategoryHierarchy.allocateAcrossIds(100L, listOf("c1", "c2", "c3"))
+        assertEquals(100L, splitOdd.sumOf { it.second })
     }
 }

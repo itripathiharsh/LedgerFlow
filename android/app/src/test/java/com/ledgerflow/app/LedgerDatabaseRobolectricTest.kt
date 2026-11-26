@@ -1,10 +1,13 @@
 package com.ledgerflow.app
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
+import com.ledgerflow.app.data.local.CategoryEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.LedgerDatabase
 import com.ledgerflow.app.data.local.MagicRuleEntity
@@ -18,6 +21,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -54,7 +58,7 @@ class LedgerDatabaseRobolectricTest {
         assertEquals(1, accounts.size)
         assertEquals("Cash Wallet", accounts.first().name)
         assertEquals(0L, accounts.first().balanceMinor)
-        assertEquals(8, db.categoryDao().getAllActive().size)
+        assertEquals(SeedData.starterCategories(0L).size, db.categoryDao().getAllActive().size)
         assertEquals(0, db.transactionDao().getAllActive().size)
         assertEquals(0, db.budgetDao().getAllActive().size)
         assertEquals(0, db.plannedPaymentDao().getAllActive().size)
@@ -210,7 +214,7 @@ class LedgerDatabaseRobolectricTest {
         assertEquals(0L, accounts.first().balanceMinor)
         assertEquals("INR", accounts.first().currency)
         assertEquals("Cash Wallet", accounts.first().name)
-        assertEquals(8, db.categoryDao().getAllActive().size)
+        assertEquals(SeedData.starterCategories(0L).size, db.categoryDao().getAllActive().size)
         assertEquals(0, db.transactionDao().getAllActive().size)
         assertEquals(0, db.budgetDao().getAllActive().size)
         assertEquals(0, db.plannedPaymentDao().getAllActive().size)
@@ -322,5 +326,95 @@ class LedgerDatabaseRobolectricTest {
         // If all accounts are soft-deleted, execute returns false instead of lying
         db.accountDao().upsert(db.accountDao().getById(wallet.id)!!.copy(deletedAtEpochMs = nov20 + 2_000L, updatedAtEpochMs = nov20 + 2_000L))
         assertFalse(db.executePlannedPaymentAtomic(plannedId, null, nowMs = nov20 + 3_000L))
+    }
+
+    @Test
+    fun migration1To2_preservesExistingDataAndSupportsSubcategoriesAndCreditLimits() = runTest {
+        val dbName = "migration_v1_to_v2_test.db"
+        context.deleteDatabase(dbName)
+
+        // Create an authentic v1 database schema matching schemas/.../1.json and insert v1 rows
+        val v1Helper = object : SQLiteOpenHelper(context, dbName, null, 1) {
+            override fun onCreate(sqldb: SQLiteDatabase) {
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `accounts` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `institution` TEXT NOT NULL, `accountType` TEXT NOT NULL, `currency` TEXT NOT NULL, `balanceMinor` INTEGER NOT NULL, `lastFour` TEXT NOT NULL, `sourceType` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `lastSyncedAtEpochMs` INTEGER, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_accounts_updatedAtEpochMs` ON `accounts` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_accounts_deletedAtEpochMs` ON `accounts` (`deletedAtEpochMs`)")
+
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `categories` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `kind` TEXT NOT NULL, `iconKey` TEXT NOT NULL, `colorHex` TEXT NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_categories_updatedAtEpochMs` ON `categories` (`updatedAtEpochMs`)")
+
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `transactions` (`id` TEXT NOT NULL, `accountId` TEXT NOT NULL, `transferAccountId` TEXT, `categoryId` TEXT, `txType` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `convertedMinor` INTEGER, `convertedCurrency` TEXT, `merchant` TEXT NOT NULL, `note` TEXT NOT NULL, `labelsCsv` TEXT NOT NULL, `sourceTag` TEXT NOT NULL, `autoRuleApplied` INTEGER NOT NULL, `occurredAtEpochMs` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_accountId` ON `transactions` (`accountId`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_categoryId` ON `transactions` (`categoryId`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_occurredAtEpochMs` ON `transactions` (`occurredAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_updatedAtEpochMs` ON `transactions` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_deletedAtEpochMs` ON `transactions` (`deletedAtEpochMs`)")
+
+                sqldb.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS `transactions_fts` USING FTS4(`merchant` TEXT NOT NULL, `note` TEXT NOT NULL, `labelsCsv` TEXT NOT NULL, content=`transactions`)")
+                sqldb.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_transactions_fts_BEFORE_UPDATE BEFORE UPDATE ON `transactions` BEGIN DELETE FROM `transactions_fts` WHERE `docid`=OLD.`rowid`; END")
+                sqldb.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_transactions_fts_BEFORE_DELETE BEFORE DELETE ON `transactions` BEGIN DELETE FROM `transactions_fts` WHERE `docid`=OLD.`rowid`; END")
+                sqldb.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_transactions_fts_AFTER_UPDATE AFTER UPDATE ON `transactions` BEGIN INSERT INTO `transactions_fts`(`docid`, `merchant`, `note`, `labelsCsv`) VALUES (NEW.`rowid`, NEW.`merchant`, NEW.`note`, NEW.`labelsCsv`); END")
+                sqldb.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_transactions_fts_AFTER_INSERT AFTER INSERT ON `transactions` BEGIN INSERT INTO `transactions_fts`(`docid`, `merchant`, `note`, `labelsCsv`) VALUES (NEW.`rowid`, NEW.`merchant`, NEW.`note`, NEW.`labelsCsv`); END")
+
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `budgets` (`id` TEXT NOT NULL, `categoryId` TEXT, `name` TEXT NOT NULL, `limitMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `period` TEXT NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_budgets_updatedAtEpochMs` ON `budgets` (`updatedAtEpochMs`)")
+
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `planned_payments` (`id` TEXT NOT NULL, `accountId` TEXT, `categoryId` TEXT, `title` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `txType` TEXT NOT NULL, `cadence` TEXT NOT NULL, `nextDueAtEpochMs` INTEGER NOT NULL, `autoPay` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_planned_payments_nextDueAtEpochMs` ON `planned_payments` (`nextDueAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_planned_payments_updatedAtEpochMs` ON `planned_payments` (`updatedAtEpochMs`)")
+
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `holdings` (`id` TEXT NOT NULL, `symbol` TEXT NOT NULL, `name` TEXT NOT NULL, `assetClass` TEXT NOT NULL, `exchange` TEXT NOT NULL, `quantity` REAL NOT NULL, `avgCostMinor` INTEGER NOT NULL, `currentPriceMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `dayChangeBps` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_holdings_updatedAtEpochMs` ON `holdings` (`updatedAtEpochMs`)")
+
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `magic_rules` (`id` TEXT NOT NULL, `matchPattern` TEXT NOT NULL, `targetCategoryId` TEXT, `targetLabel` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_magic_rules_updatedAtEpochMs` ON `magic_rules` (`updatedAtEpochMs`)")
+
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT)")
+                sqldb.execSQL("INSERT OR REPLACE INTO room_master_table (id, identity_hash) VALUES(42, 'dccae9600b5ddaa8d12af5361fc0c34e')")
+
+                // Insert legacy v1 data
+                sqldb.execSQL("INSERT INTO `accounts` VALUES ('a_legacy', 'Legacy Card', 'HDFC', 'CREDIT_CARD', 'INR', -250000, '8812', 'MANUAL', 'OK', 1000, 1000, 1000, NULL, 0)")
+                sqldb.execSQL("INSERT INTO `categories` VALUES ('${SeedData.CAT_DINING}', 'Dining & Coffee', 'EXPENSE', 'cafe', '#D97706', 1000, 1000, NULL, 0)")
+                sqldb.execSQL("INSERT INTO `transactions` VALUES ('tx_legacy', 'a_legacy', NULL, '${SeedData.CAT_DINING}', 'EXPENSE', -45000, 'INR', NULL, NULL, 'Cafe Coffee Day', 'latte', '', 'MANUAL', 0, 1700000000000, 1000, 1000, NULL, 0)")
+            }
+
+            override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        v1Helper.writableDatabase.close()
+        v1Helper.close()
+
+        val migratedDb = Room.databaseBuilder(context, LedgerDatabase::class.java, dbName)
+            .addMigrations(LedgerDatabase.MIGRATION_1_2)
+            .allowMainThreadQueries()
+            .build()
+
+        try {
+            // Legacy records survive intact with safe defaults on v2 columns
+            val acc = migratedDb.accountDao().getById("a_legacy")!!
+            assertEquals(-250_000L, acc.balanceMinor)
+            assertEquals(0L, acc.creditLimitMinor)
+
+            val cat = migratedDb.categoryDao().getById(SeedData.CAT_DINING)!!
+            assertNull(cat.parentCategoryId)
+
+            val tx = migratedDb.transactionDao().getById("tx_legacy")!!
+            assertEquals("", tx.categoryIdsCsv)
+
+            // Idempotent ensureMinimalSetup adds the new expanded daily-life categories & subcategories
+            SeedData.ensureMinimalSetup(migratedDb, defaultCurrency = "INR", nowMs = 2_000L)
+            assertEquals(SeedData.starterCategories(0L).size, migratedDb.categoryDao().getAllActive().size)
+            assertEquals(SeedData.CAT_FUEL, migratedDb.categoryDao().getById(SeedData.SUB_PETROL_DIESEL)?.parentCategoryId)
+
+            // Credit limit update and custom child category creation work end-to-end
+            migratedDb.accountDao().upsert(acc.copy(creditLimitMinor = 1_000_000L))
+            assertEquals(1_000_000L, migratedDb.accountDao().getById("a_legacy")?.creditLimitMinor)
+
+            val customSub = CategoryEntity("c_custom_ev", "Highway Fastag", "EXPENSE", "fuel", "#F59E0B", SeedData.CAT_FUEL, 3_000L, 3_000L)
+            migratedDb.categoryDao().upsert(customSub)
+            assertEquals(SeedData.CAT_FUEL, migratedDb.categoryDao().getById("c_custom_ev")?.parentCategoryId)
+        } finally {
+            migratedDb.close()
+            context.deleteDatabase(dbName)
+        }
     }
 }

@@ -76,6 +76,7 @@ import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.AppUpdateDialog
 import com.ledgerflow.app.ui.screens.AccountsScreen
 import com.ledgerflow.app.ui.screens.AddTransactionScreen
+import com.ledgerflow.app.ui.screens.AnalyticsScreen
 import com.ledgerflow.app.ui.screens.BudgetsScreen
 import com.ledgerflow.app.ui.screens.HomeScreen
 import com.ledgerflow.app.ui.screens.InvestScreen
@@ -90,7 +91,7 @@ import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SurfaceCard
-import com.ledgerflow.app.ui.theme.resolveIsDarkTheme
+import com.ledgerflow.app.ui.theme.resolveLedgerPalette
 import com.ledgerflow.app.update.AppUpdateManager
 import com.ledgerflow.app.update.UpdateEventBus
 import com.ledgerflow.app.update.UpdateInstallProgress
@@ -125,7 +126,8 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             val vault by vm.vaultState.collectAsState()
-            val isDark = resolveIsDarkTheme(vault.themeMode)
+            val palette = resolveLedgerPalette(vault.themeMode)
+            val isDark = palette.isDark
 
             SideEffect {
                 enableEdgeToEdge(
@@ -148,7 +150,7 @@ class MainActivity : FragmentActivity() {
                 )
             }
 
-            LedgerFlowTheme(darkTheme = isDark) {
+            LedgerFlowTheme(palette = palette) {
                 val isLocked by vm.isLocked.collectAsState()
                 val isOnline by vm.isOnline.collectAsState()
                 val availableUpdate by vm.availableUpdate.collectAsState()
@@ -475,8 +477,7 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                         navigateTab("budgets")
                     },
                     onOpenAnalytics = {
-                        budgetsInitialTab = 1
-                        navigateTab("budgets")
+                        navController.navigate("analytics") { launchSingleTop = true }
                     },
                     onOpenAccounts = { navigateTab("accounts") },
                     onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
@@ -492,6 +493,14 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                 BudgetsScreen(
                     vm = vm,
                     initialTab = budgetsInitialTab,
+                    onOpenFullAnalytics = { navController.navigate("analytics") { launchSingleTop = true } },
+                    onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
+                )
+            }
+            composable("analytics") {
+                AnalyticsScreen(
+                    vm = vm,
+                    onBack = { navController.popBackStack() },
                     onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
                 )
             }

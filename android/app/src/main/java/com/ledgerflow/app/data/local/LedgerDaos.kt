@@ -53,6 +53,15 @@ interface CategoryDao {
     @Query("SELECT * FROM categories WHERE id IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<CategoryEntity>
 
+    @Query("SELECT id FROM categories")
+    suspend fun getAllIds(): List<String>
+
+    @Query("SELECT * FROM categories WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): CategoryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(category: CategoryEntity)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(categories: List<CategoryEntity>)
 

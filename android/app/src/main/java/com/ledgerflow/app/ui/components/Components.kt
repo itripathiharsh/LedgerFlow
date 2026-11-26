@@ -19,14 +19,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CardGiftcard
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Coffee
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.DirectionsTransit
+import androidx.compose.material.icons.outlined.Flight
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.LocalGasStation
 import androidx.compose.material.icons.outlined.MedicalServices
+import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Payments
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material.icons.outlined.ShoppingCart
+import androidx.compose.material.icons.outlined.Spa
+import androidx.compose.material.icons.outlined.WorkOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -155,11 +163,19 @@ fun SourceTagBadge(sourceTag: String) {
 fun categoryIcon(iconKey: String): ImageVector = when (iconKey) {
     "cafe" -> Icons.Outlined.Coffee
     "shopping_cart" -> Icons.Outlined.ShoppingCart
+    "shopping_bag" -> Icons.Outlined.ShoppingBag
+    "fuel", "local_gas_station" -> Icons.Outlined.LocalGasStation
     "directions_transit" -> Icons.Outlined.DirectionsTransit
     "auto_awesome" -> Icons.Outlined.AutoAwesome
     "home" -> Icons.Outlined.Home
     "payments" -> Icons.Outlined.Payments
     "medical_services" -> Icons.Outlined.MedicalServices
+    "movie" -> Icons.Outlined.Movie
+    "flight" -> Icons.Outlined.Flight
+    "school" -> Icons.Outlined.School
+    "spa" -> Icons.Outlined.Spa
+    "work" -> Icons.Outlined.WorkOutline
+    "gift", "card_giftcard" -> Icons.Outlined.CardGiftcard
     "credit_card" -> Icons.Outlined.CreditCard
     "loan" -> Icons.AutoMirrored.Outlined.ReceiptLong
     "bank" -> Icons.Outlined.AccountBalance

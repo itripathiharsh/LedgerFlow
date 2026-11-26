@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ledgerflow.app.data.local.TransactionEntity
+import com.ledgerflow.app.domain.CategoryHierarchy
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
@@ -244,7 +245,11 @@ fun RecordsScreen(
                     CleanCard(padding = 4.dp) {
                         itemsInDay.forEachIndexed { idx, tx ->
                             if (idx > 0) HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 12.dp))
-                            val cat = catMap[tx.categoryId]
+                            val assignedCats = remember(tx.categoryId, tx.categoryIdsCsv, catMap) {
+                                with(CategoryHierarchy) { tx.allAssignedCategoryIds() }.mapNotNull { catMap[it] }
+                            }
+                            val cat = assignedCats.firstOrNull() ?: catMap[tx.categoryId]
+                            val catLabel = assignedCats.map { it.name }.distinct().joinToString(" + ").ifBlank { cat?.name ?: tx.txType }
                             val acc = accMap[tx.accountId]
                             Row(
                                 modifier = Modifier
@@ -265,7 +270,7 @@ fun RecordsScreen(
                                     Spacer(Modifier.height(2.dp))
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Text(
-                                            text = "${cat?.name ?: tx.txType} • ${acc?.name ?: "Account"}",
+                                            text = "$catLabel • ${acc?.name ?: "Account"}",
                                             fontSize = 12.sp,
                                             color = MutedSlate,
                                             maxLines = 1,

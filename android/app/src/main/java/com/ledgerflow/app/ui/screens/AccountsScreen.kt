@@ -32,6 +32,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -48,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -121,6 +123,7 @@ fun AccountsScreen(
     var showAddAccount by remember { mutableStateOf(false) }
     var pendingDeleteAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var pendingRepayAccount by remember { mutableStateOf<AccountEntity?>(null) }
+    var pendingEditLimitAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var showSmartPaste by remember { mutableStateOf(false) }
     val importBusy by vm.importInProgress.collectAsState()
     val accountSummary = remember(accounts, baseCurrency) {
@@ -229,6 +232,7 @@ fun AccountsScreen(
         } else {
             items(accounts, key = { it.id }) { acc ->
                 val normType = AccountTypeCatalog.normalize(acc.accountType)
+                val isCreditCard = normType == "CREDIT_CARD" || normType == "CARD"
                 val isDebtType = AccountTypeCatalog.isLiability(normType) || acc.balanceMinor < 0L
                 val tintHex = when (normType) {
                     "CREDIT_CARD" -> "#E11D48"
@@ -288,6 +292,14 @@ fun AccountsScreen(
                                     )
                                 }
                             }
+                            if (isCreditCard) {
+                                TextButton(
+                                    onClick = { pendingEditLimitAccount = acc },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                ) {
+                                    Text("Limit", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = SkySync)
+                                }
+                            }
                             if (isDebtType && acc.balanceMinor < 0L && assetAccounts.isNotEmpty()) {
                                 TextButton(
                                     onClick = { pendingRepayAccount = acc },
@@ -307,6 +319,53 @@ fun AccountsScreen(
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
+                        }
+                    }
+                    if (isCreditCard) {
+                        Spacer(Modifier.height(8.dp))
+                        if (acc.creditLimitMinor > 0L) {
+                            val usedMinor = if (acc.balanceMinor < 0L) abs(acc.balanceMinor) else 0L
+                            val utilRatio = (usedMinor.toFloat() / acc.creditLimitMinor.toFloat()).coerceIn(0f, 1.5f)
+                            val utilPct = (utilRatio * 100f).toInt()
+                            val barColor = when {
+                                utilPct >= 70 -> RoseOutflow
+                                utilPct >= 30 -> AmberWarn
+                                else -> EmeraldPrimary
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "Credit Used: ${MoneyFormatter.formatMinor(usedMinor, acc.currency, masked = masked)} / ${MoneyFormatter.formatMinor(acc.creditLimitMinor, acc.currency, masked = masked)}",
+                                    style = TabularStyle,
+                                    fontSize = 11.sp,
+                                    color = MutedSlate,
+                                )
+                                Text(
+                                    text = "$utilPct% used",
+                                    style = TabularStyle,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = barColor,
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = { utilRatio.coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(999.dp)),
+                                color = barColor,
+                                trackColor = SlateTint,
+                            )
+                        } else {
+                            Text(
+                                text = "Tap Limit to set your credit limit and track utilization.",
+                                fontSize = 11.sp,
+                                color = MutedSlate,
+                            )
                         }
                     }
                 }
@@ -498,12 +557,62 @@ fun AccountsScreen(
         )
     }
 
+    if (pendingEditLimitAccount != null) {
+        val cardAcc = pendingEditLimitAccount!!
+        val isJpy = cardAcc.currency.equals("JPY", ignoreCase = true)
+        var limitText by remember(cardAcc.id) {
+            mutableStateOf(
+                if (cardAcc.creditLimitMinor > 0L) {
+                    if (isJpy) cardAcc.creditLimitMinor.toString()
+                    else String.format(java.util.Locale.US, "%.2f", cardAcc.creditLimitMinor / 100.0)
+                } else {
+                    ""
+                }
+            )
+        }
+        val parsedLimit = if (limitText.isBlank()) 0L else MoneyFormatter.parseDecimalToMinor(limitText, cardAcc.currency)
+
+        AlertDialog(
+            onDismissRequest = { pendingEditLimitAccount = null },
+            title = { Text("Credit Limit • ${cardAcc.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Enter the card's total credit limit in ${cardAcc.currency} (or leave blank to clear).",
+                        fontSize = 12.sp,
+                        color = MutedSlate,
+                    )
+                    OutlinedTextField(
+                        value = limitText,
+                        onValueChange = { limitText = MoneyFormatter.sanitizeDecimalInput(it, cardAcc.currency, allowNegative = false) },
+                        label = { Text("Credit Limit (${cardAcc.currency})") },
+                        placeholder = { Text(if (isJpy) "100000" else "50000.00") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = parsedLimit != null,
+                    onClick = {
+                        vm.updateAccountCreditLimit(cardAcc.id, (parsedLimit ?: 0L).coerceAtLeast(0L))
+                        pendingEditLimitAccount = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                ) { Text("Save Limit") }
+            },
+            dismissButton = { TextButton(onClick = { pendingEditLimitAccount = null }) { Text("Cancel") } },
+        )
+    }
+
     if (showAddAccount) {
         var accountType by remember { mutableStateOf("CASH") }
         var name by remember { mutableStateOf("") }
         var institution by remember { mutableStateOf("") }
         var balance by remember { mutableStateOf("") }
         var lastFour by remember { mutableStateOf("") }
+        var creditLimit by remember { mutableStateOf("") }
 
         val isCash = accountType == "CASH"
         val isDebit = accountType == "DEBIT_CARD"
@@ -511,7 +620,10 @@ fun AccountsScreen(
         val isLoan = accountType == "LOAN"
         val supportsLastFour = AccountTypeCatalog.supportsLastFour(accountType)
         val parsedBalance = if (balance.isBlank()) 0L else MoneyFormatter.parseDecimalToMinor(balance, baseCurrency)
-        val canSave = (if (isCash) true else name.isNotBlank()) && parsedBalance != null
+        val parsedCreditLimit = if (creditLimit.isBlank()) 0L else MoneyFormatter.parseDecimalToMinor(creditLimit, baseCurrency)
+        val canSave = (if (isCash) true else name.isNotBlank()) &&
+            parsedBalance != null &&
+            (!isCredit || parsedCreditLimit != null)
 
         AlertDialog(
             onDismissRequest = { showAddAccount = false },
@@ -620,6 +732,16 @@ fun AccountsScreen(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                         )
+                        if (isCredit) {
+                            OutlinedTextField(
+                                value = creditLimit,
+                                onValueChange = { creditLimit = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
+                                label = { Text("Credit Limit (optional, $baseCurrency)") },
+                                placeholder = { Text(if (baseCurrency == "JPY") "100000" else "50000.00") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                singleLine = true,
+                            )
+                        }
                         Text(
                             text = when {
                                 isCredit -> "Purchases increase amount owed; card repayments from bank/cash reduce it."
@@ -647,6 +769,7 @@ fun AccountsScreen(
                             currency = baseCurrency,
                             balanceMinor = normalizedMinor,
                             lastFour = if (supportsLastFour) lastFour else "",
+                            creditLimitMinor = if (isCredit) (parsedCreditLimit ?: 0L).coerceAtLeast(0L) else 0L,
                         )
                         showAddAccount = false
                     },

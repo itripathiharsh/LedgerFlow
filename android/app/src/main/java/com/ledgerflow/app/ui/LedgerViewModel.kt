@@ -27,6 +27,7 @@ import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.UpdateManifest
 import com.ledgerflow.app.security.VaultSessionState
 import com.ledgerflow.app.service.PayAndTrackCapture
+import com.ledgerflow.app.ui.theme.ThemeModes
 import com.ledgerflow.app.update.AppUpdateManager
 import com.ledgerflow.app.update.UpdateCheckOutcome
 import com.ledgerflow.app.update.UpdateEventBus
@@ -261,16 +262,17 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setThemeMode(mode: String) {
-        val clean = when (mode.trim().uppercase()) {
-            "DARK" -> "DARK"
-            "LIGHT" -> "LIGHT"
-            else -> "SYSTEM"
-        }
+        val clean = ThemeModes.normalize(mode)
         _vaultState.value = vault.update { it.copy(themeMode = clean) }
     }
 
     fun toggleDarkLightMode(currentlyDark: Boolean) {
-        val next = if (currentlyDark) "LIGHT" else "DARK"
+        val current = ThemeModes.normalize(_vaultState.value.themeMode)
+        val next = when {
+            !currentlyDark -> ThemeModes.FLOW_DARK
+            current == ThemeModes.FLOW_DARK -> ThemeModes.PREMIUM_DARK
+            else -> ThemeModes.LIGHT
+        }
         setThemeMode(next)
     }
 
@@ -373,6 +375,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         labelsCsv: String,
         recurringMonthly: Boolean,
         fallbackCategoryId: String? = null,
+        selectedCategoryIds: List<String> = emptyList(),
     ): Boolean {
         val magnitudeMinor = CalculatorEngine.evaluateToMinor(amountExpr, currency)
         if (magnitudeMinor == null || magnitudeMinor <= 0L) {
@@ -396,7 +399,13 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val rules = db.magicRuleDao().getAllActive()
             val ruleMatch = MagicRuleEngine.apply(cleanMerchant, note, rules)
-            val effectiveCategoryId = manualCategoryId ?: ruleMatch.categoryId ?: fallbackCategoryId
+            val cleanExtraIds = selectedCategoryIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            val primaryFromList = cleanExtraIds.firstOrNull()
+            val effectiveCategoryId = manualCategoryId ?: primaryFromList ?: ruleMatch.categoryId ?: fallbackCategoryId
+            val allCategoryIds = buildList {
+                effectiveCategoryId?.let { add(it) }
+                cleanExtraIds.forEach { if (!contains(it)) add(it) }
+            }
             val mergedLabels = listOfNotNull(
                 labelsCsv.trim().ifBlank { null },
                 ruleMatch.label?.takeIf { !labelsCsv.contains(it, ignoreCase = true) },
@@ -416,6 +425,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 accountId = accountId,
                 transferAccountId = if (txType == "TRANSFER") transferAccountId else null,
                 categoryId = effectiveCategoryId,
+                categoryIdsCsv = if (allCategoryIds.size > 1) allCategoryIds.joinToString(",") else "",
                 txType = txType,
                 amountMinor = signedMinor,
                 currency = currency,
@@ -425,7 +435,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 note = note.trim(),
                 labelsCsv = mergedLabels,
                 sourceTag = "MANUAL",
-                autoRuleApplied = manualCategoryId == null && ruleMatch.matched,
+                autoRuleApplied = manualCategoryId == null && primaryFromList == null && ruleMatch.matched,
                 occurredAtEpochMs = now,
                 createdAtEpochMs = now,
                 updatedAtEpochMs = now,
@@ -592,7 +602,15 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun addAccount(name: String, institution: String, type: String, currency: String, balanceMinor: Long, lastFour: String) {
+    fun addAccount(
+        name: String,
+        institution: String,
+        type: String,
+        currency: String,
+        balanceMinor: Long,
+        lastFour: String,
+        creditLimitMinor: Long = 0L,
+    ) {
         val normType = AccountTypeCatalog.normalize(type)
         val cleanName = if (normType == "CASH") name.trim().ifBlank { "Cash Wallet" } else name.trim()
         if (cleanName.isBlank()) {
@@ -607,6 +625,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             ""
         }
         val normalizedMinor = AccountTypeCatalog.normalizeOpeningBalanceMinor(normType, balanceMinor)
+        val safeLimit = if (normType == "CREDIT_CARD" || normType == "CARD") creditLimitMinor.coerceAtLeast(0L) else 0L
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             db.accountDao().upsert(
@@ -618,6 +637,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                     currency = cleanCur,
                     balanceMinor = normalizedMinor,
                     lastFour = cleanLastFour,
+                    creditLimitMinor = safeLimit,
                     sourceType = "MANUAL",
                     syncStatus = "OK",
                     lastSyncedAtEpochMs = now,
@@ -628,6 +648,126 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             )
             SyncWorker.enqueueWhenOnline(app)
             _statusMessage.value = "${AccountTypeCatalog.displayLabel(normType)} \"$cleanName\" added"
+        }
+    }
+
+    fun updateAccountCreditLimit(accountId: String, creditLimitMinor: Long) {
+        val safeLimit = creditLimitMinor.coerceAtLeast(0L)
+        viewModelScope.launch {
+            val existing = db.accountDao().getById(accountId) ?: return@launch
+            if (existing.deletedAtEpochMs != null) return@launch
+            val now = System.currentTimeMillis()
+            db.accountDao().upsert(
+                existing.copy(
+                    creditLimitMinor = safeLimit,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "Credit limit updated for \"${existing.name}\""
+        }
+    }
+
+    fun addCategory(
+        name: String,
+        kind: String,
+        parentCategoryId: String?,
+        iconKey: String,
+        colorHex: String,
+        onCreated: (CategoryEntity) -> Unit = {},
+    ) {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            _statusMessage.value = "Enter a category name"
+            return
+        }
+        val cleanKind = if (kind.trim().uppercase() == "INCOME") "INCOME" else "EXPENSE"
+        val cleanIcon = iconKey.trim().ifBlank { "category" }
+        val cleanColor = colorHex.trim().ifBlank { "#059669" }
+        viewModelScope.launch {
+            val existingParent = parentCategoryId?.let { db.categoryDao().getById(it) }?.takeIf { it.deletedAtEpochMs == null }
+            val resolvedKind = existingParent?.kind ?: cleanKind
+            val now = System.currentTimeMillis()
+            val created = CategoryEntity(
+                id = UUID.randomUUID().toString(),
+                name = cleanName,
+                kind = resolvedKind,
+                iconKey = existingParent?.iconKey ?: cleanIcon,
+                colorHex = existingParent?.colorHex ?: cleanColor,
+                parentCategoryId = existingParent?.id,
+                createdAtEpochMs = now,
+                updatedAtEpochMs = now,
+                pendingSync = true,
+            )
+            db.categoryDao().upsert(created)
+            SyncWorker.enqueueWhenOnline(app)
+            onCreated(created)
+            _statusMessage.value = if (existingParent != null) {
+                "Subcategory \"$cleanName\" added under ${existingParent.name}"
+            } else {
+                "Category \"$cleanName\" added"
+            }
+        }
+    }
+
+    fun deleteCategories(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val all = db.categoryDao().getAllActive()
+            val toDeleteIds = HashSet(ids)
+            // Also delete subcategories whose parent is being deleted
+            all.filter { it.parentCategoryId != null && it.parentCategoryId in ids }.forEach { toDeleteIds.add(it.id) }
+            val updated = all
+                .filter { it.id in toDeleteIds }
+                .map { it.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true) }
+            if (updated.isNotEmpty()) {
+                db.categoryDao().upsertAll(updated)
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = "Removed ${updated.size} category item(s)"
+            }
+        }
+    }
+
+    fun shareTextReport(title: String, fileName: String, contents: String, mimeType: String = "text/csv", onShareIntent: (Intent) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val dir = File(app.cacheDir, "exports").apply { mkdirs() }
+                val file = File(dir, fileName)
+                file.writeText(contents, Charsets.UTF_8)
+                val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = mimeType
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, title)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(intent, title)
+                withContext(Dispatchers.Main) { onShareIntent(chooser) }
+            }.onFailure { err ->
+                withContext(Dispatchers.Main) {
+                    _statusMessage.value = "Failed to export report: ${err.message ?: "error"}"
+                }
+            }
+        }
+    }
+
+    fun saveReportToUri(uri: Uri, contents: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                app.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(contents.toByteArray(Charsets.UTF_8))
+                } ?: error("Cannot open destination file")
+            }.onSuccess {
+                withContext(Dispatchers.Main) {
+                    _statusMessage.value = "Report saved to Downloads / Drive"
+                }
+            }.onFailure { err ->
+                withContext(Dispatchers.Main) {
+                    _statusMessage.value = "Save failed: ${err.message ?: "error"}"
+                }
+            }
         }
     }
 

@@ -1,8 +1,11 @@
 package com.ledgerflow.app.ui.screens
 
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -13,10 +16,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Lock
@@ -32,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -44,17 +52,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
-import com.ledgerflow.app.ui.ads.AdMobGate
 import com.ledgerflow.app.ui.components.CleanCard
+import com.ledgerflow.app.ui.components.ManageCategoriesDialog
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.rememberDataImportPicker
 import com.ledgerflow.app.ui.theme.AlabasterBg
@@ -68,9 +77,26 @@ import com.ledgerflow.app.ui.theme.SkySoft
 import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
+import com.ledgerflow.app.ui.theme.SurfaceCard
+import com.ledgerflow.app.ui.theme.ThemeModes
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private data class ThemeOptionMeta(
+    val key: String,
+    val label: String,
+    val subtitle: String,
+    val bgSwatch: Color,
+    val accentSwatch: Color,
+)
+
+private val themeOptions = listOf(
+    ThemeOptionMeta(ThemeModes.SYSTEM, "System", "Auto device", Color(0xFF64748B), Color(0xFF059669)),
+    ThemeOptionMeta(ThemeModes.LIGHT, "Light", "Alabaster", Color(0xFFF6F7F4), Color(0xFF059669)),
+    ThemeOptionMeta(ThemeModes.FLOW_DARK, "Flow Dark", "Green dark", Color(0xFF0E1A15), Color(0xFF34D399)),
+    ThemeOptionMeta(ThemeModes.PREMIUM_DARK, "Premium Black", "Pure OLED", Color(0xFF000000), Color(0xFF10B981)),
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -80,6 +106,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val vault by vm.vaultState.collectAsState()
+    val categories by vm.categories.collectAsState()
     val pending by vm.pendingSyncCount.collectAsState()
     val syncBusy by vm.syncInProgress.collectAsState()
     val isOnline by vm.isOnline.collectAsState()
@@ -92,12 +119,17 @@ fun SettingsScreen(
     )
 
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showCurrencyDialog by remember { mutableStateOf(false) }
+    var showCategoryManager by remember { mutableStateOf(false) }
     var showPinDialog by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
 
     val fmt = remember { SimpleDateFormat("MMM d, HH:mm", Locale.US) }
     val currencies = listOf("INR", "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "SGD")
+    val normalizedTheme = ThemeModes.normalize(vault.themeMode)
+    val parentCatCount = remember(categories) { categories.count { it.parentCategoryId == null } }
+    val subCatCount = remember(categories) { categories.count { it.parentCategoryId != null } }
 
     LazyColumn(
         modifier = Modifier
@@ -106,6 +138,7 @@ fun SettingsScreen(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        // Header
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -134,54 +167,9 @@ fun SettingsScreen(
             }
         }
 
-        // 0. Appearance / Theme
+        // 1. Account & Currency
         item {
-            Text("APPEARANCE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
-            Spacer(Modifier.height(6.dp))
-            CleanCard(padding = 14.dp) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Outlined.DarkMode, contentDescription = null, tint = EmeraldDark)
-                        Column {
-                            Text("App Theme", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-                            Text("Switch between Light, Dark, or follow system", fontSize = 12.sp, color = MutedSlate)
-                        }
-                    }
-                    StatusPill(
-                        text = vault.themeMode.lowercase().replaceFirstChar { it.uppercase() },
-                        containerColor = EmeraldSoft,
-                        contentColor = EmeraldDark,
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("SYSTEM" to "System", "LIGHT" to "Light", "DARK" to "Dark").forEach { (key, label) ->
-                        FilterChip(
-                            selected = vault.themeMode.equals(key, ignoreCase = true),
-                            onClick = { vm.setThemeMode(key) },
-                            label = { Text(label, fontSize = 12.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = EmeraldSoft,
-                                selectedLabelColor = EmeraldDark,
-                            ),
-                        )
-                    }
-                }
-            }
-        }
-
-        // 1. Profile & Locked Currency
-        item {
-            Text("PROFILE & CURRENCY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
-            Spacer(Modifier.height(6.dp))
+            SettingsGroupTitle("ACCOUNT & CURRENCY")
             CleanCard(padding = 14.dp) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -218,43 +206,130 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Default Currency", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-                    StatusPill("Locked: ${vault.baseCurrency}", EmeraldSoft, EmeraldDark)
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Used across all accounts, transactions, budgets, and holdings.",
-                    fontSize = 12.sp,
-                    color = MutedSlate,
-                )
-                Spacer(Modifier.height(10.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    currencies.forEach { code ->
-                        val active = vault.baseCurrency == code
-                        FilterChip(
-                            selected = active,
-                            onClick = { if (!active) vm.setBaseCurrency(code) },
-                            label = {
-                                val sym = MoneyFormatter.currencySymbol(code).trim()
-                                Text("$sym $code", fontSize = 12.sp)
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = EmeraldSoft,
-                                selectedLabelColor = EmeraldDark,
-                            ),
-                        )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Primary Currency", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                        Text("Locked across accounts, budgets & reports", fontSize = 12.sp, color = MutedSlate)
+                    }
+                    OutlinedButton(
+                        onClick = { showCurrencyDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        val sym = MoneyFormatter.currencySymbol(vault.baseCurrency).trim()
+                        Text("$sym ${vault.baseCurrency}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldDark)
                     }
                 }
             }
         }
 
-        // 2. Privacy & App Lock
+        // 2. Appearance (System, Light, Flow Dark Green, Premium Black)
         item {
-            Text("PRIVACY & SECURITY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
-            Spacer(Modifier.height(6.dp))
+            SettingsGroupTitle("APPEARANCE")
+            CleanCard(padding = 14.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Outlined.DarkMode, contentDescription = null, tint = EmeraldDark)
+                        Column {
+                            Text("Theme Mode", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                            Text("Light, Flow Dark (Green), or Premium Black", fontSize = 12.sp, color = MutedSlate)
+                        }
+                    }
+                    StatusPill(
+                        text = ThemeModes.displayLabel(normalizedTheme),
+                        containerColor = EmeraldSoft,
+                        contentColor = EmeraldDark,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    themeOptions.chunked(2).forEach { pair ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            pair.forEach { option ->
+                                val active = normalizedTheme == option.key
+                                Surface(
+                                    onClick = { vm.setThemeMode(option.key) },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (active) EmeraldSoft else SlateTint,
+                                    border = BorderStroke(if (active) 1.5.dp else 1.dp, if (active) EmeraldPrimary else BorderSubtle),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                                .background(option.bgSwatch)
+                                                .border(2.dp, option.accentSwatch, CircleShape),
+                                        )
+                                        Column {
+                                            Text(
+                                                text = option.label,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (active) EmeraldDark else SlateInk,
+                                            )
+                                            Text(
+                                                text = option.subtitle,
+                                                fontSize = 10.sp,
+                                                color = if (active) EmeraldDark else MutedSlate,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Categories & Subcategories
+        item {
+            SettingsGroupTitle("CATEGORIES")
+            CleanCard(padding = 14.dp, onClick = { showCategoryManager = true }) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Outlined.Category, contentDescription = null, tint = EmeraldDark)
+                        Column {
+                            Text("Categories & Subcategories", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                            Text(
+                                text = "$parentCatCount main categories • $subCatCount subcategories",
+                                fontSize = 12.sp,
+                                color = MutedSlate,
+                            )
+                        }
+                    }
+                    Text("Manage", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
+                }
+            }
+        }
+
+        // 4. Privacy & Security
+        item {
+            SettingsGroupTitle("PRIVACY & SECURITY")
             CleanCard(padding = 14.dp) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
@@ -269,16 +344,18 @@ fun SettingsScreen(
                         colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
                     )
                 }
-                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
-                Text("Auto-Lock Delay", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(0 to "Immediate", 10 to "10s", 60 to "60s").forEach { (sec, label) ->
-                        FilterChip(
-                            selected = vault.autoLockSeconds == sec,
-                            onClick = { vm.setAutoLockSeconds(sec) },
-                            label = { Text(label, fontSize = 12.sp) },
-                        )
+                if (vault.appLockEnabled) {
+                    HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+                    Text("Auto-Lock Delay", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(0 to "Immediate", 10 to "10s", 60 to "60s").forEach { (sec, label) ->
+                            FilterChip(
+                                selected = vault.autoLockSeconds == sec,
+                                onClick = { vm.setAutoLockSeconds(sec) },
+                                label = { Text(label, fontSize = 12.sp) },
+                            )
+                        }
                     }
                 }
                 HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
@@ -308,21 +385,16 @@ fun SettingsScreen(
             }
         }
 
-        // 3. Cloud Sync
+        // 5. Cloud Sync & Data Backup
         item {
-            Text("CLOUD SYNC", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
-            Spacer(Modifier.height(6.dp))
+            SettingsGroupTitle("SYNC & BACKUP")
             CleanCard(padding = 14.dp) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                         Icon(Icons.Outlined.CloudSync, contentDescription = null, tint = SkySync)
                         Column {
                             Text(
-                                text = if (!vault.accessToken.isNullOrBlank()) {
-                                    vault.userEmail ?: "Signed in"
-                                } else {
-                                    "Local-Only (Not Signed In)"
-                                },
+                                text = if (!vault.accessToken.isNullOrBlank()) vault.userEmail ?: "Signed in" else "Local-Only Vault",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = SlateInk,
@@ -337,7 +409,7 @@ fun SettingsScreen(
                         contentColor = if (isOnline) SkySync else MutedSlate,
                     )
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (vault.accessToken.isNullOrBlank()) {
                         Button(
@@ -360,15 +432,8 @@ fun SettingsScreen(
                         ) { Text("Sign Out", fontSize = 12.sp, color = SlateInk) }
                     }
                 }
-            }
-        }
 
-        // 4. Data Backup & Start Fresh (ONE central location)
-        item {
-            val adsActive = AdMobGate.isConfiguredAdUnit()
-            Text("DATA & BACKUP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
-            Spacer(Modifier.height(6.dp))
-            CleanCard(padding = 14.dp) {
+                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
@@ -404,38 +469,12 @@ fun SettingsScreen(
                         color = SlateInk,
                     )
                 }
-                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("AdMob Banner", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-                        Text(
-                            text = if (adsActive) "Loads only when online" else "No ad unit configured — hidden",
-                            fontSize = 12.sp,
-                            color = MutedSlate,
-                        )
-                    }
-                    StatusPill(if (adsActive) "Online-Only" else "Disabled", SlateTint, SlateInk)
-                }
-                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
-                OutlinedButton(
-                    onClick = { showResetConfirm = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text(
-                        text = "Start Fresh (Delete All Data)",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = RoseOutflow,
-                    )
-                }
             }
         }
 
-        // 5. App Updates
+        // 6. App Updates
         item {
-            Text("APP UPDATES", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
-            Spacer(Modifier.height(6.dp))
+            SettingsGroupTitle("UPDATES")
             CleanCard(padding = 14.dp) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -480,6 +519,35 @@ fun SettingsScreen(
                 }
             }
         }
+
+        // 7. Danger Zone (Separated at bottom)
+        item {
+            SettingsGroupTitle("DANGER ZONE", color = RoseOutflow)
+            CleanCard(
+                padding = 14.dp,
+                borderColor = RoseOutflow.copy(alpha = 0.35f),
+            ) {
+                Text(
+                    text = "Resetting removes all local accounts, transactions, budgets, holdings, and disconnects cloud sync.",
+                    fontSize = 12.sp,
+                    color = MutedSlate,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { showResetConfirm = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, RoseOutflow.copy(alpha = 0.5f)),
+                ) {
+                    Text(
+                        text = "Start Fresh (Delete All Data)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = RoseOutflow,
+                    )
+                }
+            }
+        }
     }
 
     if (showProfileDialog) {
@@ -506,6 +574,62 @@ fun SettingsScreen(
                 ) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showProfileDialog = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showCurrencyDialog) {
+        AlertDialog(
+            onDismissRequest = { showCurrencyDialog = false },
+            containerColor = SurfaceCard,
+            title = { Text("Select Default Currency") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "All screens, totals, budgets, and reports display in this currency.",
+                        fontSize = 12.sp,
+                        color = MutedSlate,
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        currencies.forEach { code ->
+                            val active = vault.baseCurrency == code
+                            FilterChip(
+                                selected = active,
+                                onClick = {
+                                    if (!active) vm.setBaseCurrency(code)
+                                    showCurrencyDialog = false
+                                },
+                                label = {
+                                    val sym = MoneyFormatter.currencySymbol(code).trim()
+                                    Text("$sym $code", fontSize = 12.sp)
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = EmeraldSoft,
+                                    selectedLabelColor = EmeraldDark,
+                                ),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCurrencyDialog = false }) { Text("Close") }
+            },
+        )
+    }
+
+    if (showCategoryManager) {
+        ManageCategoriesDialog(
+            categories = categories,
+            onDismiss = { showCategoryManager = false },
+            onCreateCategory = { name, kind, parentId, iconKey, colorHex ->
+                vm.addCategory(name, kind, parentId, iconKey, colorHex)
+            },
+            onDeleteCategories = { ids ->
+                vm.deleteCategories(ids)
+            },
         )
     }
 
@@ -595,4 +719,18 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") } },
         )
     }
+}
+
+@Composable
+private fun SettingsGroupTitle(
+    title: String,
+    color: Color = MutedSlate,
+) {
+    Text(
+        text = title,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        color = color,
+        modifier = Modifier.padding(bottom = 6.dp),
+    )
 }

@@ -17,6 +17,7 @@ data class AccountEntity(
     val currency: String = "USD",
     val balanceMinor: Long = 0L,
     val lastFour: String = "",
+    val creditLimitMinor: Long = 0L,
     val sourceType: String = "MANUAL", // MANUAL, OPEN_BANKING, SHARED
     val syncStatus: String = "OK", // OK, RECONNECT, SYNCING
     val lastSyncedAtEpochMs: Long? = null,
@@ -36,6 +37,7 @@ data class CategoryEntity(
     val kind: String = "EXPENSE", // EXPENSE, INCOME, TRANSFER
     val iconKey: String = "category",
     val colorHex: String = "#059669",
+    val parentCategoryId: String? = null,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
     val deletedAtEpochMs: Long? = null,
@@ -57,6 +59,7 @@ data class TransactionEntity(
     val accountId: String,
     val transferAccountId: String? = null,
     val categoryId: String? = null,
+    val categoryIdsCsv: String = "",
     val txType: String, // EXPENSE, INCOME, TRANSFER
     val amountMinor: Long, // negative for expense, positive for income, positive magnitude on transfer
     val currency: String = "USD",

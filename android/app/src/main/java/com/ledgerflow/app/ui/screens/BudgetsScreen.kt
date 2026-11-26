@@ -92,6 +92,7 @@ import kotlin.math.abs
 fun BudgetsScreen(
     vm: LedgerViewModel,
     initialTab: Int = 0,
+    onOpenFullAnalytics: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     val budgets by vm.budgets.collectAsState()
@@ -109,15 +110,15 @@ fun BudgetsScreen(
     val monthFraction = remember(dayKey) { vm.currentMonthFraction() }
     val daysRemaining = remember(dayKey) { vm.daysRemainingInMonth() }
 
-    val progressList = remember(budgets, transactions, baseCurrency, monthStart, monthFraction) {
-        AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction)
+    val progressList = remember(budgets, transactions, categories, baseCurrency, monthStart, monthFraction) {
+        AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction, categories)
     }
 
     val totalLimit = remember(budgets, baseCurrency) {
         AnalyticsCalculator.computeTotalBudgetLimit(budgets, baseCurrency)
     }
-    val totalSpent = remember(budgets, transactions, baseCurrency, monthStart) {
-        AnalyticsCalculator.computeTotalBudgetedSpent(budgets, transactions, baseCurrency, monthStart)
+    val totalSpent = remember(budgets, transactions, categories, baseCurrency, monthStart) {
+        AnalyticsCalculator.computeTotalBudgetedSpent(budgets, transactions, baseCurrency, monthStart, categories)
     }
     val totalPlanned = remember(planned, baseCurrency, monthStart, monthEnd) {
         AnalyticsCalculator.computeMonthlyPlannedExpenseMinor(planned, baseCurrency, monthStart, monthEnd)
@@ -360,6 +361,26 @@ fun BudgetsScreen(
             }
 
             1 -> {
+                item {
+                    CleanCard(
+                        padding = 14.dp,
+                        containerColor = EmeraldSoft,
+                        borderColor = EmeraldPrimary.copy(alpha = 0.35f),
+                        onClick = onOpenFullAnalytics,
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Full Analytics & CSV Reports", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EmeraldDark)
+                                Text("Balance trends, forecasts, credit utilization, DTI & downloads", fontSize = 11.sp, color = MutedSlate)
+                            }
+                            Text("Open →", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldDark)
+                        }
+                    }
+                }
                 // GitHub-style Daily Spend Heatmap + Category Pie Breakdown
                 item {
                     val monthlyHeatmap = remember(transactions, baseCurrency, dayKey) {
@@ -581,7 +602,7 @@ fun BudgetsScreen(
                             onClick = { selectedCatId = null },
                             label = { Text("All Categories", fontSize = 11.sp) },
                         )
-                        categories.filter { it.kind == "EXPENSE" }.forEach { c ->
+                        categories.filter { it.kind == "EXPENSE" && it.parentCategoryId == null }.forEach { c ->
                             FilterChip(selected = selectedCatId == c.id, onClick = { selectedCatId = c.id }, label = { Text(c.name, fontSize = 11.sp) })
                         }
                     }

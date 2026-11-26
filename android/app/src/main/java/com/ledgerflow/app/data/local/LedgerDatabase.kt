@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.room.withTransaction
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
@@ -22,7 +24,7 @@ import kotlin.math.abs
         HoldingEntity::class,
         MagicRuleEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class LedgerDatabase : RoomDatabase() {
@@ -260,8 +262,17 @@ abstract class LedgerDatabase : RoomDatabase() {
     companion object {
         private const val MAX_AUTOPAY_CATCHUP_STEPS = 24
 
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE accounts ADD COLUMN creditLimitMinor INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE categories ADD COLUMN parentCategoryId TEXT")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN categoryIdsCsv TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long =
             AnalyticsCalculator.advanceDueDate(currentDueMs, cadence)
+
         @Volatile
         private var INSTANCE: LedgerDatabase? = null
 
@@ -272,6 +283,7 @@ abstract class LedgerDatabase : RoomDatabase() {
                     LedgerDatabase::class.java,
                     "ledgerflow_vault.db",
                 )
+                    .addMigrations(MIGRATION_1_2)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
                     .also { INSTANCE = it }
