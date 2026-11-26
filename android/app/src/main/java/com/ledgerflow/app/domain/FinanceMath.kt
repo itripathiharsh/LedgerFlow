@@ -48,11 +48,17 @@ object MoneyFormatter {
         return "$sign${currencySymbol(currency)}$formatted"
     }
 
-    fun parseDecimalToMinor(input: String): Long? {
+    private const val maxSafeMinor = 1_000_000_000_000_00L
+
+    fun parseDecimalToMinor(input: String, currency: String = "USD"): Long? {
         val clean = input.trim().replace(",", "").replace(" ", "")
         if (clean.isEmpty()) return null
         val bd = clean.toBigDecimalOrNull() ?: return null
-        return bd.multiply(BigDecimal(100)).setScale(0, RoundingMode.HALF_UP).toLong()
+        val scaleFactor = if (currency.equals("JPY", ignoreCase = true)) BigDecimal.ONE else BigDecimal(100)
+        return runCatching {
+            val scaled = bd.multiply(scaleFactor).setScale(0, RoundingMode.HALF_UP).longValueExact()
+            if (abs(scaled) > maxSafeMinor) null else scaled
+        }.getOrNull()
     }
 }
 
@@ -363,7 +369,7 @@ object AnalyticsCalculator {
                 .filter { budget.categoryId == null || it.categoryId == budget.categoryId }
                 .sumOf { abs(FxConverter.convertMinor(it.amountMinor, it.currency, budget.currency)) }
             val limit = budget.limitMinor.coerceAtLeast(1L)
-            val ratio = (spent.toFloat() / limit.toFloat()).coerceIn(0f, 1.5f)
+            val ratio = (spent.toFloat() / limit.toFloat()).coerceAtLeast(0f)
             val convertedSpent = FxConverter.convertMinor(spent, budget.currency, baseCurrency)
             val convertedRemaining = FxConverter.convertMinor(budget.limitMinor - spent, budget.currency, baseCurrency)
             BudgetProgress(
@@ -371,9 +377,43 @@ object AnalyticsCalculator {
                 spentMinor = convertedSpent,
                 remainingMinor = convertedRemaining,
                 ratio = ratio,
-                onTrack = ratio <= dayOfMonthFraction + 0.10f,
+                onTrack = ratio <= 1.0f && ratio <= dayOfMonthFraction + 0.10f,
             )
         }
+    }
+
+    /**
+     * Computes monthly expenses covered by active budgets without double-counting transactions
+     * when overall (categoryId == null) and per-category budgets coexist.
+     */
+    fun computeTotalBudgetedSpent(
+        budgets: List<BudgetEntity>,
+        transactions: List<TransactionEntity>,
+        baseCurrency: String,
+        monthStartEpochMs: Long,
+    ): Long {
+        val activeBudgets = budgets.filter { it.deletedAtEpochMs == null }
+        if (activeBudgets.isEmpty()) return 0L
+        return transactions
+            .asSequence()
+            .filter { it.deletedAtEpochMs == null && it.txType == "EXPENSE" && it.occurredAtEpochMs >= monthStartEpochMs }
+            .filter { tx -> activeBudgets.any { b -> b.categoryId == null || b.categoryId == tx.categoryId } }
+            .sumOf { tx -> abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, baseCurrency)) }
+    }
+
+    fun computeTotalBudgetLimit(
+        budgets: List<BudgetEntity>,
+        baseCurrency: String,
+    ): Long {
+        val active = budgets.filter { it.deletedAtEpochMs == null }
+        if (active.isEmpty()) return 0L
+        val overallSum = active
+            .filter { it.categoryId == null }
+            .sumOf { FxConverter.convertMinor(it.limitMinor.coerceAtLeast(0L), it.currency, baseCurrency) }
+        val categorySum = active
+            .filter { it.categoryId != null }
+            .sumOf { FxConverter.convertMinor(it.limitMinor.coerceAtLeast(0L), it.currency, baseCurrency) }
+        return if (overallSum > 0L) maxOf(overallSum, categorySum) else categorySum
     }
 
     fun computePortfolio(holdings: List<HoldingEntity>, baseCurrency: String): PortfolioSummary {

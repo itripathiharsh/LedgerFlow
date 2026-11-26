@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
@@ -44,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ledgerflow.app.domain.AnalyticsCalculator
@@ -61,6 +63,8 @@ import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
 import com.ledgerflow.app.ui.theme.MutedSlate
+import com.ledgerflow.app.ui.theme.RoseOutflow
+import com.ledgerflow.app.ui.theme.RoseSoft
 import com.ledgerflow.app.ui.theme.SkySoft
 import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
@@ -95,11 +99,17 @@ fun BudgetsScreen(
         AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction)
     }
 
-    val totalLimit = progressList.sumOf { FxConverter.convertMinor(it.budget.limitMinor, it.budget.currency, baseCurrency) }
-    val totalSpent = progressList.sumOf { it.spentMinor }
+    val totalLimit = remember(budgets, baseCurrency) {
+        AnalyticsCalculator.computeTotalBudgetLimit(budgets, baseCurrency)
+    }
+    val totalSpent = remember(budgets, transactions, baseCurrency, monthStart) {
+        AnalyticsCalculator.computeTotalBudgetedSpent(budgets, transactions, baseCurrency, monthStart)
+    }
     val totalPlanned = planned.filter { it.deletedAtEpochMs == null && it.txType == "EXPENSE" }
         .sumOf { FxConverter.convertMinor(it.amountMinor, it.currency, baseCurrency) }
-    val safeRemaining = (totalLimit - totalSpent).coerceAtLeast(0L)
+    val netRemaining = totalLimit - totalSpent
+    val safeRemaining = netRemaining.coerceAtLeast(0L)
+    val isOverTotalBudget = progressList.isNotEmpty() && netRemaining < 0L
     val dailySafe = safeRemaining / daysRemaining.coerceAtLeast(1)
     val allBudgetsOnTrack = progressList.isNotEmpty() && progressList.all { it.onTrack }
 
@@ -179,22 +189,39 @@ fun BudgetsScreen(
                         StatusPill(
                             text = when {
                                 progressList.isEmpty() -> "No active monthly budgets"
+                                isOverTotalBudget -> "Over monthly budget"
                                 allBudgetsOnTrack -> "Within monthly budget pace"
                                 else -> "Ahead of monthly budget pace"
                             },
-                            containerColor = if (allBudgetsOnTrack || progressList.isEmpty()) EmeraldSoft else AmberSoft,
-                            contentColor = if (allBudgetsOnTrack || progressList.isEmpty()) EmeraldDark else AmberWarn,
+                            containerColor = when {
+                                isOverTotalBudget -> RoseSoft
+                                allBudgetsOnTrack || progressList.isEmpty() -> EmeraldSoft
+                                else -> AmberSoft
+                            },
+                            contentColor = when {
+                                isOverTotalBudget -> RoseOutflow
+                                allBudgetsOnTrack || progressList.isEmpty() -> EmeraldDark
+                                else -> AmberWarn
+                            },
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "${MoneyFormatter.formatMinor(safeRemaining, baseCurrency, masked = masked)} left",
+                            text = if (isOverTotalBudget) {
+                                "${MoneyFormatter.formatMinor(abs(netRemaining), baseCurrency, masked = masked)} over"
+                            } else {
+                                "${MoneyFormatter.formatMinor(safeRemaining, baseCurrency, masked = masked)} left"
+                            },
                             style = TabularStyle,
                             fontSize = 28.sp,
                             fontWeight = FontWeight.Bold,
-                            color = SlateInk,
+                            color = if (isOverTotalBudget) RoseOutflow else SlateInk,
                         )
                         Text(
-                            text = "${MoneyFormatter.formatMinor(dailySafe, baseCurrency, masked = masked)} / day for remaining $daysRemaining days",
+                            text = if (isOverTotalBudget) {
+                                "Monthly spending exceeded budgeted limit by ${MoneyFormatter.formatMinor(abs(netRemaining), baseCurrency, masked = masked)}"
+                            } else {
+                                "${MoneyFormatter.formatMinor(dailySafe, baseCurrency, masked = masked)} / day for remaining $daysRemaining days"
+                            },
                             style = TabularStyle,
                             fontSize = 12.sp,
                             color = MutedSlate,
@@ -229,6 +256,7 @@ fun BudgetsScreen(
                     items(progressList, key = { it.budget.id }) { bp ->
                         val cat = catMap[bp.budget.categoryId]
                         val limitBase = FxConverter.convertMinor(bp.budget.limitMinor, bp.budget.currency, baseCurrency)
+                        val isOver = bp.remainingMinor < 0L
                         CleanCard(padding = 16.dp) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -249,11 +277,15 @@ fun BudgetsScreen(
                                 }
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
-                                        text = "${MoneyFormatter.formatMinor(bp.remainingMinor, baseCurrency, masked = masked)} left",
+                                        text = if (isOver) {
+                                            "${MoneyFormatter.formatMinor(abs(bp.remainingMinor), baseCurrency, masked = masked)} over"
+                                        } else {
+                                            "${MoneyFormatter.formatMinor(bp.remainingMinor, baseCurrency, masked = masked)} left"
+                                        },
                                         style = TabularStyle,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (bp.onTrack) EmeraldDark else AmberWarn,
+                                        color = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldDark else AmberWarn,
                                     )
                                     Text("${(bp.ratio * 100).toInt()}%", style = TabularStyle, fontSize = 11.sp, color = MutedSlate)
                                 }
@@ -265,7 +297,7 @@ fun BudgetsScreen(
                                     .fillMaxWidth()
                                     .height(8.dp)
                                     .clip(RoundedCornerShape(999.dp)),
-                                color = if (bp.onTrack) EmeraldPrimary else AmberWarn,
+                                color = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldPrimary else AmberWarn,
                                 trackColor = SlateTint,
                             )
                             Spacer(Modifier.height(6.dp))
@@ -275,9 +307,9 @@ fun BudgetsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 StatusPill(
-                                    text = if (bp.onTrack) "On track" else "Ahead of pace",
-                                    containerColor = if (bp.onTrack) EmeraldSoft else AmberSoft,
-                                    contentColor = if (bp.onTrack) EmeraldDark else AmberWarn,
+                                    text = if (isOver) "Over budget" else if (bp.onTrack) "On track" else "Ahead of pace",
+                                    containerColor = if (isOver) RoseSoft else if (bp.onTrack) EmeraldSoft else AmberSoft,
+                                    contentColor = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldDark else AmberWarn,
                                 )
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -394,26 +426,63 @@ fun BudgetsScreen(
     if (showNewBudget) {
         var name by remember { mutableStateOf("") }
         var amount by remember { mutableStateOf("") }
-        var selectedCatId by remember { mutableStateOf(categories.firstOrNull { it.kind == "EXPENSE" }?.id ?: categories.firstOrNull()?.id) }
-        val parsedLimit = MoneyFormatter.parseDecimalToMinor(amount) ?: 0L
+        var selectedCatId by remember { mutableStateOf<String?>(null) }
+        val parsedLimit = MoneyFormatter.parseDecimalToMinor(amount, baseCurrency) ?: 0L
+        val existingCatSpent = remember(transactions, selectedCatId, baseCurrency, monthStart) {
+            transactions
+                .filter {
+                    it.deletedAtEpochMs == null &&
+                        it.txType == "EXPENSE" &&
+                        it.occurredAtEpochMs >= monthStart &&
+                        (selectedCatId == null || it.categoryId == selectedCatId)
+                }
+                .sumOf { abs(FxConverter.convertMinor(it.amountMinor, it.currency, baseCurrency)) }
+        }
 
         AlertDialog(
             onDismissRequest = { showNewBudget = false },
             title = { Text("Create Monthly Budget") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Budget Name") }, singleLine = true)
                     OutlinedTextField(
-                        value = amount,
-                        onValueChange = { amount = it },
-                        label = { Text("Limit ($baseCurrency)") },
-                        placeholder = { Text("0.00") },
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Budget Name") },
+                        placeholder = { Text(selectedCatId?.let { catMap[it]?.name } ?: "Monthly Budget") },
                         singleLine = true,
                     )
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = { amount = sanitizePositiveDecimalInput(it, baseCurrency) },
+                        label = { Text("Limit ($baseCurrency)") },
+                        placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                    )
+                    if (amount.isNotBlank() && parsedLimit <= 0L) {
+                        Text("Enter a positive budget limit greater than 0.", fontSize = 11.sp, color = RoseOutflow)
+                    }
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = selectedCatId == null,
+                            onClick = { selectedCatId = null },
+                            label = { Text("All Categories", fontSize = 11.sp) },
+                        )
                         categories.filter { it.kind == "EXPENSE" }.forEach { c ->
                             FilterChip(selected = selectedCatId == c.id, onClick = { selectedCatId = c.id }, label = { Text(c.name, fontSize = 11.sp) })
                         }
+                    }
+                    if (existingCatSpent > 0L) {
+                        val scopeLabel = selectedCatId?.let { catMap[it]?.name } ?: "all expenses"
+                        Text(
+                            text = if (parsedLimit in 1L until existingCatSpent) {
+                                "Already spent ${MoneyFormatter.formatMinor(existingCatSpent, baseCurrency)} on $scopeLabel this month (${MoneyFormatter.formatMinor(existingCatSpent - parsedLimit, baseCurrency)} over this limit)."
+                            } else {
+                                "Already spent ${MoneyFormatter.formatMinor(existingCatSpent, baseCurrency)} on $scopeLabel this month."
+                            },
+                            fontSize = 11.sp,
+                            color = if (parsedLimit in 1L until existingCatSpent) AmberWarn else MutedSlate,
+                        )
                     }
                 }
             },
@@ -421,7 +490,12 @@ fun BudgetsScreen(
                 Button(
                     enabled = parsedLimit > 0L,
                     onClick = {
-                        vm.addBudget(name.ifBlank { catMap[selectedCatId]?.name ?: "Budget" }, selectedCatId, parsedLimit, baseCurrency)
+                        vm.addBudget(
+                            name = name.ifBlank { selectedCatId?.let { catMap[it]?.name } ?: "Monthly Budget" },
+                            categoryId = selectedCatId,
+                            limitMinor = parsedLimit,
+                            currency = baseCurrency,
+                        )
                         showNewBudget = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
@@ -435,7 +509,7 @@ fun BudgetsScreen(
         var title by remember { mutableStateOf("") }
         var amount by remember { mutableStateOf("") }
         var cadence by remember { mutableStateOf("MONTHLY") }
-        val parsedAmount = MoneyFormatter.parseDecimalToMinor(amount) ?: 0L
+        val parsedAmount = MoneyFormatter.parseDecimalToMinor(amount, baseCurrency) ?: 0L
 
         AlertDialog(
             onDismissRequest = { showNewPlanned = false },
@@ -445,9 +519,10 @@ fun BudgetsScreen(
                     OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Bill Name") }, singleLine = true)
                     OutlinedTextField(
                         value = amount,
-                        onValueChange = { amount = it },
+                        onValueChange = { amount = sanitizePositiveDecimalInput(it, baseCurrency) },
                         label = { Text("Amount ($baseCurrency)") },
-                        placeholder = { Text("0.00") },
+                        placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -470,4 +545,27 @@ fun BudgetsScreen(
             dismissButton = { TextButton(onClick = { showNewPlanned = false }) { Text("Cancel") } },
         )
     }
+}
+
+private fun sanitizePositiveDecimalInput(raw: String, currency: String): String {
+    val maxDecimals = if (currency.equals("JPY", ignoreCase = true)) 0 else 2
+    val sb = StringBuilder()
+    var seenDot = false
+    var decimals = 0
+    for (ch in raw) {
+        when {
+            ch.isDigit() -> {
+                if (!seenDot || decimals < maxDecimals) {
+                    sb.append(ch)
+                    if (seenDot) decimals++
+                }
+            }
+            ch == '.' && maxDecimals > 0 && !seenDot -> {
+                if (sb.isEmpty()) sb.append('0')
+                sb.append('.')
+                seenDot = true
+            }
+        }
+    }
+    return sb.toString()
 }

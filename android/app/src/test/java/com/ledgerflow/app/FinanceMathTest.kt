@@ -1,7 +1,9 @@
 package com.ledgerflow.app
 
+import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.MagicRuleEntity
+import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.CalculatorEngine
 import com.ledgerflow.app.domain.FxConverter
@@ -151,5 +153,74 @@ class FinanceMathTest {
         assertEquals(55_000L, summary.stocksValueMinor)
         assertEquals(290_000L, summary.cryptoValueMinor)
         assertEquals(0L, summary.forexValueMinor)
+    }
+
+    @Test
+    fun parseDecimalToMinor_rejectsOverflowInsteadOfWrappingNegativeAndHandlesJpy() {
+        assertNull(MoneyFormatter.parseDecimalToMinor("999999999999999999"))
+        assertEquals(1500L, MoneyFormatter.parseDecimalToMinor("1500", "JPY"))
+        assertEquals(150_000L, MoneyFormatter.parseDecimalToMinor("1500", "INR"))
+    }
+
+    @Test
+    fun computeBudgetsAndTotals_deduplicatesOverlappingBudgetsAndTracksUncappedOverage() {
+        val monthStart = 1_700_000_000_000L
+        val overallBudget = BudgetEntity(
+            id = "b_all",
+            categoryId = null,
+            name = "Monthly Budget",
+            limitMinor = 100_000L,
+            currency = "INR",
+            period = "MONTHLY",
+            createdAtEpochMs = monthStart,
+            updatedAtEpochMs = monthStart,
+        )
+        val diningBudget = BudgetEntity(
+            id = "b_dining",
+            categoryId = "cat_dining",
+            name = "Dining",
+            limitMinor = 20_000L,
+            currency = "INR",
+            period = "MONTHLY",
+            createdAtEpochMs = monthStart,
+            updatedAtEpochMs = monthStart,
+        )
+        val txs = listOf(
+            TransactionEntity(
+                id = "t1",
+                accountId = "acc1",
+                categoryId = "cat_dining",
+                txType = "EXPENSE",
+                amountMinor = -40_000L, // 200% of Dining budget (400 INR of 200 INR limit)
+                currency = "INR",
+                merchant = "Cafe",
+                occurredAtEpochMs = monthStart + 10_000L,
+                createdAtEpochMs = monthStart,
+                updatedAtEpochMs = monthStart,
+            )
+        )
+
+        val progress = AnalyticsCalculator.computeBudgets(
+            budgets = listOf(overallBudget, diningBudget),
+            transactions = txs,
+            baseCurrency = "INR",
+            monthStartEpochMs = monthStart,
+            dayOfMonthFraction = 0.5f,
+        )
+        val dining = progress.first { it.budget.id == "b_dining" }
+        assertEquals(40_000L, dining.spentMinor)
+        assertEquals(-20_000L, dining.remainingMinor)
+        assertEquals(2.0f, dining.ratio, 0.001f)
+        assertFalse(dining.onTrack)
+
+        // Single expense of 400 INR must NOT be double-counted to 800 INR across overall + dining budgets.
+        val totalSpent = AnalyticsCalculator.computeTotalBudgetedSpent(
+            budgets = listOf(overallBudget, diningBudget),
+            transactions = txs,
+            baseCurrency = "INR",
+            monthStartEpochMs = monthStart,
+        )
+        assertEquals(40_000L, totalSpent)
+        assertEquals(100_000L, AnalyticsCalculator.computeTotalBudgetLimit(listOf(overallBudget, diningBudget), "INR"))
     }
 }

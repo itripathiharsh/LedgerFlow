@@ -233,6 +233,22 @@
   - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --no-daemon`: **31 / 31 passed** (`0` skipped, `0` failures, `0` errors), Lint `26 warnings` (`0` errors), signed `LedgerFlow-v1.0.8.apk` (`4,387,105` bytes, SHA-256 `1ed24f45afbcdaf1144d64616ff38c9dc49194129c285bf3a876a11f02e894d6`, cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.0.8`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.8/LedgerFlow-v1.0.8.apk`.
 
+---
+
+## Budget Creation, Overage Display & Category Sync Fix (`v1.0.9`, `versionCode 10`)
+- **Root Causes Fixed**:
+  - `MoneyFormatter.parseDecimalToMinor()` used unchecked `BigDecimal.toLong()` (which wrapped large inputs to negative `Long` values and mis-scaled `JPY`), and budget/bill `OutlinedTextField` inputs lacked decimal-only sanitization (`sanitizePositiveDecimalInput`).
+  - `BudgetsScreen` rendered negative overages as `"-₹... left"` (`bp.remainingMinor < 0`), capped ratios at `150%`, offered no `"All Categories"` budget option (silently defaulting new budgets to `"Dining & Coffee"`), showed no preview of already-spent month expenses in the creation dialog, and double-counted spend (`progressList.sumOf { it.spentMinor }`) across overlapping budgets.
+  - `AddTransactionSheet` visually highlighted `categories.firstOrNull()` while passing `manualCategoryId = null` to `LedgerViewModel.addTransaction()`.
+- **Changes Applied**:
+  - Updated [FinanceMath.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/domain/FinanceMath.kt): hardened `parseDecimalToMinor()`, removed the `150%` `ratio` cap, and added `computeTotalBudgetedSpent()` & `computeTotalBudgetLimit()`.
+  - Updated [BudgetsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/BudgetsScreen.kt): added `"All Categories"` scope chip, live monthly existing-spend preview inside `Create Monthly Budget`, `KeyboardType.Decimal` + `sanitizePositiveDecimalInput()`, non-double-counted hero Safe-to-Spend math, and red `₹... over` / `Over budget` status labels.
+  - Updated [AddTransactionSheet.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AddTransactionSheet.kt) & [LedgerViewModel.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/LedgerViewModel.kt): aligned default fallback category selection with saved transactions and normalized `addBudget()` validation.
+- **Verification (`v1.0.9`)**:
+  - Added `parseDecimalToMinor_rejectsOverflowInsteadOfWrappingNegativeAndHandlesJpy` and `computeBudgetsAndTotals_deduplicatesOverlappingBudgetsAndTracksUncappedOverage` in [FinanceMathTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/FinanceMathTest.kt).
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --no-daemon`: **33 / 33 passed** (`0` skipped, `0` failures, `0` errors), Lint `26 warnings` (`0` errors), signed `LedgerFlow-v1.0.9.apk` (`4,387,105` bytes, SHA-256 `605a8b569d6fffae6c429de5f16be85dbce62342980c1ebd27791a5ea6671b83`, cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.0.9`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.9/LedgerFlow-v1.0.9.apk`.
+
 
 
 

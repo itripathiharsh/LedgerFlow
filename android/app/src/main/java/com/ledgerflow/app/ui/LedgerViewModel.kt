@@ -345,6 +345,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         note: String,
         labelsCsv: String,
         recurringMonthly: Boolean,
+        fallbackCategoryId: String? = null,
     ): Boolean {
         val magnitudeMinor = CalculatorEngine.evaluateToMinor(amountExpr)
         if (magnitudeMinor == null || magnitudeMinor <= 0L) {
@@ -368,7 +369,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val rules = db.magicRuleDao().getAllActive()
             val ruleMatch = MagicRuleEngine.apply(cleanMerchant, note, rules)
-            val effectiveCategoryId = manualCategoryId ?: ruleMatch.categoryId
+            val effectiveCategoryId = manualCategoryId ?: ruleMatch.categoryId ?: fallbackCategoryId
             val mergedLabels = listOfNotNull(
                 labelsCsv.trim().ifBlank { null },
                 ruleMatch.label?.takeIf { !labelsCsv.contains(it, ignoreCase = true) },
@@ -440,8 +441,10 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun addBudget(name: String, categoryId: String?, limitMinor: Long, currency: String) {
-        if (name.isBlank() || limitMinor <= 0) {
-            _statusMessage.value = "Enter a valid budget name and limit"
+        val cleanName = name.trim()
+        val cleanCur = currency.trim().uppercase()
+        if (cleanName.isBlank() || limitMinor <= 0L || cleanCur.length != 3) {
+            _statusMessage.value = "Enter a valid budget name and positive limit"
             return
         }
         viewModelScope.launch {
@@ -450,9 +453,9 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 BudgetEntity(
                     id = UUID.randomUUID().toString(),
                     categoryId = categoryId,
-                    name = name.trim(),
+                    name = cleanName,
                     limitMinor = limitMinor,
-                    currency = currency,
+                    currency = cleanCur,
                     period = "MONTHLY",
                     createdAtEpochMs = now,
                     updatedAtEpochMs = now,
@@ -460,7 +463,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 )
             )
             SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = "Budget \"$name\" added"
+            _statusMessage.value = "Budget \"$cleanName\" added"
         }
     }
 

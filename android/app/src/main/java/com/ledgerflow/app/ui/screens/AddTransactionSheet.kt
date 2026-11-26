@@ -88,7 +88,15 @@ fun AddTransactionScreen(
 
     val evaluatedMinor = remember(expr) { CalculatorEngine.evaluateToMinor(expr) ?: 0L }
     val autoMatch = remember(merchant, note, rules) { MagicRuleEngine.apply(merchant, note, rules) }
-    val effectiveCatId = selectedCategoryId ?: autoMatch.categoryId ?: categories.firstOrNull()?.id
+    val selectableCategories = remember(categories, txType) {
+        val filtered = categories.filter { it.kind == txType || it.name.equals("General", ignoreCase = true) }
+        filtered.ifEmpty { categories }
+    }
+    val defaultCategoryId = remember(selectableCategories, txType) {
+        selectableCategories.firstOrNull { it.name.equals("General", ignoreCase = true) }?.id
+            ?: selectableCategories.firstOrNull()?.id
+    }
+    val effectiveCatId = selectedCategoryId ?: autoMatch.categoryId ?: defaultCategoryId
 
     Column(
         modifier = Modifier
@@ -248,7 +256,7 @@ fun AddTransactionScreen(
                     }
                     Spacer(Modifier.height(4.dp))
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        categories.forEach { cat ->
+                        selectableCategories.forEach { cat ->
                             FilterChip(
                                 selected = effectiveCatId == cat.id,
                                 onClick = { selectedCategoryId = cat.id },
@@ -321,6 +329,7 @@ fun AddTransactionScreen(
                     note = note,
                     labelsCsv = label,
                     recurringMonthly = recurring,
+                    fallbackCategoryId = if (txType == "TRANSFER") null else defaultCategoryId,
                 )
                 if (ok) onDismiss()
             },
