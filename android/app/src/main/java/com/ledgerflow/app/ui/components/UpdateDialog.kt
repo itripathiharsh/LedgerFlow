@@ -4,10 +4,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -21,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,18 +55,22 @@ fun AppUpdateDialog(
     currentVersionCode: Long,
     installState: UpdateInstallProgress?,
     onUpdateNow: () -> Unit,
+    onOpenSystemInstaller: () -> Unit = {},
     onLater: () -> Unit,
 ) {
     val busy = installState is UpdateInstallProgress.CheckingPermission ||
         installState is UpdateInstallProgress.Downloading ||
         installState is UpdateInstallProgress.VerifyingSignature
 
-    val installLaunched = installState is UpdateInstallProgress.Installing ||
-        installState is UpdateInstallProgress.AwaitingUserConfirmation
+    val awaitingConfirmation = installState is UpdateInstallProgress.AwaitingUserConfirmation
+    val installLaunched = installState is UpdateInstallProgress.Installing || awaitingConfirmation
 
     AlertDialog(
-        onDismissRequest = { if (!busy) onLater() },
-        properties = DialogProperties(dismissOnBackPress = !busy, dismissOnClickOutside = !busy),
+        onDismissRequest = { if (!busy && !awaitingConfirmation) onLater() },
+        properties = DialogProperties(
+            dismissOnBackPress = !busy && !awaitingConfirmation,
+            dismissOnClickOutside = false,
+        ),
         containerColor = Color.White,
         title = {
             Row(
@@ -209,7 +216,21 @@ fun AppUpdateDialog(
                     }
                     is UpdateInstallProgress.Installing,
                     is UpdateInstallProgress.AwaitingUserConfirmation -> {
-                        ProgressStatusBlock("Installing update & preparing auto-reopen...", progress = null)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ProgressStatusBlock("Installing update & preparing auto-reopen...", progress = null)
+                            OutlinedButton(
+                                onClick = onOpenSystemInstaller,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text(
+                                    text = "Open System Installer",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = EmeraldDark,
+                                )
+                            }
+                        }
                     }
                     is UpdateInstallProgress.Failed -> {
                         Surface(
@@ -231,32 +252,42 @@ fun AppUpdateDialog(
             }
         },
         confirmButton = {
-            Button(
-                onClick = onUpdateNow,
-                enabled = !busy && !installLaunched,
-                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
-                shape = RoundedCornerShape(12.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                val buttonText = when (installState) {
-                    is UpdateInstallProgress.Downloading,
-                    is UpdateInstallProgress.VerifyingSignature,
-                    is UpdateInstallProgress.CheckingPermission -> "Updating..."
-                    is UpdateInstallProgress.Installing,
-                    is UpdateInstallProgress.AwaitingUserConfirmation -> "Awaiting OS..."
-                    is UpdateInstallProgress.Failed -> "Retry"
-                    else -> "Update Now"
+                TextButton(
+                    onClick = onLater,
+                    enabled = !busy && !awaitingConfirmation,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Text("Later", color = MutedSlate, fontWeight = FontWeight.SemiBold)
                 }
-                Text(buttonText, fontWeight = FontWeight.SemiBold)
+                Button(
+                    onClick = onUpdateNow,
+                    enabled = !busy && !installLaunched,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    val buttonText = when (installState) {
+                        is UpdateInstallProgress.Downloading,
+                        is UpdateInstallProgress.VerifyingSignature,
+                        is UpdateInstallProgress.CheckingPermission -> "Updating..."
+                        is UpdateInstallProgress.Installing,
+                        is UpdateInstallProgress.AwaitingUserConfirmation -> "Awaiting OS..."
+                        is UpdateInstallProgress.Failed -> "Retry"
+                        else -> "Update Now"
+                    }
+                    Text(buttonText, fontWeight = FontWeight.SemiBold)
+                }
             }
         },
-        dismissButton = {
-            TextButton(
-                onClick = onLater,
-                enabled = !busy,
-            ) {
-                Text("Later", color = MutedSlate, fontWeight = FontWeight.SemiBold)
-            }
-        },
+        dismissButton = null,
     )
 }
 

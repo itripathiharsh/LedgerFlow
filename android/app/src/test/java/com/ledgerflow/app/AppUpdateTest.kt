@@ -16,8 +16,13 @@ import com.ledgerflow.app.security.VaultStore
 import com.ledgerflow.app.update.AppReplacedReceiver
 import com.ledgerflow.app.update.AppUpdateManager
 import com.ledgerflow.app.update.UpdateCheckOutcome
+import com.ledgerflow.app.update.UpdateEventBus
+import com.ledgerflow.app.update.UpdateInstallEvent
 import com.ledgerflow.app.update.UpdateInstallStatusReceiver
 import com.ledgerflow.app.util.NetworkMonitor
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.AfterClass
@@ -390,6 +395,83 @@ class AppUpdateRobolectricTest {
         val updated = vault.read()
         assertFalse(updated.pendingUpdateRelaunch)
         assertEquals(0L, updated.pendingInstallResumeVersionCode)
+    }
+
+    @Test
+    fun unknownSourcesSettingsIntents_providesOrderedFallbacks() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val intents = AppUpdateManager.unknownSourcesSettingsIntents(context)
+        assertTrue(intents.size >= 3)
+        assertEquals(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, intents[0].action)
+        assertEquals("package:${context.packageName}", intents[0].dataString)
+        assertEquals(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, intents[1].action)
+        assertNull(intents[1].data)
+        assertEquals(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, intents[2].action)
+        assertEquals("package:${context.packageName}", intents[2].dataString)
+    }
+
+    @Test
+    fun updateInstallStatusReceiver_pendingUserAction_handlesForegroundVsBackgroundCleanly() = runTest {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val app = context as Application
+        val receiver = UpdateInstallStatusReceiver()
+        val confirmPrompt = Intent(Intent.ACTION_VIEW)
+
+        try {
+            UpdateEventBus.isForegroundActive = true
+            val deferredEvent = async(start = CoroutineStart.UNDISPATCHED) {
+                UpdateEventBus.events.first()
+            }
+            val fgBroadcast = Intent(context, UpdateInstallStatusReceiver::class.java).apply {
+                putExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_PENDING_USER_ACTION)
+                putExtra(Intent.EXTRA_INTENT, confirmPrompt)
+            }
+            receiver.onReceive(context, fgBroadcast)
+
+            val event = deferredEvent.await()
+            assertTrue(event is UpdateInstallEvent.UserConfirmationRequired)
+            val emittedFlags = (event as UpdateInstallEvent.UserConfirmationRequired).intent.flags
+            assertEquals(0, emittedFlags and Intent.FLAG_ACTIVITY_NEW_TASK)
+            assertNull(shadowOf(app).nextStartedActivity)
+
+            UpdateEventBus.isForegroundActive = false
+            receiver.onReceive(context, fgBroadcast)
+            val bgStarted = shadowOf(app).nextStartedActivity
+            assertNotNull(bgStarted)
+            assertTrue((bgStarted!!.flags and Intent.FLAG_ACTIVITY_NEW_TASK) != 0)
+        } finally {
+            UpdateEventBus.isForegroundActive = false
+        }
+    }
+
+    @Test
+    fun buildVerifiedFallbackInstallIntent_rejectsMissingAndCorruptedCachedApks() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val updater = AppUpdateManager(context, VaultStore(context))
+        val payload = "corrupted-apk-bytes".encodeToByteArray()
+        val manifest = UpdateManifest(
+            versionCode = 88L,
+            versionName = "1.8.8",
+            apkUrl = "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.8.8/LedgerFlow-v1.8.8.apk",
+            apkSizeBytes = 1024L,
+            sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+
+        val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
+        val cachedApk = File(updatesDir, "ledgerflow-v88.apk")
+        cachedApk.delete()
+        assertNull(updater.buildVerifiedFallbackInstallIntent(manifest))
+
+        cachedApk.writeBytes(payload)
+        assertNull(updater.buildVerifiedFallbackInstallIntent(manifest))
+
+        val exactDigestManifest = manifest.copy(
+            apkSizeBytes = payload.size.toLong(),
+            sha256 = AppUpdatePolicy.sha256Hex(payload),
+        )
+        // Non-APK bytes must still fail archive package/signature inspection.
+        assertNull(updater.buildVerifiedFallbackInstallIntent(exactDigestManifest))
+        cachedApk.delete()
     }
 }
 

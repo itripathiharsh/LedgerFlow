@@ -204,6 +204,21 @@
   - Signed `LedgerFlow-v1.0.6.apk` (`4,333,857` bytes, SHA-256 `4f36f1a586df42ee76ba70f7d3c431f3c26bb86b6518c5f081cbc3cb083c87df`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.0.6`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.6/LedgerFlow-v1.0.6.apk`.
 
+---
+
+## In-App Updater UX, Permission Fallback & Installer Recovery Fix (`v1.0.7`, `versionCode 8`)
+- **Diagnosed `v1.0.5` Screen Recording Failure**:
+  - Frame inspection showed the dialog dismissing cleanly after touching/sliding near `"Update Now"` / the gap beside `"Later"` without showing progress, Settings, or an error — caused by `dismissOnClickOutside = !busy`, overlapping Material 3 `"Later"` `TextButton` touch slop next to `"Update Now"`, premature `markInstallPermissionLaunched()` resetting state to `null` while `runCatching` swallowed Settings/`PackageInstaller` launch failures, a missing guard against duplicate download runs between `onInstallPermissionResult` and `onStart`, and no recovery action if OEM `PackageInstaller` confirmation was suppressed.
+- **Changes Applied**:
+  - Updated [UpdateDialog.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/components/UpdateDialog.kt): disabled outside-tap dismissal (`dismissOnClickOutside = false`), widened **`Update Now`** (`Modifier.weight(1f).heightIn(min = 48.dp)`) with a `16.dp` gap from **`Later`**, and added **`Open System Installer`** during `Installing` / `AwaitingUserConfirmation`.
+  - Updated [AppUpdateManager.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/update/AppUpdateManager.kt), [UpdateInstallReceivers.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/update/UpdateInstallReceivers.kt), [MainActivity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/MainActivity.kt), and [LedgerViewModel.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/LedgerViewModel.kt): added ordered `unknownSourcesSettingsIntents()` fallbacks, visible `Failed(...)` UI errors instead of swallowed exceptions, verified cached-APK reuse, synchronous duplicate-start guard across `CheckingPermission`..`AwaitingUserConfirmation`, clean foreground vs background confirmation flags, and verified `FileProvider` fallback launcher handling.
+  - Updated [proguard-rules.pro](file:///D:/all%20farzi%20project/LedgerFlow/android/app/proguard-rules.pro) with explicit keep rules for `UpdateInstallStatusReceiver`, `AppReplacedReceiver`, `FileProvider`, `UpdateManifest`, and `VaultSessionState`.
+- **Verification (`v1.0.7`)**:
+  - Added `unknownSourcesSettingsIntents_providesOrderedFallbacks`, `updateInstallStatusReceiver_pendingUserAction_handlesForegroundVsBackgroundCleanly`, and `buildVerifiedFallbackInstallIntent_rejectsMissingAndCorruptedCachedApks` in [AppUpdateTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/AppUpdateTest.kt).
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --no-daemon`: **29 / 29 passed** (`0` skipped, `0` failures, `0` errors), `0` Lint errors (`26` warnings).
+  - Signed `LedgerFlow-v1.0.7.apk` (`4,350,241` bytes, SHA-256 `b956f1f75b89b0074b4f893ade7ba2cd65b5515aceb0628a6ab87b411d7965c1`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.0.7`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.7/LedgerFlow-v1.0.7.apk`.
+
 
 
 

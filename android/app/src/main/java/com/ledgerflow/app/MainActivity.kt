@@ -128,16 +128,52 @@ class MainActivity : FragmentActivity() {
                 LaunchedEffect(updateInstallState) {
                     when (val st = updateInstallState) {
                         is UpdateInstallProgress.NeedsInstallPermission -> {
-                            vm.markInstallPermissionLaunched()
-                            runCatching {
-                                installPermissionLauncher.launch(
-                                    AppUpdateManager.unknownSourcesSettingsIntent(this@MainActivity)
+                            val launched = AppUpdateManager
+                                .unknownSourcesSettingsIntents(this@MainActivity)
+                                .any { candidate ->
+                                    runCatching { installPermissionLauncher.launch(candidate) }.isSuccess
+                                }
+                            if (launched) {
+                                vm.markInstallPermissionLaunched()
+                            } else {
+                                vm.onInstallPermissionLaunchFailed(
+                                    "Could not open Android 'Install unknown apps' Settings automatically. Enable it for LedgerFlow in system Settings, then tap Retry."
                                 )
                             }
                         }
                         is UpdateInstallProgress.AwaitingUserConfirmation -> {
-                            runCatching { startActivity(st.intent) }
-                            vm.consumeAwaitingConfirmationIntent()
+                            val foregroundIntent = Intent(st.intent).apply {
+                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                            }
+                            val launched = runCatching {
+                                startActivity(foregroundIntent)
+                                true
+                            }.getOrElse {
+                                runCatching {
+                                    startActivity(st.intent)
+                                    true
+                                }.getOrDefault(false)
+                            }
+                            if (launched) {
+                                vm.consumeAwaitingConfirmationIntent()
+                            } else {
+                                val fallback = vm.fallbackSystemInstallerIntent()
+                                val fallbackLaunched = fallback != null && runCatching {
+                                    startActivity(
+                                        Intent(fallback).apply {
+                                            flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                        }
+                                    )
+                                    true
+                                }.getOrDefault(false)
+                                if (fallbackLaunched) {
+                                    vm.consumeAwaitingConfirmationIntent()
+                                } else {
+                                    vm.onInstallLaunchFailed(
+                                        "Unable to open Android's package installer prompt. Tap Retry or Open System Installer."
+                                    )
+                                }
+                            }
                         }
                         else -> Unit
                     }
@@ -176,6 +212,24 @@ class MainActivity : FragmentActivity() {
                             currentVersionCode = vm.installedVersionCode(),
                             installState = updateInstallState,
                             onUpdateNow = { vm.startUpdateNow() },
+                            onOpenSystemInstaller = {
+                                val fallback = vm.fallbackSystemInstallerIntent()
+                                if (fallback != null) {
+                                    runCatching {
+                                        startActivity(
+                                            Intent(fallback).apply {
+                                                flags = flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                                            }
+                                        )
+                                    }.onFailure { err ->
+                                        vm.onInstallLaunchFailed(
+                                            err.message ?: "Unable to launch system APK installer"
+                                        )
+                                    }
+                                } else {
+                                    vm.startUpdateNow()
+                                }
+                            },
                             onLater = { vm.dismissUpdateForLater() },
                         )
                     }

@@ -115,6 +115,15 @@ class AppUpdateManager(
                 "package:${context.packageName}".toUri(),
             )
 
+        fun unknownSourcesSettingsIntents(context: Context): List<Intent> = listOf(
+            unknownSourcesSettingsIntent(context),
+            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES),
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                "package:${context.packageName}".toUri(),
+            ),
+        )
+
         fun getInstalledSigningCertDigests(context: Context): Set<String> {
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 PackageManager.GET_SIGNING_CERTIFICATES
@@ -294,10 +303,6 @@ class AppUpdateManager(
             onProgress(UpdateInstallProgress.NeedsInstallPermission)
             return@withContext false
         }
-        if (!NetworkMonitor.isOnline(context)) {
-            onProgress(UpdateInstallProgress.Failed("You are offline. Reconnect to download this update."))
-            return@withContext false
-        }
         if (!AppUpdatePolicy.isAllowedUpdateUrl(manifest.apkUrl, allowCleartextLocal = BuildConfig.DEBUG)) {
             onProgress(UpdateInstallProgress.Failed("Blocked non-HTTPS update URL."))
             return@withContext false
@@ -308,15 +313,24 @@ class AppUpdateManager(
         }
 
         val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
+        val finalApk = File(updatesDir, "ledgerflow-v${manifest.versionCode}.apk")
+        if (isCachedVerifiedApk(finalApk, manifest)) {
+            return@withContext launchApkInstall(finalApk, manifest, onProgress)
+        }
+        runCatching { finalApk.delete() }
+
+        if (!NetworkMonitor.isOnline(context)) {
+            onProgress(UpdateInstallProgress.Failed("You are offline. Reconnect to download this update."))
+            return@withContext false
+        }
+
         val minRequiredBytes = (if (manifest.apkSizeBytes > 0L) manifest.apkSizeBytes * 2 else 20L * 1024L * 1024L)
         if (updatesDir.usableSpace in 1L until minRequiredBytes) {
             onProgress(UpdateInstallProgress.Failed("Insufficient storage space to download and install update."))
             return@withContext false
         }
         val partFile = File(updatesDir, "ledgerflow-v${manifest.versionCode}.apk.part")
-        val finalApk = File(updatesDir, "ledgerflow-v${manifest.versionCode}.apk")
         runCatching { partFile.delete() }
-        runCatching { finalApk.delete() }
 
         // Always stream clean verified APK
         val request = Request.Builder().url(manifest.apkUrl).get().build()
@@ -387,23 +401,52 @@ class AppUpdateManager(
         }
 
         // Verify APK package name, versionCode & embedded signing certificate digest BEFORE opening PackageInstaller!
+        val trustError = verifyDownloadedApk(finalApk, manifest)
+        if (trustError != null) {
+            runCatching { finalApk.delete() }
+            onProgress(UpdateInstallProgress.Failed(trustError))
+            return@withContext false
+        }
+
+        return@withContext launchApkInstall(finalApk, manifest, onProgress)
+        }
+    }
+
+    fun buildVerifiedFallbackInstallIntent(manifest: UpdateManifest): Intent? {
+        if (!AppUpdatePolicy.isAllowedUpdateUrl(manifest.apkUrl, allowCleartextLocal = BuildConfig.DEBUG)) {
+            return null
+        }
+        if (!AppUpdatePolicy.isValidSha256Hex(manifest.sha256)) {
+            return null
+        }
+        val apkFile = File(File(context.cacheDir, "updates"), "ledgerflow-v${manifest.versionCode}.apk")
+        if (!isCachedVerifiedApk(apkFile, manifest)) {
+            return null
+        }
+        return buildApkInstallIntent(apkFile)
+    }
+
+    private fun isCachedVerifiedApk(apkFile: File, manifest: UpdateManifest): Boolean {
+        if (!apkFile.isFile || apkFile.length() <= 0L) return false
+        if (manifest.apkSizeBytes > 0L && apkFile.length() != manifest.apkSizeBytes) return false
+        if (!AppUpdatePolicy.verifyFileSha256(apkFile, manifest.sha256)) return false
+        return verifyDownloadedApk(apkFile, manifest) == null
+    }
+
+    private fun verifyDownloadedApk(apkFile: File, manifest: UpdateManifest): String? {
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             PackageManager.GET_SIGNING_CERTIFICATES
         } else {
             @Suppress("DEPRECATION")
             PackageManager.GET_SIGNATURES
         }
-        val archiveInfo = getPackageArchiveInfoCompat(context, finalApk.absolutePath, flags)
+        val archiveInfo = getPackageArchiveInfoCompat(context, apkFile.absolutePath, flags)
             ?: getPackageArchiveInfoCompat(
                 context,
-                finalApk.absolutePath,
+                apkFile.absolutePath,
                 @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES,
             )
-        if (archiveInfo == null) {
-            runCatching { finalApk.delete() }
-            onProgress(UpdateInstallProgress.Failed("Downloaded file is not a valid Android APK."))
-            return@withContext false
-        }
+            ?: return "Downloaded file is not a valid Android APK."
 
         val archiveCerts = extractCertDigests(archiveInfo)
         val installedCerts = getInstalledSigningCertDigests(context)
@@ -417,12 +460,14 @@ class AppUpdateManager(
             manifest = manifest,
             pinnedExpectedCertHex = BuildConfig.EXPECTED_SIGNING_CERT_SHA256,
         )
-        if (trust is ArchiveTrustResult.Rejected) {
-            runCatching { finalApk.delete() }
-            onProgress(UpdateInstallProgress.Failed(trust.reason))
-            return@withContext false
-        }
+        return (trust as? ArchiveTrustResult.Rejected)?.reason
+    }
 
+    private fun launchApkInstall(
+        finalApk: File,
+        manifest: UpdateManifest,
+        onProgress: (UpdateInstallProgress) -> Unit,
+    ): Boolean {
         onProgress(UpdateInstallProgress.Installing)
         vault.update {
             it.copy(
@@ -431,27 +476,31 @@ class AppUpdateManager(
             )
         }
 
-        return@withContext try {
+        return try {
             installViaPackageInstallerSession(finalApk, manifest)
             true
         } catch (_: Throwable) {
             // Fallback to FileProvider APK install intent (ACTION_MY_PACKAGE_REPLACED still relaunches app after completion)
-            runCatching {
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", finalApk)
-                val fallback = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/vnd.android.package-archive")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
+            val fallback = buildApkInstallIntent(finalApk)
+            if (fallback != null) {
                 onProgress(UpdateInstallProgress.AwaitingUserConfirmation(fallback))
                 true
-            }.getOrElse { err ->
+            } else {
                 vault.update { it.copy(pendingUpdateRelaunch = false, pendingUpdateVersionName = null) }
-                onProgress(UpdateInstallProgress.Failed(err.message ?: "Unable to start APK installer"))
+                onProgress(UpdateInstallProgress.Failed("Unable to start APK installer"))
                 false
             }
         }
-        }
     }
+
+    private fun buildApkInstallIntent(apkFile: File): Intent? =
+        runCatching {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }.getOrNull()
 
     private fun installViaPackageInstallerSession(apkFile: File, manifest: UpdateManifest) {
         val installer = context.packageManager.packageInstaller

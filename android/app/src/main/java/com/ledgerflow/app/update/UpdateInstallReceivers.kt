@@ -27,10 +27,10 @@ class UpdateInstallStatusReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirmIntent = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
                 if (confirmIntent != null) {
-                    confirmIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    UpdateEventBus.emit(UpdateInstallEvent.UserConfirmationRequired(confirmIntent))
+                    UpdateEventBus.emit(UpdateInstallEvent.UserConfirmationRequired(Intent(confirmIntent)))
                     if (!UpdateEventBus.isForegroundActive) {
-                        runCatching { context.startActivity(confirmIntent) }
+                        val backgroundIntent = Intent(confirmIntent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { context.startActivity(backgroundIntent) }
                     }
                 }
             }

@@ -935,12 +935,15 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     fun startUpdateNow() {
         val manifest = _availableUpdate.value ?: return
         val currentState = _updateInstallState.value
-        if (currentState is UpdateInstallProgress.Downloading ||
+        if (currentState is UpdateInstallProgress.CheckingPermission ||
+            currentState is UpdateInstallProgress.Downloading ||
             currentState is UpdateInstallProgress.VerifyingSignature ||
-            currentState is UpdateInstallProgress.Installing
+            currentState is UpdateInstallProgress.Installing ||
+            currentState is UpdateInstallProgress.AwaitingUserConfirmation
         ) {
             return
         }
+        _updateInstallState.value = UpdateInstallProgress.CheckingPermission
         viewModelScope.launch {
             updater.downloadVerifyAndInstall(manifest) { progress ->
                 _updateInstallState.value = progress
@@ -951,9 +954,10 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     fun dismissUpdateForLater() {
         val current = _availableUpdate.value ?: return
         val s = _updateInstallState.value
-        if (s is UpdateInstallProgress.Downloading ||
+        if (s is UpdateInstallProgress.CheckingPermission ||
+            s is UpdateInstallProgress.Downloading ||
             s is UpdateInstallProgress.VerifyingSignature ||
-            s is UpdateInstallProgress.Installing
+            s is UpdateInstallProgress.AwaitingUserConfirmation
         ) {
             return
         }
@@ -977,6 +981,11 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         _updateInstallState.value = null
     }
 
+    fun onInstallPermissionLaunchFailed(message: String) {
+        _vaultState.value = vault.update { it.copy(pendingInstallResumeVersionCode = 0L) }
+        _updateInstallState.value = UpdateInstallProgress.Failed(message)
+    }
+
     fun resumePendingInstallIfPermitted() {
         val pendingCode = _vaultState.value.pendingInstallResumeVersionCode
         if (pendingCode <= 0L || pendingCode <= installedVersionCode()) return
@@ -997,7 +1006,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             _vaultState.value = vault.update { it.copy(pendingInstallResumeVersionCode = 0L) }
             _updateInstallState.value = UpdateInstallProgress.Failed(
-                "Enable 'Install unknown apps' to install verified updates."
+                "Enable 'Install unknown apps' for LedgerFlow in Android Settings, then tap Retry."
             )
         }
     }
@@ -1006,5 +1015,15 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         if (_updateInstallState.value is UpdateInstallProgress.AwaitingUserConfirmation) {
             _updateInstallState.value = UpdateInstallProgress.Installing
         }
+    }
+
+    fun fallbackSystemInstallerIntent(): Intent? =
+        _availableUpdate.value?.let { updater.buildVerifiedFallbackInstallIntent(it) }
+
+    fun onInstallLaunchFailed(message: String) {
+        _vaultState.value = vault.update {
+            it.copy(pendingUpdateRelaunch = false, pendingUpdateVersionName = null)
+        }
+        _updateInstallState.value = UpdateInstallProgress.Failed(message)
     }
 }

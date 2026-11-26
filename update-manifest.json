@@ -1,17 +1,16 @@
 {
-  "versionCode": 7,
-  "versionName": "1.0.6",
+  "versionCode": 8,
+  "versionName": "1.0.7",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-26T18:24:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.6/LedgerFlow-v1.0.6.apk",
-  "apkSizeBytes": 4333857,
-  "sha256": "4f36f1a586df42ee76ba70f7d3c431f3c26bb86b6518c5f081cbc3cb083c87df",
+  "releasedAt": "2026-11-26T23:52:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.7/LedgerFlow-v1.0.7.apk",
+  "apkSizeBytes": 4350241,
+  "sha256": "b956f1f75b89b0074b4f893ade7ba2cd65b5515aceb0628a6ab87b411d7965c1",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Added first-launch onboarding asking for Name, Email, Password, and Locked Default Currency.",
-    "Locked chosen currency across Home, Add Transaction, Accounts, Budgets, and Investments (editable later only in Settings).",
-    "Simplified Add Account: Cash asks only amount and optional label, while Bank and Card show tailored fields with no redundant currency selector.",
-    "Consolidated Profile, Currency, Privacy, Cloud Sync, Data Export, and Start Fresh into one clean Settings page and balanced the 5-tab navigation bar."
+    "Fixed accidental outside/adjacent-tap dismissal & snoozing in the update dialog by disabling dismissOnClickOutside and widening the Update Now button.",
+    "Fixed silent failures when launching Android Unknown Sources Settings or the PackageInstaller confirmation sheet by adding ordered intent fallbacks and visible Retry errors.",
+    "Added verified cached-APK reuse, synchronous duplicate-download locking across permission callbacks, and an Open System Installer fallback button."
   ],
   "mandatory": false
 }
