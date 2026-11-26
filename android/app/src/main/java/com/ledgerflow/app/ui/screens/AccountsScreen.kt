@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Contactless
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -57,6 +58,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ledgerflow.app.data.local.AccountEntity
+import com.ledgerflow.app.domain.AccountTypeCatalog
+import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.service.PayAndTrackCapture
@@ -68,16 +71,21 @@ import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.rememberDataImportPicker
 import com.ledgerflow.app.ui.theme.AlabasterBg
+import com.ledgerflow.app.ui.theme.AmberSoft
+import com.ledgerflow.app.ui.theme.AmberWarn
+import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
+import com.ledgerflow.app.ui.theme.RoseSoft
 import com.ledgerflow.app.ui.theme.SkySoft
 import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.TabularStyle
+import kotlin.math.abs
 
 @Composable
 fun AccountsScreen(
@@ -111,8 +119,15 @@ fun AccountsScreen(
 
     var showAddAccount by remember { mutableStateOf(false) }
     var pendingDeleteAccount by remember { mutableStateOf<AccountEntity?>(null) }
+    var pendingRepayAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var showSmartPaste by remember { mutableStateOf(false) }
     val importBusy by vm.importInProgress.collectAsState()
+    val accountSummary = remember(accounts, baseCurrency) {
+        AnalyticsCalculator.computeAccountSummary(accounts, baseCurrency)
+    }
+    val assetAccounts = remember(accounts) {
+        accounts.filter { !AccountTypeCatalog.isLiability(it.accountType) }
+    }
 
     val launchImportPicker = rememberDataImportPicker(
         onUriSelected = { vm.importCsvUri(it) },
@@ -161,15 +176,66 @@ fun AccountsScreen(
         }
 
         // Accounts List
+        if (accounts.isNotEmpty() && accountSummary.liabilitiesMinor > 0L) {
+            item {
+                CleanCard(padding = 14.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column {
+                            Text("ASSETS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+                            Text(
+                                text = MoneyFormatter.formatMinor(accountSummary.assetsMinor, baseCurrency, masked = masked),
+                                style = TabularStyle,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldDark,
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("CARDS & LOANS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+                            Text(
+                                text = MoneyFormatter.formatMinor(accountSummary.liabilitiesMinor, baseCurrency, masked = masked),
+                                style = TabularStyle,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = RoseOutflow,
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("NET WORTH", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+                            Text(
+                                text = MoneyFormatter.formatMinor(accountSummary.netWorthMinor, baseCurrency, masked = masked),
+                                style = TabularStyle,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateInk,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         item {
-            SectionHeader(title = "Wallets, Cards & Bank Accounts")
+            SectionHeader(title = "Wallets, Cards, Loans & Banks")
         }
         if (accounts.isEmpty()) {
             item {
-                EmptyPlaceholder("No active accounts", "Tap + Add Account to create a wallet, card, or bank account.")
+                EmptyPlaceholder("No active accounts", "Tap + Add Account to create a wallet, debit/credit card, loan, or bank account.")
             }
         } else {
             items(accounts, key = { it.id }) { acc ->
+                val normType = AccountTypeCatalog.normalize(acc.accountType)
+                val isDebtType = AccountTypeCatalog.isLiability(normType) || acc.balanceMinor < 0L
+                val tintHex = when (normType) {
+                    "CREDIT_CARD" -> "#E11D48"
+                    "LOAN" -> "#D97706"
+                    "DEBIT_CARD", "CARD" -> "#0284C7"
+                    "CASH" -> "#475569"
+                    else -> "#059669"
+                }
                 CleanCard(padding = 14.dp) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -182,15 +248,15 @@ fun AccountsScreen(
                             modifier = Modifier.weight(1f),
                         ) {
                             CategoryIconBadge(
-                                iconKey = if (acc.accountType == "CASH") "payments" else "bank",
-                                tintHex = if (acc.accountType == "CASH") "#475569" else "#059669",
+                                iconKey = AccountTypeCatalog.iconKey(normType),
+                                tintHex = tintHex,
                                 size = 38.dp,
                             )
                             Column {
                                 Text(acc.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                                 val sub = listOfNotNull(
                                     acc.institution.takeIf { it.isNotBlank() },
-                                    acc.accountType,
+                                    AccountTypeCatalog.displayLabel(normType),
                                     acc.lastFour.takeIf { it.isNotBlank() }?.let { "••$it" },
                                 ).joinToString(" • ")
                                 Text(sub, fontSize = 12.sp, color = MutedSlate)
@@ -199,13 +265,19 @@ fun AccountsScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency, masked = masked),
+                                    text = if (isDebtType && acc.balanceMinor < 0L) {
+                                        "Owed ${MoneyFormatter.formatMinor(abs(acc.balanceMinor), acc.currency, masked = masked)}"
+                                    } else {
+                                        MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency, masked = masked)
+                                    },
                                     style = TabularStyle,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = SlateInk,
+                                    color = if (acc.balanceMinor < 0L) RoseOutflow else SlateInk,
                                 )
-                                if (acc.currency != baseCurrency) {
+                                if (isDebtType && acc.balanceMinor == 0L) {
+                                    Text("Settled", fontSize = 11.sp, color = EmeraldDark)
+                                } else if (acc.currency != baseCurrency) {
                                     val fx = FxConverter.convertMinor(acc.balanceMinor, acc.currency, baseCurrency)
                                     Text(
                                         text = "≈ ${MoneyFormatter.formatMinor(fx, baseCurrency, masked = masked)}",
@@ -213,6 +285,14 @@ fun AccountsScreen(
                                         fontSize = 11.sp,
                                         color = MutedSlate,
                                     )
+                                }
+                            }
+                            if (isDebtType && acc.balanceMinor < 0L && assetAccounts.isNotEmpty()) {
+                                TextButton(
+                                    onClick = { pendingRepayAccount = acc },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                ) {
+                                    Text("Pay", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
                                 }
                             }
                             IconButton(
@@ -351,6 +431,68 @@ fun AccountsScreen(
         )
     }
 
+    pendingRepayAccount?.let { debtAcc ->
+        var fromAccId by remember(debtAcc.id, assetAccounts) {
+            mutableStateOf(assetAccounts.firstOrNull()?.id ?: "")
+        }
+        val initialOwed = abs(debtAcc.balanceMinor)
+        var repayAmountText by remember(debtAcc.id) {
+            val decimals = if (baseCurrency == "JPY") 0 else 2
+            val div = if (decimals == 0) 1.0 else 100.0
+            val defaultVal = FxConverter.convertMinor(initialOwed, debtAcc.currency, baseCurrency)
+            val txt = if (decimals == 0) defaultVal.toString() else String.format(java.util.Locale.US, "%.2f", defaultVal / div)
+            mutableStateOf(txt)
+        }
+        val parsedRepay = MoneyFormatter.parseDecimalToMinor(repayAmountText, baseCurrency) ?: 0L
+
+        AlertDialog(
+            onDismissRequest = { pendingRepayAccount = null },
+            title = { Text("Repay ${debtAcc.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StatusPill(
+                        text = "Owed: ${MoneyFormatter.formatMinor(initialOwed, debtAcc.currency)}",
+                        containerColor = RoseSoft,
+                        contentColor = RoseOutflow,
+                    )
+                    Text("Pay From", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        assetAccounts.forEach { src ->
+                            FilterChip(
+                                selected = fromAccId == src.id,
+                                onClick = { fromAccId = src.id },
+                                label = {
+                                    Text("${src.name} (${MoneyFormatter.formatMinor(src.balanceMinor, src.currency)})", fontSize = 11.sp)
+                                },
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = repayAmountText,
+                        onValueChange = { repayAmountText = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
+                        label = { Text("Repayment Amount ($baseCurrency)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = fromAccId.isNotBlank() && parsedRepay > 0L,
+                    onClick = {
+                        vm.repayDebtAccount(fromAccId, debtAcc.id, parsedRepay)
+                        pendingRepayAccount = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                ) { Text("Record Payment") }
+            },
+            dismissButton = { TextButton(onClick = { pendingRepayAccount = null }) { Text("Cancel") } },
+        )
+    }
+
     if (showAddAccount) {
         var accountType by remember { mutableStateOf("CASH") }
         var name by remember { mutableStateOf("") }
@@ -359,7 +501,10 @@ fun AccountsScreen(
         var lastFour by remember { mutableStateOf("") }
 
         val isCash = accountType == "CASH"
-        val isCard = accountType == "CARD"
+        val isDebit = accountType == "DEBIT_CARD"
+        val isCredit = accountType == "CREDIT_CARD"
+        val isLoan = accountType == "LOAN"
+        val supportsLastFour = AccountTypeCatalog.supportsLastFour(accountType)
         val parsedBalance = if (balance.isBlank()) 0L else MoneyFormatter.parseDecimalToMinor(balance, baseCurrency)
         val canSave = (if (isCash) true else name.isNotBlank()) && parsedBalance != null
 
@@ -367,19 +512,22 @@ fun AccountsScreen(
             onDismissRequest = { showAddAccount = false },
             title = { Text("Add Account") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        listOf("CASH", "CHECKING", "SAVINGS", "CARD").forEach { t ->
+                        AccountTypeCatalog.creatableTypes.forEach { t ->
                             FilterChip(
                                 selected = accountType == t,
                                 onClick = {
                                     accountType = t
-                                    balance = MoneyFormatter.sanitizeDecimalInput(balance, baseCurrency, allowNegative = (t == "CARD"))
+                                    balance = MoneyFormatter.sanitizeDecimalInput(balance, baseCurrency, allowNegative = false)
                                 },
-                                label = { Text(t, fontSize = 11.sp) },
+                                label = { Text(AccountTypeCatalog.displayLabel(t), fontSize = 11.sp) },
                             )
                         }
                     }
@@ -406,16 +554,42 @@ fun AccountsScreen(
                         OutlinedTextField(
                             value = name,
                             onValueChange = { name = it },
-                            label = { Text(if (isCard) "Card Name" else "Account Name") },
+                            label = {
+                                Text(
+                                    when {
+                                        isDebit || isCredit -> "Card Name"
+                                        isLoan -> "Loan Name"
+                                        else -> "Account Name"
+                                    }
+                                )
+                            },
+                            placeholder = {
+                                Text(
+                                    when {
+                                        isDebit -> "e.g. HDFC Debit Card"
+                                        isCredit -> "e.g. SBI Cashback Card"
+                                        isLoan -> "e.g. Home Loan / Car Loan"
+                                        else -> "e.g. Main Bank Account"
+                                    }
+                                )
+                            },
                             singleLine = true,
                         )
                         OutlinedTextField(
                             value = institution,
                             onValueChange = { institution = it },
-                            label = { Text(if (isCard) "Bank / Issuer (optional)" else "Bank / Institution (optional)") },
+                            label = {
+                                Text(
+                                    when {
+                                        isLoan -> "Lender / Bank (optional)"
+                                        isDebit || isCredit -> "Bank / Issuer (optional)"
+                                        else -> "Bank / Institution (optional)"
+                                    }
+                                )
+                            },
                             singleLine = true,
                         )
-                        if (isCard) {
+                        if (supportsLastFour) {
                             OutlinedTextField(
                                 value = lastFour,
                                 onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) lastFour = it },
@@ -426,11 +600,30 @@ fun AccountsScreen(
                         }
                         OutlinedTextField(
                             value = balance,
-                            onValueChange = { balance = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = isCard) },
-                            label = { Text("Opening Balance ($baseCurrency)") },
+                            onValueChange = { balance = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
+                            label = {
+                                Text(
+                                    when {
+                                        isCredit -> "Current Amount Owed ($baseCurrency)"
+                                        isLoan -> "Remaining Loan Owed ($baseCurrency)"
+                                        isDebit -> "Available Card Balance ($baseCurrency)"
+                                        else -> "Current Balance ($baseCurrency)"
+                                    }
+                                )
+                            },
                             placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
+                        )
+                        Text(
+                            text = when {
+                                isCredit -> "Purchases increase amount owed; card repayments from bank/cash reduce it."
+                                isLoan -> "Tracked as debt owed; repayments reduce your remaining loan balance."
+                                isDebit -> "Spending deducts directly from your available debit balance."
+                                else -> "Tracked as a positive cash/bank asset in net worth."
+                            },
+                            fontSize = 11.sp,
+                            color = MutedSlate,
                         )
                     }
                 }
@@ -439,15 +632,16 @@ fun AccountsScreen(
                 Button(
                     enabled = canSave,
                     onClick = {
-                        val minor = parsedBalance ?: 0L
+                        val rawMinor = parsedBalance ?: 0L
+                        val normalizedMinor = AccountTypeCatalog.normalizeOpeningBalanceMinor(accountType, rawMinor)
                         val finalName = if (isCash) name.ifBlank { "Cash Wallet" } else name
                         vm.addAccount(
                             name = finalName,
                             institution = if (isCash) "" else institution,
                             type = accountType,
                             currency = baseCurrency,
-                            balanceMinor = minor,
-                            lastFour = if (isCard) lastFour else "",
+                            balanceMinor = normalizedMinor,
+                            lastFour = if (supportsLastFour) lastFour else "",
                         )
                         showAddAccount = false
                     },

@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
@@ -82,6 +83,7 @@ import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.TabularStyle
 import java.util.Calendar
+import kotlin.math.abs
 import kotlin.math.max
 
 @Composable
@@ -111,6 +113,9 @@ fun HomeScreen(
 
     val dashboard = remember(accounts, transactions, baseCurrency, monthStart) {
         AnalyticsCalculator.computeDashboard(accounts, transactions, baseCurrency, monthStart)
+    }
+    val accountSummary = remember(accounts, baseCurrency) {
+        AnalyticsCalculator.computeAccountSummary(accounts, baseCurrency)
     }
     val budgetProgress = remember(budgets, transactions, baseCurrency, monthStart, monthFraction) {
         AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction)
@@ -192,6 +197,15 @@ fun HomeScreen(
                     fontWeight = FontWeight.Bold,
                     color = SlateInk,
                 )
+                if (accountSummary.liabilitiesMinor > 0L) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Assets ${MoneyFormatter.formatMinor(accountSummary.assetsMinor, baseCurrency, masked = masked)} • Debt ${MoneyFormatter.formatMinor(accountSummary.liabilitiesMinor, baseCurrency, masked = masked)}",
+                        style = TabularStyle,
+                        fontSize = 11.sp,
+                        color = MutedSlate,
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 val netStr = MoneyFormatter.formatMinor(dashboard.netSavingsMinor, baseCurrency, showPlus = true, masked = masked)
                 StatusPill(
@@ -231,8 +245,13 @@ fun HomeScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    CategoryIconBadge(if (acc.accountType == "CASH") "payments" else "bank", "#0284C7", size = 32.dp)
-                                    StatusPill(acc.accountType, SlateTint, MutedSlate)
+                                    val isDebtAccount = AccountTypeCatalog.isLiability(acc.accountType) || acc.balanceMinor < 0L
+                                    CategoryIconBadge(
+                                        iconKey = AccountTypeCatalog.iconKey(acc.accountType),
+                                        tintHex = if (isDebtAccount && acc.balanceMinor < 0L) "#E11D48" else "#0284C7",
+                                        size = 32.dp,
+                                    )
+                                    StatusPill(AccountTypeCatalog.displayLabel(acc.accountType), SlateTint, MutedSlate)
                                 }
                                 Spacer(Modifier.height(10.dp))
                                 Text(
@@ -243,12 +262,17 @@ fun HomeScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                val isOwed = acc.balanceMinor < 0L
                                 Text(
-                                    text = MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency, masked = masked),
+                                    text = if (isOwed && AccountTypeCatalog.isLiability(acc.accountType)) {
+                                        "Owed ${MoneyFormatter.formatMinor(abs(acc.balanceMinor), acc.currency, masked = masked)}"
+                                    } else {
+                                        MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency, masked = masked)
+                                    },
                                     style = TabularStyle,
                                     fontSize = 17.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = SlateInk,
+                                    color = if (isOwed) RoseOutflow else SlateInk,
                                 )
                                 if (acc.currency != baseCurrency) {
                                     val fxVal = FxConverter.convertMinor(acc.balanceMinor, acc.currency, baseCurrency)

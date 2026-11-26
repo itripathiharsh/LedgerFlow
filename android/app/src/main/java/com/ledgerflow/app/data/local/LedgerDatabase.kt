@@ -5,8 +5,9 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.withTransaction
+import com.ledgerflow.app.domain.AccountTypeCatalog
+import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
-import java.util.Calendar
 import java.util.UUID
 import kotlin.math.abs
 
@@ -92,21 +93,27 @@ abstract class LedgerDatabase : RoomDatabase() {
         }
     }
 
-    suspend fun executePlannedPaymentAtomic(plannedId: String, fallbackAccountId: String?, nowMs: Long = System.currentTimeMillis()) {
-        withTransaction {
-            val item = plannedPaymentDao().getById(plannedId) ?: return@withTransaction
-            if (item.deletedAtEpochMs != null) return@withTransaction
-            val accountId = item.accountId ?: fallbackAccountId ?: return@withTransaction
-            val signedAmount = if (item.txType == "EXPENSE") -abs(item.amountMinor) else abs(item.amountMinor)
+    suspend fun executePlannedPaymentAtomic(
+        plannedId: String,
+        fallbackAccountId: String?,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Boolean {
+        return withTransaction {
+            val item = plannedPaymentDao().getById(plannedId) ?: return@withTransaction false
+            if (item.deletedAtEpochMs != null || item.amountMinor <= 0L) return@withTransaction false
+            val targetAccount = resolveActiveAccountForPlannedLocked(item.accountId, fallbackAccountId)
+                ?: return@withTransaction false
+            val normType = if (item.txType.equals("INCOME", ignoreCase = true)) "INCOME" else "EXPENSE"
+            val signedAmount = if (normType == "EXPENSE") -abs(item.amountMinor) else abs(item.amountMinor)
             val tx = TransactionEntity(
                 id = UUID.randomUUID().toString(),
-                accountId = accountId,
+                accountId = targetAccount.id,
                 categoryId = item.categoryId,
-                txType = item.txType,
+                txType = normType,
                 amountMinor = signedAmount,
                 currency = item.currency,
                 merchant = item.title,
-                note = "Planned ${item.cadence.lowercase()} payment",
+                note = "Planned ${item.cadence.lowercase()} ${if (normType == "INCOME") "income" else "bill"}",
                 sourceTag = "PLANNED",
                 autoRuleApplied = true,
                 occurredAtEpochMs = nowMs,
@@ -122,7 +129,93 @@ abstract class LedgerDatabase : RoomDatabase() {
                     pendingSync = true,
                 )
             )
+            true
         }
+    }
+
+    suspend fun skipPlannedPaymentAtomic(
+        plannedId: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Boolean {
+        return withTransaction {
+            val item = plannedPaymentDao().getById(plannedId) ?: return@withTransaction false
+            if (item.deletedAtEpochMs != null) return@withTransaction false
+            plannedPaymentDao().upsert(
+                item.copy(
+                    nextDueAtEpochMs = advanceDueDateEpochMs(item.nextDueAtEpochMs, item.cadence),
+                    updatedAtEpochMs = nowMs,
+                    pendingSync = true,
+                )
+            )
+            true
+        }
+    }
+
+    /**
+     * Executes any overdue or due-now Auto-Pay planned items once per due occurrence inside an atomic
+     * SQLite transaction. Uses deterministic per-occurrence IDs so concurrent calls cannot double-post.
+     */
+    suspend fun processDueAutoPayPlannedPayments(nowMs: Long = System.currentTimeMillis()): Int {
+        return withTransaction {
+            val activePlanned = plannedPaymentDao().getAllActive()
+            var postedCount = 0
+            for (item in activePlanned) {
+                if (item.deletedAtEpochMs != null || !item.autoPay || item.amountMinor <= 0L) continue
+                if (item.nextDueAtEpochMs > nowMs) continue
+                val targetAccount = resolveActiveAccountForPlannedLocked(item.accountId, null) ?: continue
+                val normType = if (item.txType.equals("INCOME", ignoreCase = true)) "INCOME" else "EXPENSE"
+                val signedAmount = if (normType == "EXPENSE") -abs(item.amountMinor) else abs(item.amountMinor)
+
+                var dueCursor = item.nextDueAtEpochMs
+                var steps = 0
+                while (dueCursor <= nowMs && steps < MAX_AUTOPAY_CATCHUP_STEPS) {
+                    val txId = UUID.nameUUIDFromBytes("autopay:${item.id}:$dueCursor".toByteArray()).toString()
+                    val existingTx = transactionDao().getById(txId)
+                    if (existingTx == null) {
+                        val tx = TransactionEntity(
+                            id = txId,
+                            accountId = targetAccount.id,
+                            categoryId = item.categoryId,
+                            txType = normType,
+                            amountMinor = signedAmount,
+                            currency = item.currency,
+                            merchant = item.title,
+                            note = "Auto-paid ${item.cadence.lowercase()} ${if (normType == "INCOME") "income" else "bill"}",
+                            sourceTag = "PLANNED",
+                            autoRuleApplied = true,
+                            occurredAtEpochMs = dueCursor,
+                            createdAtEpochMs = nowMs,
+                            updatedAtEpochMs = nowMs,
+                            pendingSync = true,
+                        )
+                        recordTransactionAtomic(tx)
+                        postedCount++
+                    }
+                    val nextDue = advanceDueDateEpochMs(dueCursor, item.cadence)
+                    if (nextDue <= dueCursor) break
+                    dueCursor = nextDue
+                    steps++
+                }
+                plannedPaymentDao().upsert(
+                    item.copy(
+                        nextDueAtEpochMs = dueCursor,
+                        updatedAtEpochMs = nowMs,
+                        pendingSync = true,
+                    )
+                )
+            }
+            postedCount
+        }
+    }
+
+    private suspend fun resolveActiveAccountForPlannedLocked(
+        preferredAccountId: String?,
+        fallbackAccountId: String?,
+    ): AccountEntity? {
+        preferredAccountId?.let { accountDao().getById(it) }?.takeIf { it.deletedAtEpochMs == null }?.let { return it }
+        fallbackAccountId?.let { accountDao().getById(it) }?.takeIf { it.deletedAtEpochMs == null }?.let { return it }
+        val active = accountDao().getAllActive()
+        return active.firstOrNull { !AccountTypeCatalog.isLiability(it.accountType) } ?: active.firstOrNull()
     }
 
     private suspend fun deleteAllRowsLocked() {
@@ -165,15 +258,10 @@ abstract class LedgerDatabase : RoomDatabase() {
     }
 
     companion object {
-        fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long {
-            val cal = Calendar.getInstance().apply { timeInMillis = currentDueMs }
-            when (cadence.uppercase()) {
-                "WEEKLY" -> cal.add(Calendar.DAY_OF_YEAR, 7)
-                "YEARLY" -> cal.add(Calendar.YEAR, 1)
-                else -> cal.add(Calendar.MONTH, 1)
-            }
-            return cal.timeInMillis
-        }
+        private const val MAX_AUTOPAY_CATCHUP_STEPS = 24
+
+        fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long =
+            AnalyticsCalculator.advanceDueDate(currentDueMs, cadence)
         @Volatile
         private var INSTANCE: LedgerDatabase? = null
 

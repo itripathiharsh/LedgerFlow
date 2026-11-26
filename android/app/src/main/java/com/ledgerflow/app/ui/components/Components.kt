@@ -20,10 +20,12 @@ import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Coffee
+import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.DirectionsTransit
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MedicalServices
 import androidx.compose.material.icons.outlined.Payments
+import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -156,6 +158,8 @@ fun categoryIcon(iconKey: String): ImageVector = when (iconKey) {
     "home" -> Icons.Outlined.Home
     "payments" -> Icons.Outlined.Payments
     "medical_services" -> Icons.Outlined.MedicalServices
+    "credit_card" -> Icons.Outlined.CreditCard
+    "loan" -> Icons.Outlined.ReceiptLong
     "bank" -> Icons.Outlined.AccountBalance
     else -> Icons.Outlined.Category
 }

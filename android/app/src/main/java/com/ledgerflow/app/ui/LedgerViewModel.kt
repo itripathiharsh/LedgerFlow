@@ -18,6 +18,7 @@ import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.data.remote.SupabaseSyncClient
 import com.ledgerflow.app.data.sync.LedgerSyncRepository
 import com.ledgerflow.app.data.sync.SyncOutcome
+import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.CalculatorEngine
 import com.ledgerflow.app.domain.FxConverter
@@ -159,6 +160,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
+            db.processDueAutoPayPlannedPayments()
             repo.refreshFxRatesIfOnline()
         }
 
@@ -207,6 +209,17 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
+        }
+        return cal.timeInMillis
+    }
+
+    fun currentMonthEndEpochMs(): Long {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, getActualMaximum(Calendar.DAY_OF_MONTH))
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
         }
         return cal.timeInMillis
     }
@@ -467,50 +480,119 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun addPlannedPayment(title: String, amountMinor: Long, currency: String, accountId: String?, categoryId: String?, cadence: String) {
-        if (title.isBlank() || amountMinor <= 0) {
-            _statusMessage.value = "Enter valid bill title & amount"
+    fun addPlannedPayment(
+        title: String,
+        amountMinor: Long,
+        currency: String,
+        accountId: String?,
+        categoryId: String?,
+        cadence: String,
+        txType: String = "EXPENSE",
+        nextDueAtEpochMs: Long? = null,
+        autoPay: Boolean = false,
+    ) {
+        val cleanTitle = title.trim()
+        val cleanCur = currency.trim().uppercase()
+        if (cleanTitle.isBlank() || amountMinor <= 0L || cleanCur.length != 3) {
+            _statusMessage.value = "Enter valid planned payment title & amount"
             return
         }
+        val normCadence = when (cadence.trim().uppercase()) {
+            "WEEKLY" -> "WEEKLY"
+            "YEARLY" -> "YEARLY"
+            else -> "MONTHLY"
+        }
+        val normType = if (txType.trim().equals("INCOME", ignoreCase = true)) "INCOME" else "EXPENSE"
         viewModelScope.launch {
             val now = System.currentTimeMillis()
+            val dueAt = nextDueAtEpochMs ?: LedgerDatabase.advanceDueDateEpochMs(now, normCadence)
+            val resolvedAccountId = accountId
+                ?.takeIf { id -> accounts.value.any { it.id == id && it.deletedAtEpochMs == null } }
+                ?: accounts.value.firstOrNull { !AccountTypeCatalog.isLiability(it.accountType) }?.id
+                ?: accounts.value.firstOrNull()?.id
             db.plannedPaymentDao().upsert(
                 PlannedPaymentEntity(
                     id = UUID.randomUUID().toString(),
-                    accountId = accountId,
+                    accountId = resolvedAccountId,
                     categoryId = categoryId,
-                    title = title.trim(),
-                    amountMinor = amountMinor,
-                    currency = currency,
-                    txType = "EXPENSE",
-                    cadence = cadence,
-                    nextDueAtEpochMs = now + 7L * 86_400_000L,
-                    autoPay = false,
+                    title = cleanTitle,
+                    amountMinor = abs(amountMinor),
+                    currency = cleanCur,
+                    txType = normType,
+                    cadence = normCadence,
+                    nextDueAtEpochMs = dueAt,
+                    autoPay = autoPay,
                     createdAtEpochMs = now,
                     updatedAtEpochMs = now,
                     pendingSync = true,
                 )
             )
+            if (autoPay && dueAt <= now) {
+                db.processDueAutoPayPlannedPayments(now)
+            }
             SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = "Planned payment added"
+            _statusMessage.value = if (normType == "INCOME") "Scheduled income added" else "Planned payment added"
         }
     }
 
     fun payPlannedNow(plannedId: String) {
         viewModelScope.launch {
-            val fallback = accounts.value.firstOrNull()?.id
-            db.executePlannedPaymentAtomic(plannedId, fallback)
+            val fallback = accounts.value.firstOrNull { !AccountTypeCatalog.isLiability(it.accountType) }?.id
+                ?: accounts.value.firstOrNull()?.id
+            val recorded = db.executePlannedPaymentAtomic(plannedId, fallback)
+            if (recorded) {
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = "Planned payment recorded"
+            } else {
+                _statusMessage.value = "Add an active account first to record planned payments"
+            }
+        }
+    }
+
+    fun skipPlannedPayment(plannedId: String) {
+        viewModelScope.launch {
+            if (db.skipPlannedPaymentAtomic(plannedId)) {
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = "Skipped to next due date"
+            }
+        }
+    }
+
+    fun togglePlannedAutoPay(plannedId: String, enabled: Boolean) {
+        viewModelScope.launch {
+            val existing = db.plannedPaymentDao().getById(plannedId) ?: return@launch
+            if (existing.deletedAtEpochMs != null) return@launch
+            val now = System.currentTimeMillis()
+            db.plannedPaymentDao().upsert(
+                existing.copy(
+                    autoPay = enabled,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            if (enabled && existing.nextDueAtEpochMs <= now) {
+                db.processDueAutoPayPlannedPayments(now)
+            }
             SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = "Planned payment recorded"
+            _statusMessage.value = if (enabled) "Auto-Pay enabled" else "Auto-Pay paused"
         }
     }
 
     fun addAccount(name: String, institution: String, type: String, currency: String, balanceMinor: Long, lastFour: String) {
-        val cleanName = name.trim()
+        val normType = AccountTypeCatalog.normalize(type)
+        val cleanName = if (normType == "CASH") name.trim().ifBlank { "Cash Wallet" } else name.trim()
         if (cleanName.isBlank()) {
             _statusMessage.value = "Account name required"
             return
         }
+        val cleanCur = currency.trim().uppercase()
+        if (cleanCur.length != 3) return
+        val cleanLastFour = if (AccountTypeCatalog.supportsLastFour(normType)) {
+            lastFour.filter(Char::isDigit).take(4)
+        } else {
+            ""
+        }
+        val normalizedMinor = AccountTypeCatalog.normalizeOpeningBalanceMinor(normType, balanceMinor)
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             db.accountDao().upsert(
@@ -518,10 +600,10 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                     id = UUID.randomUUID().toString(),
                     name = cleanName,
                     institution = institution.trim(),
-                    accountType = type,
-                    currency = currency.uppercase(),
-                    balanceMinor = balanceMinor,
-                    lastFour = lastFour.take(4),
+                    accountType = normType,
+                    currency = cleanCur,
+                    balanceMinor = normalizedMinor,
+                    lastFour = cleanLastFour,
                     sourceType = "MANUAL",
                     syncStatus = "OK",
                     lastSyncedAtEpochMs = now,
@@ -531,8 +613,46 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 )
             )
             SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = "Account \"$cleanName\" created"
+            _statusMessage.value = "${AccountTypeCatalog.displayLabel(normType)} \"$cleanName\" added"
         }
+    }
+
+    fun repayDebtAccount(
+        fromAccountId: String,
+        debtAccountId: String,
+        amountMinor: Long,
+        note: String = "",
+    ): Boolean {
+        if (amountMinor <= 0L || fromAccountId == debtAccountId) {
+            _statusMessage.value = "Select a source account and positive repayment amount"
+            return false
+        }
+        val fromAcc = accounts.value.firstOrNull { it.id == fromAccountId } ?: return false
+        val debtAcc = accounts.value.firstOrNull { it.id == debtAccountId } ?: return false
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val tx = TransactionEntity(
+                id = UUID.randomUUID().toString(),
+                accountId = fromAcc.id,
+                transferAccountId = debtAcc.id,
+                categoryId = null,
+                txType = "TRANSFER",
+                amountMinor = abs(amountMinor),
+                currency = fromAcc.currency,
+                merchant = "Repay ${debtAcc.name}",
+                note = note.trim().ifBlank { "${AccountTypeCatalog.displayLabel(debtAcc.accountType)} repayment" },
+                labelsCsv = "repayment",
+                sourceTag = "MANUAL",
+                occurredAtEpochMs = now,
+                createdAtEpochMs = now,
+                updatedAtEpochMs = now,
+                pendingSync = true,
+            )
+            db.recordTransactionAtomic(tx)
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "Repayment recorded for \"${debtAcc.name}\""
+        }
+        return true
     }
 
     fun deleteAccount(accountId: String) {
@@ -932,6 +1052,9 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             if (elapsedMs >= state.autoLockSeconds * 1000L) {
                 _isLocked.value = true
             }
+        }
+        viewModelScope.launch {
+            db.processDueAutoPayPlannedPayments()
         }
         resumePendingInstallIfPermitted()
         maybeCheckForUpdatesSilently()

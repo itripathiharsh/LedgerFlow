@@ -5,6 +5,7 @@ import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.CategoryEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.MagicRuleEntity
+import com.ledgerflow.app.data.local.PlannedPaymentEntity
 import com.ledgerflow.app.data.local.TransactionEntity
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -743,5 +744,149 @@ object AnalyticsCalculator {
             ratio <= 0.75 -> 3
             else -> 4
         }
+    }
+
+    data class AccountSummaryMetrics(
+        val assetsMinor: Long,
+        val liabilitiesMinor: Long,
+        val netWorthMinor: Long,
+    )
+
+    fun computeAccountSummary(
+        accounts: List<AccountEntity>,
+        baseCurrency: String,
+    ): AccountSummaryMetrics {
+        var assets = 0L
+        var liabilities = 0L
+        for (acc in accounts) {
+            if (acc.deletedAtEpochMs != null) continue
+            val converted = FxConverter.convertMinor(acc.balanceMinor, acc.currency, baseCurrency)
+            if (converted >= 0L) {
+                assets += converted
+            } else {
+                liabilities += abs(converted)
+            }
+        }
+        return AccountSummaryMetrics(
+            assetsMinor = assets,
+            liabilitiesMinor = liabilities,
+            netWorthMinor = assets - liabilities,
+        )
+    }
+
+    fun advanceDueDate(currentDueMs: Long, cadence: String): Long {
+        val cal = Calendar.getInstance().apply { timeInMillis = currentDueMs }
+        when (cadence.uppercase(Locale.US)) {
+            "DAILY" -> cal.add(Calendar.DAY_OF_YEAR, 1)
+            "WEEKLY" -> cal.add(Calendar.DAY_OF_YEAR, 7)
+            "YEARLY" -> cal.add(Calendar.YEAR, 1)
+            else -> cal.add(Calendar.MONTH, 1)
+        }
+        return cal.timeInMillis
+    }
+
+    /**
+     * Counts remaining upcoming scheduled EXPENSE bill occurrences falling inside
+     * [monthStartEpochMs .. monthEndEpochMs], preventing yearly bills due months away
+     * or already-paid bills (advanced into next month) from distorting Monthly Safe-to-Spend.
+     */
+    fun computeMonthlyPlannedExpenseMinor(
+        planned: List<PlannedPaymentEntity>,
+        baseCurrency: String,
+        monthStartEpochMs: Long,
+        monthEndEpochMs: Long,
+    ): Long {
+        var total = 0L
+        for (p in planned) {
+            if (p.deletedAtEpochMs != null || p.amountMinor <= 0L) continue
+            if (!p.txType.equals("EXPENSE", ignoreCase = true)) continue
+            if (p.nextDueAtEpochMs > monthEndEpochMs) continue
+            val perOccurrence = abs(FxConverter.convertMinor(p.amountMinor, p.currency, baseCurrency))
+            if (p.nextDueAtEpochMs < monthStartEpochMs) {
+                // Overdue unpaid bill counts once against current month obligation.
+                total += perOccurrence
+            } else {
+                var due = p.nextDueAtEpochMs
+                var guard = 0
+                while (due <= monthEndEpochMs && guard < 32) {
+                    total += perOccurrence
+                    val next = advanceDueDate(due, p.cadence)
+                    if (next <= due) break
+                    due = next
+                    guard++
+                }
+            }
+        }
+        return total
+    }
+}
+
+object AccountTypeCatalog {
+    val creatableTypes: List<String> = listOf(
+        "CASH",
+        "DEBIT_CARD",
+        "CREDIT_CARD",
+        "LOAN",
+        "CHECKING",
+        "SAVINGS",
+    )
+
+    fun normalize(raw: String): String = when (raw.trim().uppercase(Locale.US)) {
+        "CASH" -> "CASH"
+        "DEBIT_CARD", "DEBIT" -> "DEBIT_CARD"
+        "CREDIT_CARD", "CREDIT" -> "CREDIT_CARD"
+        "LOAN", "LOAD", "MORTGAGE", "EMI" -> "LOAN"
+        "CHECKING" -> "CHECKING"
+        "SAVINGS" -> "SAVINGS"
+        "CARD" -> "CARD"
+        "INVESTMENT" -> "INVESTMENT"
+        "SHARED" -> "SHARED"
+        else -> "CHECKING"
+    }
+
+    fun isLiability(accountType: String): Boolean {
+        val norm = normalize(accountType)
+        return norm == "CREDIT_CARD" || norm == "LOAN"
+    }
+
+    fun supportsLastFour(accountType: String): Boolean {
+        val norm = normalize(accountType)
+        return norm == "DEBIT_CARD" || norm == "CREDIT_CARD" || norm == "CARD"
+    }
+
+    fun normalizeOpeningBalanceMinor(accountType: String, enteredMinor: Long): Long =
+        when (normalize(accountType)) {
+            "CREDIT_CARD", "LOAN" -> if (enteredMinor == 0L) 0L else -abs(enteredMinor)
+            "CASH", "CHECKING", "SAVINGS", "DEBIT_CARD" -> abs(enteredMinor)
+            else -> enteredMinor
+        }
+
+    fun displayLabel(accountType: String): String = when (normalize(accountType)) {
+        "CASH" -> "Cash"
+        "DEBIT_CARD" -> "Debit Card"
+        "CREDIT_CARD" -> "Credit Card"
+        "LOAN" -> "Loan"
+        "CHECKING" -> "Checking"
+        "SAVINGS" -> "Savings"
+        "CARD" -> "Card"
+        "INVESTMENT" -> "Investment"
+        "SHARED" -> "Shared"
+        else -> accountType
+    }
+
+    fun iconKey(accountType: String): String = when (normalize(accountType)) {
+        "CASH" -> "payments"
+        "DEBIT_CARD", "CREDIT_CARD", "CARD" -> "credit_card"
+        "LOAN" -> "loan"
+        else -> "bank"
+    }
+
+    fun toSupabaseSafeType(accountType: String): String = when (normalize(accountType)) {
+        "CASH" -> "CASH"
+        "SAVINGS" -> "SAVINGS"
+        "INVESTMENT" -> "INVESTMENT"
+        "DEBIT_CARD", "CREDIT_CARD", "CARD" -> "CARD"
+        "LOAN", "SHARED" -> "SHARED"
+        else -> "CHECKING"
     }
 }

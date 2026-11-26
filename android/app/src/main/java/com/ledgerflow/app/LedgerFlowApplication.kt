@@ -45,6 +45,7 @@ class LedgerFlowApplication : Application(), Configuration.Provider {
 
         applicationScope.launch {
             SeedData.ensureMinimalSetup(database, defaultCurrency = vaultStore.read().baseCurrency)
+            database.processDueAutoPayPlannedPayments()
             syncRepository.restoreCachedFxRates()
             if (!vaultStore.read().pendingUpdateRelaunch) {
                 AppUpdateManager.cleanupUpdateCache(this@LedgerFlowApplication)

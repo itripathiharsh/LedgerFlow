@@ -46,9 +46,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.CalculatorEngine
 import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.MoneyFormatter
+import kotlin.math.abs
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.StatusPill
@@ -78,7 +80,13 @@ fun AddTransactionScreen(
     val lockedCurrency = vault.baseCurrency
     var txType by remember { mutableStateOf(initialType) }
     var expr by remember { mutableStateOf("0") }
-    var selectedAccountId by remember(accounts) { mutableStateOf(accounts.firstOrNull()?.id ?: "") }
+    var selectedAccountId by remember(accounts) {
+        mutableStateOf(
+            accounts.firstOrNull { AccountTypeCatalog.normalize(it.accountType) != "LOAN" }?.id
+                ?: accounts.firstOrNull()?.id
+                ?: ""
+        )
+    }
     var transferTargetId by remember(accounts) { mutableStateOf(accounts.getOrNull(1)?.id ?: accounts.firstOrNull()?.id ?: "") }
     var selectedCategoryId by remember { mutableStateOf<String?>(null) }
     var merchant by remember { mutableStateOf("") }
@@ -224,10 +232,15 @@ fun AddTransactionScreen(
                 } else {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         accounts.forEach { acc ->
+                            val balText = if (acc.balanceMinor < 0L && AccountTypeCatalog.isLiability(acc.accountType)) {
+                                "Owed ${MoneyFormatter.formatMinor(abs(acc.balanceMinor), acc.currency)}"
+                            } else {
+                                MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency)
+                            }
                             FilterChip(
                                 selected = selectedAccountId == acc.id,
                                 onClick = { selectedAccountId = acc.id },
-                                label = { Text("${acc.name} (${MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency)})", fontSize = 12.sp) },
+                                label = { Text("${acc.name} ($balText)", fontSize = 12.sp) },
                                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = EmeraldSoft, selectedLabelColor = EmeraldDark),
                             )
                         }
@@ -356,9 +369,12 @@ fun AddTransactionScreen(
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
         ) {
-            val actionLabel = when (txType) {
-                "INCOME" -> "Save Income"
-                "TRANSFER" -> "Save Transfer"
+            val transferTarget = accounts.firstOrNull { it.id == transferTargetId }
+            val actionLabel = when {
+                txType == "INCOME" -> "Save Income"
+                txType == "TRANSFER" && transferTarget != null && AccountTypeCatalog.isLiability(transferTarget.accountType) ->
+                    "Repay ${AccountTypeCatalog.displayLabel(transferTarget.accountType)}"
+                txType == "TRANSFER" -> "Save Transfer"
                 else -> "Save Expense"
             }
             Text(

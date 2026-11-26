@@ -20,6 +20,7 @@ import com.ledgerflow.app.data.remote.SupabaseMagicRuleDto
 import com.ledgerflow.app.data.remote.SupabasePlannedDto
 import com.ledgerflow.app.data.remote.SupabaseSyncClient
 import com.ledgerflow.app.data.remote.SupabaseTransactionDto
+import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.ImportParser
 import com.ledgerflow.app.domain.MagicRuleEngine
@@ -228,7 +229,7 @@ class LedgerSyncRepository(
 
     private suspend fun pushAllDirty(userId: String, token: String): Int {
         val codes = listOf(
-            pushDirtyTable("accounts", db.accountDao().getDirty(), SupabaseAccountDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.accountDao()::markSynced),
+            pushDirtyTable("accounts", db.accountDao().getDirty(), SupabaseAccountDto.serializer(), token, { it.id }, { it.toRemoteDto(userId) }, db.accountDao()::markSynced),
             pushDirtyTable("categories", db.categoryDao().getDirty(), SupabaseCategoryDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.categoryDao()::markSynced),
             pushDirtyTable("transactions", db.transactionDao().getDirty(), SupabaseTransactionDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.transactionDao()::markSynced),
             pushDirtyTable("budgets", db.budgetDao().getDirty(), SupabaseBudgetDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.budgetDao()::markSynced),
@@ -557,6 +558,10 @@ private fun AccountEntity.toDto(userId: String) = SupabaseAccountDto(
     syncStatus = syncStatus, lastSyncedAt = lastSyncedAtEpochMs?.let(IsoTime::format),
     createdAt = IsoTime.format(createdAtEpochMs), updatedAt = IsoTime.format(updatedAtEpochMs),
     deletedAt = deletedAtEpochMs?.let(IsoTime::format),
+)
+
+private fun AccountEntity.toRemoteDto(userId: String) = toDto(userId).copy(
+    accountType = AccountTypeCatalog.toSupabaseSafeType(accountType),
 )
 
 private fun SupabaseAccountDto.toEntity(now: Long) = AccountEntity(

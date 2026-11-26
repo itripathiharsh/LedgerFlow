@@ -11,10 +11,12 @@ import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.PlannedPaymentEntity
 import com.ledgerflow.app.data.local.SeedData
 import com.ledgerflow.app.data.local.TransactionEntity
+import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.MagicRuleEngine
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -247,5 +249,78 @@ class LedgerDatabaseRobolectricTest {
         db.accountDao().upsert(after.copy(balanceMinor = 50_000L))
         db.alignStarterWalletCurrencyIfEmpty("EUR", nowMs = 1_700_000_002_000L)
         assertEquals("INR", db.accountDao().getAllActive().single().currency)
+    }
+
+    @Test
+    fun autoPayAndSkipPlannedPayments_handleCatchUpIdempotentlyAndFallBackWhenAccountDeleted() = runTest {
+        SeedData.ensureMinimalSetup(db, defaultCurrency = "INR", nowMs = 1_700_000_000_000L)
+        val wallet = db.accountDao().getAllActive().single()
+        val debitCardId = UUID.randomUUID().toString()
+        db.accountDao().upsert(
+            AccountEntity(
+                id = debitCardId,
+                name = "HDFC Debit",
+                accountType = "DEBIT_CARD",
+                currency = "INR",
+                balanceMinor = AccountTypeCatalog.normalizeOpeningBalanceMinor("DEBIT_CARD", 200_000L),
+                lastFour = "4411",
+                createdAtEpochMs = 1_700_000_000_000L,
+                updatedAtEpochMs = 1_700_000_000_000L,
+            )
+        )
+
+        val oct15 = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            set(2026, Calendar.OCTOBER, 15, 9, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val nov20 = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            set(2026, Calendar.NOVEMBER, 20, 9, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val plannedId = UUID.randomUUID().toString()
+        db.plannedPaymentDao().upsert(
+            PlannedPaymentEntity(
+                id = plannedId,
+                accountId = debitCardId,
+                categoryId = SeedData.CAT_BILLS,
+                title = "Fiber Internet",
+                amountMinor = 50_000L,
+                currency = "INR",
+                txType = "EXPENSE",
+                cadence = "MONTHLY",
+                nextDueAtEpochMs = oct15,
+                autoPay = true,
+                createdAtEpochMs = oct15,
+                updatedAtEpochMs = oct15,
+            )
+        )
+
+        // Two due cycles (Oct 15 and Nov 15) <= Nov 20 should post exactly once per period
+        val postedFirst = db.processDueAutoPayPlannedPayments(nowMs = nov20)
+        assertEquals(2, postedFirst)
+        assertEquals(100_000L, db.accountDao().getById(debitCardId)!!.balanceMinor)
+
+        val updatedPlanned = db.plannedPaymentDao().getById(plannedId)!!
+        assertTrue(updatedPlanned.nextDueAtEpochMs > nov20)
+
+        // Second run must be 100% idempotent
+        assertEquals(0, db.processDueAutoPayPlannedPayments(nowMs = nov20))
+
+        // Skipping advances one cadence without posting a transaction
+        val beforeSkipDue = updatedPlanned.nextDueAtEpochMs
+        assertTrue(db.skipPlannedPaymentAtomic(plannedId, nowMs = nov20))
+        val afterSkip = db.plannedPaymentDao().getById(plannedId)!!
+        assertEquals(LedgerDatabase.advanceDueDateEpochMs(beforeSkipDue, "MONTHLY"), afterSkip.nextDueAtEpochMs)
+        assertEquals(2, db.transactionDao().getAllActive().size)
+
+        // If target account is soft-deleted, manual execute falls back safely to active Cash Wallet
+        db.accountDao().upsert(db.accountDao().getById(debitCardId)!!.copy(deletedAtEpochMs = nov20, updatedAtEpochMs = nov20))
+        assertTrue(db.executePlannedPaymentAtomic(plannedId, wallet.id, nowMs = nov20 + 1_000L))
+        assertEquals(-50_000L, db.accountDao().getById(wallet.id)!!.balanceMinor)
+
+        // If all accounts are soft-deleted, execute returns false instead of lying
+        db.accountDao().upsert(db.accountDao().getById(wallet.id)!!.copy(deletedAtEpochMs = nov20 + 2_000L, updatedAtEpochMs = nov20 + 2_000L))
+        assertFalse(db.executePlannedPaymentAtomic(plannedId, null, nowMs = nov20 + 3_000L))
     }
 }

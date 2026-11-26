@@ -1,10 +1,13 @@
 package com.ledgerflow.app
 
+import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.CategoryEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.MagicRuleEntity
+import com.ledgerflow.app.data.local.PlannedPaymentEntity
 import com.ledgerflow.app.data.local.TransactionEntity
+import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.CalculatorEngine
 import com.ledgerflow.app.domain.FxConverter
@@ -19,6 +22,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Calendar
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 
@@ -285,5 +289,66 @@ class FinanceMathTest {
         assertEquals(1500L, CalculatorEngine.evaluateToMinor("1000+500", "JPY"))
         assertNull(CalculatorEngine.evaluateToMinor("9999999999999999999"))
         assertEquals(0L, AnalyticsCalculator.safeMultiplyMinor(Double.POSITIVE_INFINITY, 100L))
+    }
+
+    @Test
+    fun accountTypesAndMonthlyPlannedExpenseMath_separateAssetsDebtAndCalendarScope() {
+        // Opening balance normalization: credit card & loan store negative owed debt; debit card & cash stay assets
+        assertEquals(-150_000L, AccountTypeCatalog.normalizeOpeningBalanceMinor("CREDIT_CARD", 150_000L))
+        assertEquals(-500_000L, AccountTypeCatalog.normalizeOpeningBalanceMinor("LOAN", 500_000L))
+        assertEquals(200_000L, AccountTypeCatalog.normalizeOpeningBalanceMinor("DEBIT_CARD", 200_000L))
+        assertEquals("CARD", AccountTypeCatalog.toSupabaseSafeType("CREDIT_CARD"))
+        assertEquals("CARD", AccountTypeCatalog.toSupabaseSafeType("DEBIT_CARD"))
+        assertEquals("SHARED", AccountTypeCatalog.toSupabaseSafeType("LOAN"))
+
+        val accs = listOf(
+            AccountEntity("a1", "Debit Card", accountType = "DEBIT_CARD", currency = "INR", balanceMinor = 800_000L, createdAtEpochMs = 1L, updatedAtEpochMs = 1L),
+            AccountEntity("a2", "Credit Card", accountType = "CREDIT_CARD", currency = "INR", balanceMinor = -150_000L, createdAtEpochMs = 1L, updatedAtEpochMs = 1L),
+            AccountEntity("a3", "Car Loan", accountType = "LOAN", currency = "INR", balanceMinor = -450_000L, createdAtEpochMs = 1L, updatedAtEpochMs = 1L),
+        )
+        val acctSummary = AnalyticsCalculator.computeAccountSummary(accs, "INR")
+        assertEquals(800_000L, acctSummary.assetsMinor)
+        assertEquals(600_000L, acctSummary.liabilitiesMinor)
+        assertEquals(200_000L, acctSummary.netWorthMinor)
+
+        val novStart = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 1, 0, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val novEnd = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 30, 23, 59, 59)
+            set(Calendar.MILLISECOND, 999)
+        }.timeInMillis
+        val nov24 = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 24, 9, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val nov16 = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 16, 9, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val dec15NextMonth = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.DECEMBER, 15, 9, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val augNextYear = java.util.Calendar.getInstance().apply {
+            set(2027, java.util.Calendar.AUGUST, 10, 9, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val planned = listOf(
+            // Weekly starting Nov 16 -> 3 occurrences remaining in Nov (16, 23, 30) * 1000 = 3000
+            PlannedPaymentEntity("p_wk", "a1", null, "Transit", 1_000L, "INR", "EXPENSE", "WEEKLY", nov16, false, 1L, 1L),
+            // Monthly already paid (due Dec 15) -> 0 this month
+            PlannedPaymentEntity("p_paid", "a1", null, "Rent", 50_000L, "INR", "EXPENSE", "MONTHLY", dec15NextMonth, false, 1L, 1L),
+            // Yearly due Aug next year -> 0 this month
+            PlannedPaymentEntity("p_yr", "a1", null, "Insurance", 200_000L, "INR", "EXPENSE", "YEARLY", augNextYear, false, 1L, 1L),
+            // Scheduled income due Nov 24 -> never subtracted as an expense bill
+            PlannedPaymentEntity("p_inc", "a1", null, "Salary", 100_000L, "INR", "INCOME", "MONTHLY", nov24, false, 1L, 1L),
+        )
+        assertEquals(
+            3_000L,
+            AnalyticsCalculator.computeMonthlyPlannedExpenseMinor(planned, "INR", novStart, novEnd),
+        )
     }
 }
