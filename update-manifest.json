@@ -1,16 +1,16 @@
 {
-  "versionCode": 8,
-  "versionName": "1.0.7",
+  "versionCode": 9,
+  "versionName": "1.0.8",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-26T23:52:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.7/LedgerFlow-v1.0.7.apk",
-  "apkSizeBytes": 4350241,
-  "sha256": "b956f1f75b89b0074b4f893ade7ba2cd65b5515aceb0628a6ab87b411d7965c1",
+  "releasedAt": "2026-11-27T00:40:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.8/LedgerFlow-v1.0.8.apk",
+  "apkSizeBytes": 4387105,
+  "sha256": "1ed24f45afbcdaf1144d64616ff38c9dc49194129c285bf3a876a11f02e894d6",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Fixed accidental outside/adjacent-tap dismissal & snoozing in the update dialog by disabling dismissOnClickOutside and widening the Update Now button.",
-    "Fixed silent failures when launching Android Unknown Sources Settings or the PackageInstaller confirmation sheet by adding ordered intent fallbacks and visible Retry errors.",
-    "Added verified cached-APK reuse, synchronous duplicate-download locking across permission callbacks, and an Open System Installer fallback button."
+    "Fixed crash when clicking Import Data on Android devices by adding safe OpenDocument -> GetContent -> Chooser fallbacks.",
+    "Moved file reading, parsing, and Room import onto background IO with full exception handling so malformed or large files never close the app.",
+    "Upgraded importer to support third-party app CSV/TSV exports (UTF-8/UTF-16 BOM, split Debit/Credit, positive amounts + Type, currency symbols, dates) and JSON backups in both Accounts and Settings."
   ],
   "mandatory": false
 }

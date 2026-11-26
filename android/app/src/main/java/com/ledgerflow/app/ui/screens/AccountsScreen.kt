@@ -2,8 +2,6 @@ package com.ledgerflow.app.ui.screens
 
 import android.content.Intent
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -66,6 +64,7 @@ import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
 import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.StatusPill
+import com.ledgerflow.app.ui.components.rememberDataImportPicker
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
@@ -111,11 +110,12 @@ fun AccountsScreen(
     var showAddAccount by remember { mutableStateOf(false) }
     var pendingDeleteAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var showSmartPaste by remember { mutableStateOf(false) }
+    val importBusy by vm.importInProgress.collectAsState()
 
-    val csvPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        vm.importCsvUri(uri)
-    }
+    val launchImportPicker = rememberDataImportPicker(
+        onUriSelected = { vm.importCsvUri(it) },
+        onLaunchFailed = { vm.showMessage(it) },
+    )
 
     LazyColumn(
         modifier = Modifier
@@ -304,11 +304,11 @@ fun AccountsScreen(
             }
         }
 
-        // Import CSV Card
+        // Import Data Card (CSV / TSV / JSON)
         item {
             CleanCard(
                 padding = 14.dp,
-                onClick = { csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/*")) },
+                onClick = { if (!importBusy) launchImportPicker() },
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -316,10 +316,10 @@ fun AccountsScreen(
                 ) {
                     Icon(Icons.Outlined.FileUpload, contentDescription = null, tint = SkySync)
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Import Bank CSV", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateInk)
-                        Text("Parse CSV statements directly on your device", fontSize = 12.sp, color = MutedSlate)
+                        Text("Import Data (CSV / JSON)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateInk)
+                        Text("Import transactions from other apps or bank statements", fontSize = 12.sp, color = MutedSlate)
                     }
-                    StatusPill("Browse", SlateTint, SlateInk)
+                    StatusPill(if (importBusy) "Importing..." else "Browse", SlateTint, SlateInk)
                 }
             }
         }

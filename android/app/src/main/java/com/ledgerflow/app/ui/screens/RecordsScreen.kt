@@ -133,7 +133,8 @@ fun RecordsScreen(
                     IconButton(onClick = {
                         vm.exportAndShare(asCsv = true) { intent ->
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            context.startActivity(intent)
+                            runCatching { context.startActivity(intent) }
+                                .onFailure { vm.showMessage("No app found to share exported CSV") }
                         }
                     }) {
                         Icon(Icons.Outlined.FileDownload, contentDescription = "Export CSV", tint = SlateInk)

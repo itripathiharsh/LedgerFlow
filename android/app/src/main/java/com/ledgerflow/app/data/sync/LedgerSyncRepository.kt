@@ -9,6 +9,7 @@ import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.LedgerDatabase
 import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.PlannedPaymentEntity
+import com.ledgerflow.app.data.local.SeedData
 import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.data.remote.IsoTime
 import com.ledgerflow.app.data.remote.SupabaseAccountDto
@@ -20,7 +21,9 @@ import com.ledgerflow.app.data.remote.SupabasePlannedDto
 import com.ledgerflow.app.data.remote.SupabaseSyncClient
 import com.ledgerflow.app.data.remote.SupabaseTransactionDto
 import com.ledgerflow.app.domain.FxConverter
+import com.ledgerflow.app.domain.ImportParser
 import com.ledgerflow.app.domain.MagicRuleEngine
+import com.ledgerflow.app.domain.ParsedImportResult
 import com.ledgerflow.app.security.VaultStore
 import com.ledgerflow.app.util.NetworkMonitor
 import kotlinx.coroutines.sync.Mutex
@@ -38,6 +41,14 @@ sealed class SyncOutcome {
     data class LocalOnly(val reason: String, val pendingCount: Int) : SyncOutcome()
     data class Error(val message: String) : SyncOutcome()
 }
+
+data class DataImportOutcome(
+    val importedTransactions: Int,
+    val importedAccounts: Int = 0,
+    val importedOtherItems: Int = 0,
+    val formatLabel: String = "CSV",
+    val message: String,
+)
 
 @Serializable
 data class LedgerVaultBackup(
@@ -60,6 +71,7 @@ class LedgerSyncRepository(
 ) {
     private val syncMutex = Mutex()
     private val exportJson = Json { prettyPrint = true; encodeDefaults = true }
+    private val importJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
     suspend fun countPendingChanges(): Int =
         db.accountDao().getDirty().size +
@@ -352,61 +364,148 @@ class LedgerSyncRepository(
         return winners.size
     }
 
-    suspend fun importCsvOffline(csvText: String, targetAccountId: String, defaultCurrency: String = "USD"): Int {
-        val lines = csvText.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        if (lines.size < 2) return 0
-        val delimiter = if (lines[0].contains(';') && !lines[0].contains(',')) ';' else ','
-        val headers = splitCsv(lines[0], delimiter).map { it.lowercase(Locale.US) }
-        val merchantIdx = headers.indexOfFirst { it.contains("merchant") || it.contains("description") || it.contains("payee") || it.contains("name") }
-        val amountIdx = headers.indexOfFirst { it.contains("amount") || it.contains("value") || it.contains("sum") }
-        val currIdx = headers.indexOfFirst { it.contains("curr") }
-        val noteIdx = headers.indexOfFirst { it.contains("note") || it.contains("memo") }
-        if (merchantIdx < 0 || amountIdx < 0) return 0
+    suspend fun importCsvOffline(csvText: String, targetAccountId: String, defaultCurrency: String = "USD"): Int =
+        importExternalDataOffline(
+            rawBytes = csvText.toByteArray(Charsets.UTF_8),
+            preferredAccountId = targetAccountId,
+            defaultCurrency = defaultCurrency,
+        ).importedTransactions
 
-        val rules = db.magicRuleDao().getAllActive()
-        var imported = 0
+    suspend fun importExternalDataOffline(
+        rawBytes: ByteArray,
+        preferredAccountId: String? = null,
+        defaultCurrency: String = "USD",
+    ): DataImportOutcome {
+        ImportParser.detectBinaryFormatMessage(rawBytes)?.let { reason ->
+            return DataImportOutcome(0, message = reason)
+        }
+        val text = ImportParser.decodeTextBytes(rawBytes)
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) {
+            return DataImportOutcome(0, message = "Selected file is empty.")
+        }
+
         val now = System.currentTimeMillis()
-        db.withTransaction {
-            for (i in 1 until lines.size) {
-                val cols = splitCsv(lines[i], delimiter)
-                if (cols.size <= maxOf(merchantIdx, amountIdx)) continue
-                val cell = cols[amountIdx].trim()
-                val parensNegative = cell.startsWith("(") && cell.endsWith(")")
-                val rawAmt = cell.replace(Regex("[^\\d.\\-]"), "")
-                var decimal = rawAmt.toBigDecimalOrNull() ?: continue
-                if (parensNegative && decimal > BigDecimal.ZERO) {
-                    decimal = decimal.negate()
-                }
-                val minor = decimal.multiply(BigDecimal(100)).setScale(0, RoundingMode.HALF_UP).toLong()
-                if (minor == 0L) continue
-                val txType = if (minor < 0) "EXPENSE" else "INCOME"
-                val merchant = cols[merchantIdx].ifBlank { "Imported Item" }
-                val note = if (noteIdx in cols.indices) cols[noteIdx] else ""
-                val currency = if (currIdx in cols.indices && cols[currIdx].length == 3) cols[currIdx].uppercase(Locale.US) else defaultCurrency
-                val ruleMatch = MagicRuleEngine.apply(merchant, note, rules)
-                db.recordTransactionAtomic(
-                    TransactionEntity(
-                        id = UUID.randomUUID().toString(),
-                        accountId = targetAccountId,
-                        categoryId = ruleMatch.categoryId,
-                        txType = txType,
-                        amountMinor = if (txType == "EXPENSE") -abs(minor) else abs(minor),
-                        currency = currency,
-                        merchant = merchant,
-                        note = note,
-                        labelsCsv = ruleMatch.label.orEmpty(),
-                        sourceTag = "IMPORT",
-                        autoRuleApplied = ruleMatch.matched,
-                        occurredAtEpochMs = now - i * 1000L,
-                        createdAtEpochMs = now,
-                        updatedAtEpochMs = now,
-                        pendingSync = true,
-                    )
-                )
-                imported++
+        if (trimmed.startsWith("{") && trimmed.contains("\"transactions\"") && trimmed.contains("\"accounts\"")) {
+            val backup = runCatching { importJson.decodeFromString(LedgerVaultBackup.serializer(), trimmed) }.getOrNull()
+            if (backup != null && (backup.accounts.isNotEmpty() || backup.transactions.isNotEmpty())) {
+                return restoreVaultBackupOffline(backup, defaultCurrency, now)
             }
         }
-        return imported
+
+        return when (val parsed = ImportParser.parseTransactionsCsvOrJson(text, defaultCurrency, now)) {
+            is ParsedImportResult.Error -> DataImportOutcome(0, message = parsed.message)
+            is ParsedImportResult.Transactions -> {
+                SeedData.ensureMinimalSetup(db, defaultCurrency = defaultCurrency, nowMs = now)
+                val activeAccounts = db.accountDao().getAllActive()
+                val fallbackAccountId = preferredAccountId?.takeIf { id -> activeAccounts.any { it.id == id } }
+                    ?: activeAccounts.firstOrNull()?.id
+                    ?: return DataImportOutcome(0, formatLabel = parsed.formatLabel, message = "Create an account first before importing.")
+
+                val categories = db.categoryDao().getAllActive()
+                val rules = db.magicRuleDao().getAllActive()
+                var imported = 0
+
+                db.withTransaction {
+                    for (draft in parsed.drafts) {
+                        val accountId = resolveAccountId(draft.accountHint, activeAccounts) ?: fallbackAccountId
+                        val ruleMatch = MagicRuleEngine.apply(draft.merchant, draft.note, rules)
+                        val hintCatId = resolveCategoryId(draft.categoryHint, draft.txType, categories)
+                        val categoryId = ruleMatch.categoryId ?: hintCatId
+                        val labels = listOfNotNull(
+                            draft.labelsCsv.takeIf { it.isNotBlank() },
+                            ruleMatch.label?.takeIf { it.isNotBlank() },
+                        ).distinct().joinToString(",")
+
+                        db.recordTransactionAtomic(
+                            TransactionEntity(
+                                id = UUID.randomUUID().toString(),
+                                accountId = accountId,
+                                categoryId = categoryId,
+                                txType = draft.txType,
+                                amountMinor = draft.amountMinor,
+                                currency = draft.currency,
+                                merchant = draft.merchant,
+                                note = draft.note,
+                                labelsCsv = labels,
+                                sourceTag = "IMPORT",
+                                autoRuleApplied = ruleMatch.matched,
+                                occurredAtEpochMs = draft.occurredAtEpochMs,
+                                createdAtEpochMs = now,
+                                updatedAtEpochMs = now,
+                                pendingSync = true,
+                            )
+                        )
+                        imported++
+                    }
+                }
+                DataImportOutcome(
+                    importedTransactions = imported,
+                    formatLabel = parsed.formatLabel,
+                    message = "Imported $imported transactions (${parsed.formatLabel})",
+                )
+            }
+        }
+    }
+
+    private suspend fun restoreVaultBackupOffline(
+        backup: LedgerVaultBackup,
+        defaultCurrency: String,
+        nowMs: Long,
+    ): DataImportOutcome {
+        val cats = backup.categories.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val accs = backup.accounts.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val txs = backup.transactions.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val budgets = backup.budgets.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val planned = backup.plannedPayments.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val holdings = backup.holdings.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val rules = backup.magicRules.map { it.toEntity(nowMs).copy(pendingSync = true) }
+
+        db.withTransaction {
+            if (cats.isNotEmpty()) db.categoryDao().upsertAll(cats)
+            if (accs.isNotEmpty()) db.accountDao().upsertAll(accs)
+            if (budgets.isNotEmpty()) db.budgetDao().upsertAll(budgets)
+            if (planned.isNotEmpty()) db.plannedPaymentDao().upsertAll(planned)
+            if (holdings.isNotEmpty()) db.holdingDao().upsertAll(holdings)
+            if (rules.isNotEmpty()) db.magicRuleDao().upsertAll(rules)
+            if (txs.isNotEmpty()) db.transactionDao().upsertAll(txs)
+            if (db.accountDao().getAllActive().isEmpty() || db.categoryDao().getAllActive().isEmpty()) {
+                SeedData.ensureMinimalSetup(db, defaultCurrency = backup.baseCurrency.ifBlank { defaultCurrency }, nowMs = nowMs)
+            }
+        }
+
+        val activeTxCount = txs.count { it.deletedAtEpochMs == null }
+        val activeAccCount = accs.count { it.deletedAtEpochMs == null }
+        val otherCount = budgets.count { it.deletedAtEpochMs == null } +
+            planned.count { it.deletedAtEpochMs == null } +
+            holdings.count { it.deletedAtEpochMs == null } +
+            rules.count { it.deletedAtEpochMs == null }
+
+        return DataImportOutcome(
+            importedTransactions = activeTxCount,
+            importedAccounts = activeAccCount,
+            importedOtherItems = otherCount,
+            formatLabel = "JSON",
+            message = "Imported $activeTxCount transactions across $activeAccCount accounts (JSON backup)",
+        )
+    }
+
+    private fun resolveAccountId(hint: String?, accounts: List<AccountEntity>): String? {
+        val clean = hint?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return accounts.firstOrNull { it.name.equals(clean, ignoreCase = true) }?.id
+            ?: accounts.firstOrNull { it.name.contains(clean, ignoreCase = true) || clean.contains(it.name, ignoreCase = true) }?.id
+    }
+
+    private fun resolveCategoryId(hint: String?, txType: String, categories: List<CategoryEntity>): String? {
+        val clean = hint?.trim()?.takeIf { it.isNotEmpty() }
+        if (clean != null) {
+            categories.firstOrNull { it.name.equals(clean, ignoreCase = true) }?.let { return it.id }
+            categories.firstOrNull { it.name.contains(clean, ignoreCase = true) || clean.contains(it.name, ignoreCase = true) }?.let { return it.id }
+        }
+        return when (txType) {
+            "INCOME" -> categories.firstOrNull { it.kind == "INCOME" }?.id
+            else -> categories.firstOrNull { it.name.equals("General", ignoreCase = true) }?.id
+        }
     }
 
     suspend fun exportVaultJson(): String {
@@ -450,34 +549,6 @@ class LedgerSyncRepository(
     }
 
     private fun csvCell(v: String): String = "\"${v.replace("\"", "\"\"")}\""
-
-    private fun splitCsv(line: String, delimiter: Char): List<String> {
-        val res = mutableListOf<String>()
-        val cur = StringBuilder()
-        var inQuotes = false
-        var i = 0
-        while (i < line.length) {
-            val c = line[i]
-            when {
-                c == '"' -> {
-                    if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
-                        cur.append('"')
-                        i++
-                    } else {
-                        inQuotes = !inQuotes
-                    }
-                }
-                c == delimiter && !inQuotes -> {
-                    res.add(cur.toString().trim())
-                    cur.clear()
-                }
-                else -> cur.append(c)
-            }
-            i++
-        }
-        res.add(cur.toString().trim())
-        return res
-    }
 }
 
 private fun AccountEntity.toDto(userId: String) = SupabaseAccountDto(

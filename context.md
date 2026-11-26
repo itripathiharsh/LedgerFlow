@@ -219,6 +219,20 @@
   - Signed `LedgerFlow-v1.0.7.apk` (`4,350,241` bytes, SHA-256 `b956f1f75b89b0074b4f893ade7ba2cd65b5515aceb0628a6ab87b411d7965c1`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.0.7`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.7/LedgerFlow-v1.0.7.apk`.
 
+---
+
+## Crash-Proof Document Picker & Cross-App Data Importer (`v1.0.8`, `versionCode 9`)
+- **Root Causes Fixed**:
+  - `AccountsScreen` called `ActivityResultContracts.OpenDocument().launch(arrayOf("text/*", "text/csv", "application/*"))` directly without `try/catch`, crashing on devices where `DocumentsUI` is unavailable/restricted or throws `ActivityNotFoundException`.
+  - `LedgerViewModel.importCsvUri` ran `repo.importCsvOffline` directly on `Dispatchers.Main` with no `try/catch`, crashing if Room/parsing threw, and only checked CSV header row 0 without handling UTF-8/UTF-16 BOM, quoted newlines, `Rs.` amount prefixes, split `Debit`/`Credit` bank columns, `Type` columns, external JSON exports, or `LedgerVaultBackup` JSON restores.
+- **Changes Applied**:
+  - Added [ImportPicker.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/components/ImportPicker.kt) (`OpenDocument("*/*")` -> `GetContent("*/*")` -> `ACTION_GET_CONTENT` chooser fallback with safe error reporting) and wired **`Import Data (CSV / JSON)`** in both [AccountsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AccountsScreen.kt) and [SettingsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/SettingsScreen.kt), plus safe `startActivity` error guards on exports in [SettingsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/SettingsScreen.kt) and [RecordsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/RecordsScreen.kt).
+  - Added [ImportParser.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/domain/ImportParser.kt), `importExternalDataOffline()` in [LedgerSyncRepository.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/sync/LedgerSyncRepository.kt), and background IO `try/catch` handling in [LedgerViewModel.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/LedgerViewModel.kt), plus keep rules in [proguard-rules.pro](file:///D:/all%20farzi%20project/LedgerFlow/android/app/proguard-rules.pro).
+- **Verification (`v1.0.8`)**:
+  - Added `importParser_handlesExternalCurrencyPrefixesSplitDebitCreditQuotesAndUtf16` and `importExternalDataOffline_importsThirdPartyAppCsvJsonRestoresVaultBackupAndRejectsBinary` in [SyncRepositoryIntegrationTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/SyncRepositoryIntegrationTest.kt).
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --no-daemon`: **31 / 31 passed** (`0` skipped, `0` failures, `0` errors), Lint `26 warnings` (`0` errors), signed `LedgerFlow-v1.0.8.apk` (`4,387,105` bytes, SHA-256 `1ed24f45afbcdaf1144d64616ff38c9dc49194129c285bf3a876a11f02e894d6`, cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.0.8`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.8/LedgerFlow-v1.0.8.apk`.
+
 
 
 

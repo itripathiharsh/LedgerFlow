@@ -33,6 +33,7 @@ import com.ledgerflow.app.update.UpdateInstallEvent
 import com.ledgerflow.app.update.UpdateInstallProgress
 import com.ledgerflow.app.util.NetworkMonitor
 import com.ledgerflow.app.work.SyncWorker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -87,6 +88,9 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _syncInProgress = MutableStateFlow(false)
     val syncInProgress: StateFlow<Boolean> = _syncInProgress.asStateFlow()
+
+    private val _importInProgress = MutableStateFlow(false)
+    val importInProgress: StateFlow<Boolean> = _importInProgress.asStateFlow()
 
     val isOnline: StateFlow<Boolean> = NetworkMonitor.observeOnline(app)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NetworkMonitor.isOnline(app))
@@ -223,6 +227,12 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearMessage() {
         _statusMessage.value = null
+    }
+
+    fun showMessage(message: String) {
+        if (message.isNotBlank()) {
+            _statusMessage.value = message
+        }
     }
 
     fun setSearchQuery(query: String) {
@@ -677,55 +687,95 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun importCsvUri(uri: Uri) {
+        if (_importInProgress.value) return
+        _importInProgress.value = true
         viewModelScope.launch {
-            val csvText = withContext(Dispatchers.IO) {
-                runCatching {
-                    app.contentResolver.openInputStream(uri)?.use { stream ->
-                        val maxBytes = 2 * 1024 * 1024
-                        val buf = ByteArray(8192)
-                        val out = java.io.ByteArrayOutputStream()
-                        var total = 0
-                        while (true) {
-                            val n = stream.read(buf)
-                            if (n <= 0) break
-                            total += n
-                            if (total > maxBytes) return@use null
-                            out.write(buf, 0, n)
+            try {
+                val baseCur = _vaultState.value.baseCurrency
+                val preferredAccId = accounts.value.firstOrNull()?.id
+                val outcomeMsg = withContext(Dispatchers.IO) {
+                    var readError: String? = null
+                    var exceededLimit = false
+                    val rawBytes = try {
+                        val stream = app.contentResolver.openInputStream(uri)
+                        if (stream == null) {
+                            readError = "Unable to open selected file."
+                            null
+                        } else {
+                            stream.use { input ->
+                                val maxBytes = 10 * 1024 * 1024
+                                val buf = ByteArray(8192)
+                                val out = java.io.ByteArrayOutputStream()
+                                var total = 0
+                                while (true) {
+                                    val n = input.read(buf)
+                                    if (n <= 0) break
+                                    total += n
+                                    if (total > maxBytes) {
+                                        exceededLimit = true
+                                        return@use null
+                                    }
+                                    out.write(buf, 0, n)
+                                }
+                                out.toByteArray()
+                            }
                         }
-                        out.toString(Charsets.UTF_8.name())
+                    } catch (ce: CancellationException) {
+                        throw ce
+                    } catch (t: Throwable) {
+                        readError = "Unable to read selected file (${t.message ?: "access error"})"
+                        null
                     }
-                }.getOrNull()
+
+                    if (exceededLimit) {
+                        return@withContext "Selected file exceeds 10 MB import limit."
+                    }
+                    if (rawBytes == null) {
+                        return@withContext readError ?: "Unable to read selected file."
+                    }
+
+                    val outcome = repo.importExternalDataOffline(
+                        rawBytes = rawBytes,
+                        preferredAccountId = preferredAccId,
+                        defaultCurrency = baseCur,
+                    )
+                    if (outcome.importedTransactions > 0 || outcome.importedAccounts > 0 || outcome.importedOtherItems > 0) {
+                        runCatching { SyncWorker.enqueueWhenOnline(app) }
+                    }
+                    outcome.message
+                }
+                _statusMessage.value = outcomeMsg
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                _statusMessage.value = "Import failed: ${t.message ?: "Unsupported file"}"
+            } finally {
+                _importInProgress.value = false
             }
-            if (csvText == null) {
-                _statusMessage.value = "Unable to read CSV (or file exceeds 2 MB limit)"
-                return@launch
-            }
-            val targetId = accounts.value.firstOrNull()?.id
-            if (targetId == null) {
-                _statusMessage.value = "Create an account first before importing CSV"
-                return@launch
-            }
-            val count = repo.importCsvOffline(csvText, targetId, _vaultState.value.baseCurrency)
-            if (count > 0) SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = if (count > 0) "Imported $count transactions locally" else "No valid CSV rows found"
         }
     }
 
     fun exportAndShare(asCsv: Boolean, onUriReady: (Intent) -> Unit) {
         viewModelScope.launch {
-            val intent = withContext(Dispatchers.IO) {
-                val exportDir = File(app.cacheDir, "exports").apply { mkdirs() }
-                val file = File(exportDir, if (asCsv) "ledgerflow_export.csv" else "ledgerflow_vault_backup.json")
-                val body = if (asCsv) repo.exportLedgerCsv() else repo.exportVaultJson()
-                file.writeText(body)
-                val uri: Uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
-                Intent(Intent.ACTION_SEND).apply {
-                    type = if (asCsv) "text/csv" else "application/json"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            try {
+                val intent = withContext(Dispatchers.IO) {
+                    val exportDir = File(app.cacheDir, "exports").apply { mkdirs() }
+                    val file = File(exportDir, if (asCsv) "ledgerflow_export.csv" else "ledgerflow_vault_backup.json")
+                    val body = if (asCsv) repo.exportLedgerCsv() else repo.exportVaultJson()
+                    file.writeText(body)
+                    val uri: Uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = if (asCsv) "text/csv" else "application/json"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
                 }
+                onUriReady(Intent.createChooser(intent, if (asCsv) "Export Ledger CSV" else "Export Vault Backup"))
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                _statusMessage.value = "Export failed: ${t.message ?: "Unable to write file"}"
             }
-            onUriReady(Intent.createChooser(intent, if (asCsv) "Export Ledger CSV" else "Export Vault Backup"))
         }
     }
 

@@ -12,4 +12,6 @@
 -keep class com.ledgerflow.app.update.AppReplacedReceiver { *; }
 -keep class com.ledgerflow.app.domain.UpdateManifest { *; }
 -keep class com.ledgerflow.app.security.VaultSessionState { *; }
+-keep class com.ledgerflow.app.data.sync.LedgerVaultBackup { *; }
+-keep class com.ledgerflow.app.data.remote.Supabase** { *; }
 -keep class androidx.core.content.FileProvider { *; }

@@ -337,4 +337,79 @@ class SyncRepositoryIntegrationTest {
             com.ledgerflow.app.domain.FxConverter.resetToBaselineForTests()
         }
     }
+
+    @Test
+    fun importParser_handlesExternalCurrencyPrefixesSplitDebitCreditQuotesAndUtf16() {
+        val rsAmount = com.ledgerflow.app.domain.ImportParser.parseAmountCell("Rs. 500.00")
+        assertEquals(50_000L, rsAmount?.minor)
+        assertEquals("INR", rsAmount?.currencyHint)
+
+        val euroAmount = com.ledgerflow.app.domain.ImportParser.parseAmountCell("€ 1.234,56")
+        assertEquals(123_456L, euroAmount?.minor)
+        assertEquals("EUR", euroAmount?.currencyHint)
+
+        val bankCsv = """
+            HDFC Account Statement
+            Account Number,XXXX1234
+
+            Date,Narration,Withdrawal Amt.,Deposit Amt.,Currency,Note
+            2026-11-20,"SWIGGY ORDER
+            DINNER",Rs. 450.50,,INR,"Quoted
+            multiline note"
+            2026-11-21,SALARY CREDIT,,25000.00,INR,Monthly Pay
+        """.trimIndent()
+        val utf16LeBom = byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + bankCsv.toByteArray(Charsets.UTF_16LE)
+        val decoded = com.ledgerflow.app.domain.ImportParser.decodeTextBytes(utf16LeBom)
+        val parsed = com.ledgerflow.app.domain.ImportParser.parseTransactionsCsvOrJson(decoded, defaultCurrency = "INR")
+        assertTrue(parsed is com.ledgerflow.app.domain.ParsedImportResult.Transactions)
+        val drafts = (parsed as com.ledgerflow.app.domain.ParsedImportResult.Transactions).drafts
+        assertEquals(2, drafts.size)
+        assertEquals("EXPENSE", drafts[0].txType)
+        assertEquals(-45_050L, drafts[0].amountMinor)
+        assertEquals("INR", drafts[0].currency)
+        assertEquals("INCOME", drafts[1].txType)
+        assertEquals(2_500_000L, drafts[1].amountMinor)
+    }
+
+    @Test
+    fun importExternalDataOffline_importsThirdPartyAppCsvJsonRestoresVaultBackupAndRejectsBinary() = runTest {
+        SeedData.ensureMinimalSetup(db, defaultCurrency = "INR", nowMs = 1_700_000_000_000L)
+        val repo = LedgerSyncRepository(context, db, vault)
+
+        // Third-party finance app CSV with positive amounts + Type column
+        val thirdPartyCsv = """
+            Date;Category;Title;Type;Amount;Note
+            2026-11-18;Groceries;BigBasket;Expense;₹840.25;Weekly veggies
+            2026-11-19;Income;Freelance Payout;Income;₹5000;Client invoice
+        """.trimIndent()
+        val csvOutcome = repo.importExternalDataOffline(thirdPartyCsv.toByteArray(Charsets.UTF_8), defaultCurrency = "INR")
+        assertEquals(2, csvOutcome.importedTransactions)
+        val walletAfterCsv = db.accountDao().getAllActive().first()
+        assertEquals(-84_025L + 500_000L, walletAfterCsv.balanceMinor)
+
+        // Generic JSON array export from another app
+        val genericJson = """
+            {
+              "transactions": [
+                {"title": "Metro Card", "amount": 120.0, "type": "expense", "currency": "INR", "date": "2026-11-22"}
+              ]
+            }
+        """.trimIndent()
+        val jsonOutcome = repo.importExternalDataOffline(genericJson.toByteArray(Charsets.UTF_8), defaultCurrency = "INR")
+        assertEquals(1, jsonOutcome.importedTransactions)
+        assertEquals(-84_025L + 500_000L - 12_000L, db.accountDao().getAllActive().first().balanceMinor)
+
+        // Binary PDF rejection (no crash)
+        val pdfBytes = "%PDF-1.7\n%...".toByteArray(Charsets.US_ASCII)
+        val pdfOutcome = repo.importExternalDataOffline(pdfBytes, defaultCurrency = "INR")
+        assertEquals(0, pdfOutcome.importedTransactions)
+        assertTrue(pdfOutcome.message.contains("PDF", ignoreCase = true))
+
+        // Full LedgerVaultBackup JSON export -> fresh DB -> restore round-trip
+        val backupJson = repo.exportVaultJson()
+        db.resetAllDataFresh(defaultCurrency = "INR")
+        val restoreOutcome = repo.importExternalDataOffline(backupJson.toByteArray(Charsets.UTF_8), defaultCurrency = "INR")
+        assertEquals(3, restoreOutcome.importedTransactions)
+        assertEquals(-84_025L + 500_000L - 12_000L, db.accountDao().getAllActive().first().balanceMinor)
+    }
 }

@@ -55,6 +55,7 @@ import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.ads.AdMobGate
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.StatusPill
+import com.ledgerflow.app.ui.components.rememberDataImportPicker
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
@@ -82,6 +83,12 @@ fun SettingsScreen(
     val syncBusy by vm.syncInProgress.collectAsState()
     val isOnline by vm.isOnline.collectAsState()
     val updateChecking by vm.updateCheckInProgress.collectAsState()
+    val importBusy by vm.importInProgress.collectAsState()
+
+    val launchImportPicker = rememberDataImportPicker(
+        onUriSelected = { vm.importCsvUri(it) },
+        onLaunchFailed = { vm.showMessage(it) },
+    )
 
     var showProfileDialog by remember { mutableStateOf(false) }
     var showPinDialog by remember { mutableStateOf(false) }
@@ -322,7 +329,8 @@ fun SettingsScreen(
                         onClick = {
                             vm.exportAndShare(asCsv = true) { intent ->
                                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
+                                runCatching { context.startActivity(intent) }
+                                    .onFailure { vm.showMessage("No app found to share exported CSV") }
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -331,11 +339,25 @@ fun SettingsScreen(
                         onClick = {
                             vm.exportAndShare(asCsv = false) { intent ->
                                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
+                                runCatching { context.startActivity(intent) }
+                                    .onFailure { vm.showMessage("No app found to share exported JSON") }
                             }
                         },
                         modifier = Modifier.weight(1f),
                     ) { Text("Export JSON", fontSize = 12.sp, color = SlateInk) }
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { if (!importBusy) launchImportPicker() },
+                    enabled = !importBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(
+                        text = if (importBusy) "Importing Data..." else "Import Data (CSV / JSON)",
+                        fontSize = 12.sp,
+                        color = SlateInk,
+                    )
                 }
                 HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
