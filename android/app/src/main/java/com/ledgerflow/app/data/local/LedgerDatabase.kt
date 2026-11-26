@@ -146,6 +146,24 @@ abstract class LedgerDatabase : RoomDatabase() {
         }
     }
 
+    suspend fun alignStarterWalletCurrencyIfEmpty(
+        currency: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        val cleanCur = currency.trim().uppercase()
+        if (cleanCur.length != 3) return
+        withTransaction {
+            val accounts = accountDao().getAllActive()
+            val txs = transactionDao().getAllActive()
+            if (accounts.size == 1 && txs.isEmpty()) {
+                val only = accounts.first()
+                if (only.accountType == "CASH" && only.balanceMinor == 0L && only.currency != cleanCur) {
+                    accountDao().upsert(only.copy(currency = cleanCur, updatedAtEpochMs = nowMs, pendingSync = true))
+                }
+            }
+        }
+    }
+
     companion object {
         fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long {
             val cal = Calendar.getInstance().apply { timeInMillis = currentDueMs }

@@ -4,6 +4,8 @@ import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,25 +13,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -49,6 +50,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.ads.AdMobGate
 import com.ledgerflow.app.ui.components.CleanCard
@@ -60,7 +62,6 @@ import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
-import com.ledgerflow.app.ui.theme.RoseSoft
 import com.ledgerflow.app.ui.theme.SkySoft
 import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
@@ -69,8 +70,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PrivacyVaultScreen(
+fun SettingsScreen(
     vm: LedgerViewModel,
     onBack: () -> Unit,
 ) {
@@ -81,18 +83,20 @@ fun PrivacyVaultScreen(
     val isOnline by vm.isOnline.collectAsState()
     val updateChecking by vm.updateCheckInProgress.collectAsState()
 
+    var showProfileDialog by remember { mutableStateOf(false) }
     var showPinDialog by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
 
     val fmt = remember { SimpleDateFormat("MMM d, HH:mm", Locale.US) }
+    val currencies = listOf("INR", "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "SGD")
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 36.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
             Row(
@@ -105,8 +109,8 @@ fun PrivacyVaultScreen(
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = SlateInk)
                     }
                     Text(
-                        text = "Privacy & Vault",
-                        fontSize = 20.sp,
+                        text = "Settings",
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         color = SlateInk,
                         maxLines = 1,
@@ -114,7 +118,7 @@ fun PrivacyVaultScreen(
                     )
                 }
                 StatusPill(
-                    text = if (vault.appLockEnabled) "Vault Locked" else "Local Mode",
+                    text = if (vault.appLockEnabled) "Vault Locked" else "Local Vault",
                     containerColor = if (vault.appLockEnabled) EmeraldSoft else SlateTint,
                     contentColor = if (vault.appLockEnabled) EmeraldDark else MutedSlate,
                     dotColor = if (vault.appLockEnabled) EmeraldPrimary else null,
@@ -122,34 +126,82 @@ fun PrivacyVaultScreen(
             }
         }
 
-        // Hero Vault Security Card
+        // 1. Profile & Locked Currency
         item {
-            CleanCard(containerColor = EmeraldSoft, borderColor = Color(0xFFA7F3D0), padding = 16.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Outlined.Shield, contentDescription = null, tint = EmeraldDark)
-                    Column {
-                        Text("Local-First Encrypted Vault", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                        Text("HARDWARE BACKED KEYSTORE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EmeraldDark)
+            Text("PROFILE & CURRENCY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+            Spacer(Modifier.height(6.dp))
+            CleanCard(padding = 14.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Outlined.Person, contentDescription = null, tint = EmeraldDark)
+                        Column {
+                            Text(
+                                text = vault.userName.ifBlank { "Personal Profile" },
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SlateInk,
+                            )
+                            Text(
+                                text = vault.userEmail?.takeIf { it.isNotBlank() } ?: "No email set",
+                                fontSize = 12.sp,
+                                color = MutedSlate,
+                            )
+                        }
+                    }
+                    TextButton(onClick = { showProfileDialog = true }) {
+                        Text("Edit", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Default Currency", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                    StatusPill("Locked: ${vault.baseCurrency}", EmeraldSoft, EmeraldDark)
+                }
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "All accounts, transactions, budgets, and holdings stay accessible offline inside Room WAL SQLite. Auth tokens & vault keys are encrypted with AES-256-GCM.",
+                    text = "Used across all accounts, transactions, budgets, and holdings.",
                     fontSize = 12.sp,
-                    color = SlateInk,
+                    color = MutedSlate,
                 )
                 Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatusPill("AES-256-GCM", Color.White, EmeraldDark)
-                    StatusPill("HTTPS Only", Color.White, EmeraldDark)
-                    StatusPill("Zero Paywalls", Color.White, EmeraldDark)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    currencies.forEach { code ->
+                        val active = vault.baseCurrency == code
+                        FilterChip(
+                            selected = active,
+                            onClick = { if (!active) vm.setBaseCurrency(code) },
+                            label = {
+                                val sym = MoneyFormatter.currencySymbol(code).trim()
+                                Text("$sym $code", fontSize = 12.sp)
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = EmeraldSoft,
+                                selectedLabelColor = EmeraldDark,
+                            ),
+                        )
+                    }
                 }
             }
         }
 
-        // Access Lock Section
+        // 2. Privacy & App Lock
         item {
-            Text("ACCESS LOCK", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+            Text("PRIVACY & SECURITY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
             Spacer(Modifier.height(6.dp))
             CleanCard(padding = 14.dp) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -180,7 +232,7 @@ fun PrivacyVaultScreen(
                 HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Blur in App Switcher", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                        Text("Hide in App Switcher", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
                         Text("Applies FLAG_SECURE when App Lock is enabled", fontSize = 12.sp, color = MutedSlate)
                     }
                     Switch(
@@ -189,12 +241,24 @@ fun PrivacyVaultScreen(
                         colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
                     )
                 }
+                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Mask Balances", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                        Text("Hide monetary figures across dashboards", fontSize = 12.sp, color = MutedSlate)
+                    }
+                    Switch(
+                        checked = vault.hideBalances,
+                        onCheckedChange = { if (it != vault.hideBalances) vm.toggleHideBalances() },
+                        colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
+                    )
+                }
             }
         }
 
-        // Supabase Cloud Sync Section
+        // 3. Cloud Sync
         item {
-            Text("CLOUD SYNC (SUPABASE FREE TIER)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+            Text("CLOUD SYNC", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
             Spacer(Modifier.height(6.dp))
             CleanCard(padding = 14.dp) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -202,7 +266,11 @@ fun PrivacyVaultScreen(
                         Icon(Icons.Outlined.CloudSync, contentDescription = null, tint = SkySync)
                         Column {
                             Text(
-                                text = vault.userEmail ?: "Local-Only Mode (No Cloud Account)",
+                                text = if (!vault.accessToken.isNullOrBlank()) {
+                                    vault.userEmail ?: "Signed in"
+                                } else {
+                                    "Local-Only (Not Signed In)"
+                                },
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = SlateInk,
@@ -225,7 +293,7 @@ fun PrivacyVaultScreen(
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                             shape = RoundedCornerShape(12.dp),
-                        ) { Text("Sign In / Create Sync Account", fontSize = 12.sp) }
+                        ) { Text("Sign In / Sync Account", fontSize = 12.sp) }
                     } else {
                         Button(
                             onClick = { vm.syncNow() },
@@ -243,36 +311,12 @@ fun PrivacyVaultScreen(
             }
         }
 
-        // Data Sovereignty & Export
+        // 4. Data Backup & Start Fresh (ONE central location)
         item {
             val adsActive = AdMobGate.isConfiguredAdUnit()
-            Text("DATA SOVEREIGNTY & ADS POLICY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+            Text("DATA & BACKUP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
             Spacer(Modifier.height(6.dp))
             CleanCard(padding = 14.dp) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("AdMob Network Behavior", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-                        Text(
-                            text = if (adsActive) "Ads load ONLY when internet is available" else "No ad unit configured — ad banner hidden",
-                            fontSize = 12.sp,
-                            color = MutedSlate,
-                        )
-                    }
-                    StatusPill(if (adsActive) "Online-Only" else "Disabled", SlateTint, SlateInk)
-                }
-                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Diagnostics Opt-In", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-                        Text("Off by default — zero invasive SDK profiling", fontSize = 12.sp, color = MutedSlate)
-                    }
-                    Switch(
-                        checked = vault.telemetryOptIn,
-                        onCheckedChange = { vm.setTelemetryOptIn(it) },
-                        colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
-                    )
-                }
-                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
@@ -294,13 +338,25 @@ fun PrivacyVaultScreen(
                     ) { Text("Export JSON", fontSize = 12.sp, color = SlateInk) }
                 }
                 HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("AdMob Banner", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                        Text(
+                            text = if (adsActive) "Loads only when online" else "No ad unit configured — hidden",
+                            fontSize = 12.sp,
+                            color = MutedSlate,
+                        )
+                    }
+                    StatusPill(if (adsActive) "Online-Only" else "Disabled", SlateTint, SlateInk)
+                }
+                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
                 OutlinedButton(
                     onClick = { showResetConfirm = true },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     Text(
-                        text = "Delete All Data & Start Fresh",
+                        text = "Start Fresh (Delete All Data)",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = RoseOutflow,
@@ -309,9 +365,9 @@ fun PrivacyVaultScreen(
             }
         }
 
-        // App Updates Section
+        // 5. App Updates
         item {
-            Text("AUTOMATIC APP UPDATES", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+            Text("APP UPDATES", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
             Spacer(Modifier.height(6.dp))
             CleanCard(padding = 14.dp) {
                 Row(
@@ -340,11 +396,7 @@ fun PrivacyVaultScreen(
                             Text(checkedTxt, fontSize = 12.sp, color = MutedSlate)
                         }
                     }
-                    StatusPill(
-                        text = if (isOnline) "Verified" else "Offline Safe",
-                        containerColor = if (isOnline) EmeraldSoft else SlateTint,
-                        contentColor = if (isOnline) EmeraldDark else MutedSlate,
-                    )
+                    Icon(Icons.Outlined.Lock, contentDescription = null, tint = EmeraldDark)
                 }
                 Spacer(Modifier.height(10.dp))
                 OutlinedButton(
@@ -361,23 +413,33 @@ fun PrivacyVaultScreen(
                 }
             }
         }
+    }
 
-        // Vault Specification Footer Card
-        item {
-            CleanCard(containerColor = SlateTint, padding = 14.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Outlined.Lock, contentDescription = null, tint = EmeraldDark)
-                    Text("Vault Technical Specification", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "• Hardware Keystore AES-256-GCM session & PIN protection\n• Room SQLite WAL + FTS4 instant offline search\n• HTTPS-only transport (zero cleartext domains in release)\n• Supabase Row-Level Security ((select auth.uid()) = user_id)",
-                    fontSize = 12.sp,
-                    color = MutedSlate,
-                    lineHeight = 18.sp,
+    if (showProfileDialog) {
+        var nameInput by remember(vault.userName) { mutableStateOf(vault.userName) }
+        AlertDialog(
+            onDismissRequest = { showProfileDialog = false },
+            title = { Text("Edit Profile Name") },
+            text = {
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Full Name") },
+                    singleLine = true,
                 )
-            }
-        }
+            },
+            confirmButton = {
+                Button(
+                    enabled = nameInput.isNotBlank(),
+                    onClick = {
+                        vm.updateProfileName(nameInput)
+                        showProfileDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showProfileDialog = false }) { Text("Cancel") } },
+        )
     }
 
     if (showPinDialog) {
@@ -408,13 +470,13 @@ fun PrivacyVaultScreen(
     }
 
     if (showAuthDialog) {
-        var email by remember { mutableStateOf("") }
+        var email by remember(vault.userEmail) { mutableStateOf(vault.userEmail.orEmpty()) }
         var password by remember { mutableStateOf("") }
         var createAccount by remember { mutableStateOf(false) }
 
         AlertDialog(
             onDismissRequest = { showAuthDialog = false },
-            title = { Text(if (createAccount) "Create Supabase Sync Account" else "Sign In to Supabase Sync") },
+            title = { Text(if (createAccount) "Create Cloud Sync Account" else "Sign In to Cloud Sync") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("Email") }, singleLine = true)
@@ -426,7 +488,7 @@ fun PrivacyVaultScreen(
                         singleLine = true,
                     )
                     TextButton(onClick = { createAccount = !createAccount }) {
-                        Text(if (createAccount) "Already have an account? Sign In" else "New here? Create free account")
+                        Text(if (createAccount) "Already have an account? Sign In" else "New here? Create account")
                     }
                 }
             },
@@ -449,7 +511,7 @@ fun PrivacyVaultScreen(
             title = { Text("Delete All Data & Start Fresh?") },
             text = {
                 Text(
-                    "Clears all recorded accounts, transactions, budgets, recurring bills, holdings, and rules, and disconnects cloud sync so you start cleanly at zero balance.",
+                    "Clears all recorded accounts, transactions, budgets, recurring bills, holdings, and rules, and disconnects cloud sync so your ledger starts cleanly at zero balance (${MoneyFormatter.formatMinor(0L, vault.baseCurrency)}).",
                     fontSize = 13.sp,
                     color = MutedSlate,
                 )

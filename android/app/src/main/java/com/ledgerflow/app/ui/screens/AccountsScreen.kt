@@ -24,9 +24,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Contactless
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FileUpload
-import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -73,7 +72,6 @@ import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
-import com.ledgerflow.app.ui.theme.RoseSoft
 import com.ledgerflow.app.ui.theme.SkySoft
 import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
@@ -81,9 +79,9 @@ import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.TabularStyle
 
 @Composable
-fun AccountsHubScreen(
+fun AccountsScreen(
     vm: LedgerViewModel,
-    onOpenPrivacyVault: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
     val accounts by vm.accounts.collectAsState()
@@ -113,7 +111,6 @@ fun AccountsHubScreen(
     var showAddAccount by remember { mutableStateOf(false) }
     var pendingDeleteAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var showSmartPaste by remember { mutableStateOf(false) }
-    var showResetConfirm by remember { mutableStateOf(false) }
 
     val csvPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -124,7 +121,7 @@ fun AccountsHubScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 104.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
@@ -134,98 +131,28 @@ fun AccountsHubScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column {
-                    Text("Accounts & Hub", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                    Text("${accounts.size} active accounts • FX: ${FxConverter.lastRatesSource}", fontSize = 12.sp, color = MutedSlate)
+                    Text("Accounts", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                    Text("${accounts.size} active • $baseCurrency", fontSize = 12.sp, color = MutedSlate)
                 }
-                Surface(
-                    onClick = { showAddAccount = true },
-                    shape = RoundedCornerShape(999.dp),
-                    color = EmeraldPrimary,
-                ) {
-                    Text(
-                        text = "+ Add Account",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    )
-                }
-            }
-        }
-
-        // Pay & Track Capture Card
-        item {
-            CleanCard(containerColor = SkySoft, borderColor = Color(0xFFBAE6FD), padding = 16.dp) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CategoryIconBadge("directions_transit", "#0284C7", size = 38.dp)
-                        Column {
-                            Text("Pay & Track Capture", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                            Spacer(Modifier.height(2.dp))
-                            StatusPill(
-                                text = when {
-                                    enabledListeners -> "Listener Active"
-                                    supportsOsListener -> "Tap OS Listener Ready"
-                                    else -> "Share & Smart Paste Ready"
-                                },
-                                containerColor = EmeraldSoft,
-                                contentColor = EmeraldDark,
-                                dotColor = EmeraldPrimary,
-                            )
-                        }
+                    Surface(
+                        onClick = { showAddAccount = true },
+                        shape = RoundedCornerShape(999.dp),
+                        color = EmeraldPrimary,
+                    ) {
+                        Text(
+                            text = "+ Add Account",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        )
                     }
-                    Switch(
-                        checked = vault.payAndTrackEnabled,
-                        onCheckedChange = { vm.setPayAndTrackEnabled(it) },
-                        colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                CleanCard(padding = 12.dp) {
-                    Text(
-                        text = if (supportsOsListener) {
-                            "$gpayCapturedCount transactions captured locally with duplicate suppression."
-                        } else {
-                            "$gpayCapturedCount Pay & Track entries saved locally. Share any payment SMS or alert to LedgerFlow, or use Smart Paste."
-                        },
-                        fontSize = 12.sp,
-                        color = SlateInk,
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (supportsOsListener) {
-                        OutlinedButton(
-                            onClick = {
-                                runCatching {
-                                    val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    context.startActivity(intent)
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                        ) {
-                            Icon(Icons.Outlined.Contactless, contentDescription = null, tint = SkySync)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Notification Access", fontSize = 12.sp, color = SlateInk)
-                        }
-                    } else {
-                        Button(
-                            onClick = { showSmartPaste = true },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = SkySync),
-                        ) {
-                            Icon(Icons.Outlined.Contactless, contentDescription = null, tint = Color.White)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Smart Paste Alert", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
                     }
                 }
             }
@@ -233,11 +160,11 @@ fun AccountsHubScreen(
 
         // Accounts List
         item {
-            SectionHeader(title = "Your Accounts & Wallets", actionText = "+ Add", onActionClick = { showAddAccount = true })
+            SectionHeader(title = "Wallets, Cards & Bank Accounts")
         }
         if (accounts.isEmpty()) {
             item {
-                EmptyPlaceholder("No active accounts", "Tap + Add Account to create a wallet, checking, savings, or card account.")
+                EmptyPlaceholder("No active accounts", "Tap + Add Account to create a wallet, card, or bank account.")
             }
         } else {
             items(accounts, key = { it.id }) { acc ->
@@ -303,77 +230,96 @@ fun AccountsHubScreen(
             }
         }
 
-        // Import / Export & Security Vault Entry
+        // Pay & Track Capture Card
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CleanCard(
-                    modifier = Modifier.weight(1f),
-                    padding = 14.dp,
-                    onClick = { csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/*")) },
-                ) {
-                    Icon(Icons.Outlined.FileUpload, contentDescription = null, tint = SkySync)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Import CSV", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateInk)
-                    Text("Bank statement parser", fontSize = 11.sp, color = MutedSlate)
-                }
-                CleanCard(
-                    modifier = Modifier.weight(1f),
-                    padding = 14.dp,
-                    onClick = {
-                        vm.exportAndShare(asCsv = false) { intent ->
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            context.startActivity(intent)
-                        }
-                    },
-                ) {
-                    Icon(Icons.Outlined.FileDownload, contentDescription = null, tint = EmeraldPrimary)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Export Vault", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateInk)
-                    Text("Full JSON snapshot", fontSize = 11.sp, color = MutedSlate)
-                }
-            }
-        }
-
-        item {
-            CleanCard(containerColor = EmeraldSoft, borderColor = Color(0xFFA7F3D0), padding = 14.dp, onClick = onOpenPrivacyVault) {
+            CleanCard(containerColor = SkySoft, borderColor = Color(0xFFBAE6FD), padding = 16.dp) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Outlined.Security, contentDescription = null, tint = EmeraldDark)
+                        CategoryIconBadge("directions_transit", "#0284C7", size = 38.dp)
                         Column {
-                            Text("Privacy, Cloud Sync & App Lock", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                            Text(
-                                text = if (vault.userEmail != null) "Supabase signed in: ${vault.userEmail}" else "Local vault • Sign in optionally for sync",
-                                fontSize = 12.sp,
-                                color = EmeraldDark,
+                            Text("Payment Capture", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                            Spacer(Modifier.height(2.dp))
+                            StatusPill(
+                                text = when {
+                                    enabledListeners -> "Listener Active"
+                                    supportsOsListener -> "Listener Ready"
+                                    else -> "Share & Smart Paste ($gpayCapturedCount)"
+                                },
+                                containerColor = EmeraldSoft,
+                                contentColor = EmeraldDark,
+                                dotColor = EmeraldPrimary,
                             )
                         }
                     }
-                    StatusPill("Open →", Color.White, EmeraldDark)
+                    Switch(
+                        checked = vault.payAndTrackEnabled,
+                        onCheckedChange = { vm.setPayAndTrackEnabled(it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = if (supportsOsListener) {
+                        "Automatically log payment notifications locally with duplicate suppression."
+                    } else {
+                        "Share any payment SMS or alert to LedgerFlow, or paste one directly below."
+                    },
+                    fontSize = 12.sp,
+                    color = SlateInk,
+                )
+                Spacer(Modifier.height(10.dp))
+                if (supportsOsListener) {
+                    OutlinedButton(
+                        onClick = {
+                            runCatching {
+                                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Outlined.Contactless, contentDescription = null, tint = SkySync)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Notification Access", fontSize = 12.sp, color = SlateInk)
+                    }
+                } else {
+                    Button(
+                        onClick = { showSmartPaste = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SkySync),
+                    ) {
+                        Icon(Icons.Outlined.Contactless, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Smart Paste Alert", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
 
+        // Import CSV Card
         item {
             CleanCard(
-                containerColor = RoseSoft,
-                borderColor = Color(0xFFFECDD3),
                 padding = 14.dp,
-                onClick = { showResetConfirm = true },
+                onClick = { csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/*")) },
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    Icon(Icons.Outlined.FileUpload, contentDescription = null, tint = SkySync)
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Start Fresh (Reset Ledger)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = RoseOutflow)
-                        Text("Delete all accounts, transactions, budgets, bills & investments", fontSize = 12.sp, color = SlateInk)
+                        Text("Import Bank CSV", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateInk)
+                        Text("Parse CSV statements directly on your device", fontSize = 12.sp, color = MutedSlate)
                     }
-                    StatusPill("Reset", Color.White, RoseOutflow)
+                    StatusPill("Browse", SlateTint, SlateInk)
                 }
             }
         }
@@ -403,86 +349,97 @@ fun AccountsHubScreen(
         )
     }
 
-    if (showResetConfirm) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirm = false },
-            title = { Text("Delete All Data?") },
-            text = {
-                Text(
-                    "This removes all accounts, transactions, budgets, recurring bills, investments, and rules so you can start completely fresh.",
-                    fontSize = 13.sp,
-                    color = MutedSlate,
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        vm.resetAllData()
-                        showResetConfirm = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
-                ) { Text("Delete & Start Fresh") }
-            },
-            dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") } },
-        )
-    }
-
     if (showAddAccount) {
+        var accountType by remember { mutableStateOf("CASH") }
         var name by remember { mutableStateOf("") }
         var institution by remember { mutableStateOf("") }
         var balance by remember { mutableStateOf("") }
         var lastFour by remember { mutableStateOf("") }
-        var accountType by remember { mutableStateOf("CHECKING") }
-        var currency by remember { mutableStateOf(baseCurrency) }
+
+        val isCash = accountType == "CASH"
+        val isCard = accountType == "CARD"
+        val canSave = if (isCash) true else name.isNotBlank()
 
         AlertDialog(
             onDismissRequest = { showAddAccount = false },
             title = { Text("Add Account") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("CHECKING", "SAVINGS", "CARD", "CASH").forEach { t ->
-                            FilterChip(selected = accountType == t, onClick = { accountType = t }, label = { Text(t, fontSize = 11.sp) })
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        listOf("CASH", "CHECKING", "SAVINGS", "CARD").forEach { t ->
+                            FilterChip(
+                                selected = accountType == t,
+                                onClick = { accountType = t },
+                                label = { Text(t, fontSize = 11.sp) },
+                            )
                         }
                     }
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Account Name") },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = institution,
-                        onValueChange = { institution = it },
-                        label = { Text("Institution (optional)") },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = balance,
-                        onValueChange = { balance = it },
-                        label = { Text("Opening Balance") },
-                        placeholder = { Text("0.00") },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = lastFour,
-                        onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) lastFour = it },
-                        label = { Text("Last 4 digits (optional)") },
-                        singleLine = true,
-                    )
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("USD", "EUR", "GBP", "INR").forEach { c ->
-                            FilterChip(selected = currency == c, onClick = { currency = c }, label = { Text(c, fontSize = 11.sp) })
+
+                    StatusPill("Currency locked: $baseCurrency", EmeraldSoft, EmeraldDark)
+
+                    if (isCash) {
+                        OutlinedTextField(
+                            value = balance,
+                            onValueChange = { balance = it },
+                            label = { Text("Cash Amount ($baseCurrency)") },
+                            placeholder = { Text("0.00") },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("Label (optional)") },
+                            placeholder = { Text("Cash Wallet") },
+                            singleLine = true,
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text(if (isCard) "Card Name" else "Account Name") },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = institution,
+                            onValueChange = { institution = it },
+                            label = { Text(if (isCard) "Bank / Issuer (optional)" else "Bank / Institution (optional)") },
+                            singleLine = true,
+                        )
+                        if (isCard) {
+                            OutlinedTextField(
+                                value = lastFour,
+                                onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) lastFour = it },
+                                label = { Text("Last 4 digits (optional)") },
+                                singleLine = true,
+                            )
                         }
+                        OutlinedTextField(
+                            value = balance,
+                            onValueChange = { balance = it },
+                            label = { Text("Opening Balance ($baseCurrency)") },
+                            placeholder = { Text("0.00") },
+                            singleLine = true,
+                        )
                     }
                 }
             },
             confirmButton = {
                 Button(
-                    enabled = name.isNotBlank(),
+                    enabled = canSave,
                     onClick = {
                         val minor = MoneyFormatter.parseDecimalToMinor(balance) ?: 0L
-                        vm.addAccount(name, institution, accountType, currency, minor, lastFour)
+                        val finalName = if (isCash) name.ifBlank { "Cash Wallet" } else name
+                        vm.addAccount(
+                            name = finalName,
+                            institution = if (isCash) "" else institution,
+                            type = accountType,
+                            currency = baseCurrency,
+                            balanceMinor = minor,
+                            lastFour = if (isCard) lastFour else "",
+                        )
                         showAddAccount = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),

@@ -23,11 +23,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.DocumentScanner
-import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.PieChart
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SwapHoriz
-import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
@@ -63,7 +63,6 @@ import com.ledgerflow.app.ui.components.EmptyPlaceholder
 import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.SourceTagBadge
 import com.ledgerflow.app.ui.components.StatusPill
-import com.ledgerflow.app.ui.components.SyncBadge
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
@@ -87,19 +86,20 @@ fun HomeScreen(
     onOpenQuickAdd: (initialType: String) -> Unit,
     onOpenRecords: () -> Unit,
     onOpenBudgets: () -> Unit,
-    onOpenHub: () -> Unit,
-    onOpenPrivacyVault: () -> Unit,
+    onOpenAccounts: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val vault by vm.vaultState.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val categories by vm.categories.collectAsState()
     val transactions by vm.allTransactions.collectAsState()
     val budgets by vm.budgets.collectAsState()
-    val isOnline by vm.isOnline.collectAsState()
-    val pendingCount by vm.pendingSyncCount.collectAsState()
 
     val baseCurrency = vault.baseCurrency
     val masked = vault.hideBalances
+    val firstName = remember(vault.userName) {
+        vault.userName.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotBlank() }
+    }
     val dayKey = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
     val monthStart = remember(dayKey) { vm.currentMonthStartEpochMs() }
     val monthFraction = remember(dayKey) { vm.currentMonthFraction() }
@@ -116,7 +116,7 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 104.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
@@ -125,39 +125,16 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Text(
+                    text = if (firstName != null) "Hi, $firstName" else "Overview",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateInk,
+                )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(
-                        text = "Overview",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateInk,
-                    )
-                    SyncBadge(
-                        isOnline = isOnline,
-                        hasCloudSession = !vault.accessToken.isNullOrBlank(),
-                        pendingCount = pendingCount,
-                    )
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Surface(
-                        onClick = { vm.cycleBaseCurrency() },
-                        shape = RoundedCornerShape(999.dp),
-                        color = SlateTint,
-                    ) {
-                        Text(
-                            text = baseCurrency,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = SlateInk,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        )
-                    }
                     IconButton(onClick = { vm.toggleHideBalances() }) {
                         Icon(
                             imageVector = if (masked) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
@@ -165,11 +142,11 @@ fun HomeScreen(
                             tint = SlateInk,
                         )
                     }
-                    IconButton(onClick = onOpenPrivacyVault) {
+                    IconButton(onClick = onOpenSettings) {
                         Icon(
-                            imageVector = Icons.Outlined.Security,
-                            contentDescription = "Privacy & Vault",
-                            tint = EmeraldPrimary,
+                            imageVector = Icons.Outlined.Settings,
+                            contentDescription = "Settings",
+                            tint = SlateInk,
                         )
                     }
                 }
@@ -185,18 +162,13 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "TOTAL BALANCE (ALL ACCOUNTS)",
+                        text = "TOTAL BALANCE",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MutedSlate,
                         letterSpacing = 0.5.sp,
                     )
-                    Text(
-                        text = "Local Room Ledger",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MutedSlate,
-                    )
+                    StatusPill(baseCurrency, SlateTint, SlateInk)
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -206,10 +178,10 @@ fun HomeScreen(
                     fontWeight = FontWeight.Bold,
                     color = SlateInk,
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 val netStr = MoneyFormatter.formatMinor(dashboard.netSavingsMinor, baseCurrency, showPlus = true, masked = masked)
                 StatusPill(
-                    text = "${if (dashboard.savingsRatePercent >= 0) "+" else ""}${dashboard.savingsRatePercent}% savings ($netStr this mo)",
+                    text = "${if (dashboard.savingsRatePercent >= 0) "+" else ""}${dashboard.savingsRatePercent}% savings ($netStr this month)",
                     containerColor = if (dashboard.netSavingsMinor >= 0) EmeraldSoft else RoseSoft,
                     contentColor = if (dashboard.netSavingsMinor >= 0) EmeraldDark else RoseOutflow,
                 )
@@ -218,10 +190,10 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    QuickActionTile("Add", Icons.Outlined.Add, primary = true) { onOpenQuickAdd("EXPENSE") }
+                    QuickActionTile("Expense", Icons.Outlined.Add, primary = true) { onOpenQuickAdd("EXPENSE") }
                     QuickActionTile("Transfer", Icons.Outlined.SwapHoriz, primary = false) { onOpenQuickAdd("TRANSFER") }
-                    QuickActionTile("Import", Icons.Outlined.DocumentScanner, primary = false) { onOpenHub() }
-                    QuickActionTile("Sync", Icons.Outlined.Sync, primary = false) { vm.syncNow() }
+                    QuickActionTile("Budgets", Icons.Outlined.PieChart, primary = false) { onOpenBudgets() }
+                    QuickActionTile("Accounts", Icons.Outlined.AccountBalanceWallet, primary = false) { onOpenAccounts() }
                 }
             }
         }
@@ -229,28 +201,24 @@ fun HomeScreen(
         // Accounts Carousel
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionHeader(title = "Accounts", actionText = "See All", onActionClick = onOpenHub)
+                SectionHeader(title = "Accounts", actionText = "Manage", onActionClick = onOpenAccounts)
                 if (accounts.isEmpty()) {
-                    EmptyPlaceholder("No accounts yet", "Tap See All to add a wallet or bank account.")
+                    EmptyPlaceholder("No accounts yet", "Tap Manage to add a wallet, card, or bank account.")
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(accounts, key = { it.id }) { acc ->
                             CleanCard(
-                                modifier = Modifier.width(178.dp),
+                                modifier = Modifier.width(172.dp),
                                 padding = 14.dp,
-                                onClick = onOpenHub,
+                                onClick = onOpenAccounts,
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    CategoryIconBadge("bank", "#0284C7", size = 32.dp)
-                                    StatusPill(
-                                        text = "${acc.accountType} • ${acc.currency}",
-                                        containerColor = SlateTint,
-                                        contentColor = MutedSlate,
-                                    )
+                                    CategoryIconBadge(if (acc.accountType == "CASH") "payments" else "bank", "#0284C7", size = 32.dp)
+                                    StatusPill(acc.accountType, SlateTint, MutedSlate)
                                 }
                                 Spacer(Modifier.height(10.dp))
                                 Text(
@@ -325,13 +293,11 @@ fun HomeScreen(
             }
         }
 
-        // Budgets Watch
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionHeader(title = "Budgets Watch", actionText = "Manage", onActionClick = onOpenBudgets)
-                if (budgetProgress.isEmpty()) {
-                    EmptyPlaceholder("No active budgets", "Tap Manage to set monthly category limits.")
-                } else {
+        // Budgets Watch (only when budgets exist or subtle invite)
+        if (budgetProgress.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionHeader(title = "Budgets Watch", actionText = "Manage", onActionClick = onOpenBudgets)
                     CleanCard(padding = 14.dp) {
                         budgetProgress.take(2).forEachIndexed { idx, bp ->
                             if (idx > 0) HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
@@ -408,7 +374,6 @@ fun HomeScreen(
             }
         }
 
-        // Non-intrusive Online-Only AdMob Banner (invisible when offline)
         item {
             OnlineOnlyAdBanner()
         }

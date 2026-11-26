@@ -189,6 +189,22 @@
   - Signed `LedgerFlow-v1.0.5.apk` (`4,333,857` bytes, SHA-256 `c901181b4cf83d97f1484fa2dfecdc3e11530ee1b55aff1dda5a5f297461f180`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.0.5`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.5/LedgerFlow-v1.0.5.apk`.
 
+---
+
+## First-Launch Onboarding, Locked Currency & Unified Settings (`v1.0.6`, `versionCode 7`)
+- **First-Launch Onboarding & Currency Lock**:
+  - Added [OnboardingScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/OnboardingScreen.kt) prompting Name, Email, Password, and Primary Currency on initial start before entering the app shell, persisting state in [VaultSecurity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/security/VaultSecurity.kt) and aligning the starter Cash Wallet currency via `alignStarterWalletCurrencyIfEmpty()` in [LedgerDatabase.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/local/LedgerDatabase.kt).
+  - Removed inline currency switchers from [HomeScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/HomeScreen.kt), [AddTransactionSheet.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AddTransactionSheet.kt), and `+ Add Account` in [AccountsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AccountsScreen.kt) so the chosen currency stays consistent everywhere until edited inside Settings.
+- **Type-Tailored `+ Add Account` & Centralized Settings**:
+  - Replaced scattered Hub/Privacy/Start-Fresh clutter with dedicated [AccountsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/AccountsScreen.kt) (where selecting `CASH` asks only for Cash Amount + optional Label, `CARD` asks Name/Issuer/Last-4/Balance, and Bank types ask Account Name/Institution/Balance) and one unified [SettingsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/SettingsScreen.kt) holding Profile, Default Currency, Privacy/Lock, Cloud Sync, Exports, Start Fresh, and App Updates.
+  - Updated [MainActivity.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/MainActivity.kt) to use a balanced 5-tab navigation bar (`Home | Records | Budgets | Invest | Accounts`) + floating `+` action button and `Settings` gear across screens.
+- **Verification (`v1.0.6`)**:
+  - Added `alignStarterWalletCurrencyIfEmpty_updatesUntouchedWalletCurrencyOnly` in [LedgerDatabaseRobolectricTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/LedgerDatabaseRobolectricTest.kt).
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --no-daemon`: **26 / 26 passed** (`0` skipped, `0` failures, `0` errors), `0` Lint errors (`26` warnings).
+  - Signed `LedgerFlow-v1.0.6.apk` (`4,333,857` bytes, SHA-256 `4f36f1a586df42ee76ba70f7d3c431f3c26bb86b6518c5f081cbc3cb083c87df`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.0.6`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.6/LedgerFlow-v1.0.6.apk`.
+
+
 
 
 

@@ -47,7 +47,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ledgerflow.app.domain.CalculatorEngine
-import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
@@ -76,9 +75,9 @@ fun AddTransactionScreen(
     val rules by vm.magicRules.collectAsState()
     val vault by vm.vaultState.collectAsState()
 
+    val lockedCurrency = vault.baseCurrency
     var txType by remember { mutableStateOf(initialType) }
     var expr by remember { mutableStateOf("0") }
-    var currency by remember { mutableStateOf(vault.baseCurrency) }
     var selectedAccountId by remember(accounts) { mutableStateOf(accounts.firstOrNull()?.id ?: "") }
     var transferTargetId by remember(accounts) { mutableStateOf(accounts.getOrNull(1)?.id ?: accounts.firstOrNull()?.id ?: "") }
     var selectedCategoryId by remember { mutableStateOf<String?>(null) }
@@ -134,7 +133,7 @@ fun AddTransactionScreen(
                 }
             }
 
-            StatusPill("Offline First", EmeraldSoft, EmeraldDark)
+            StatusPill(lockedCurrency, EmeraldSoft, EmeraldDark)
         }
 
         Column(
@@ -152,23 +151,8 @@ fun AddTransactionScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("AMOUNT", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (currency != vault.baseCurrency) {
-                            val fx = FxConverter.convertMinor(evaluatedMinor, currency, vault.baseCurrency)
-                            Text("≈ ${MoneyFormatter.formatMinor(fx, vault.baseCurrency)}", style = TabularStyle, fontSize = 12.sp, color = MutedSlate)
-                        }
-                        Surface(
-                            onClick = {
-                                val list = listOf("USD", "EUR", "GBP", "INR")
-                                currency = list[(list.indexOf(currency) + 1) % list.size]
-                            },
-                            shape = RoundedCornerShape(999.dp),
-                            color = SlateTint,
-                        ) {
-                            Text("$currency ▾", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = SlateInk, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-                        }
-                    }
+                    Text("AMOUNT ($lockedCurrency)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MutedSlate)
+                    StatusPill("Locked", SlateTint, MutedSlate)
                 }
                 Spacer(Modifier.height(6.dp))
                 val signPrefix = when (txType) {
@@ -177,14 +161,14 @@ fun AddTransactionScreen(
                     else -> ""
                 }
                 Text(
-                    text = "$signPrefix${MoneyFormatter.currencySymbol(currency)}$expr",
+                    text = "$signPrefix${MoneyFormatter.currencySymbol(lockedCurrency)}$expr",
                     style = TabularStyle,
                     fontSize = 34.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (txType == "EXPENSE") RoseOutflow else if (txType == "INCOME") EmeraldDark else SlateInk,
                 )
                 Spacer(Modifier.height(10.dp))
-                val sym = MoneyFormatter.currencySymbol(currency)
+                val sym = MoneyFormatter.currencySymbol(lockedCurrency)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("10", "25", "50", "100").forEach { inc ->
                         Surface(
@@ -329,7 +313,7 @@ fun AddTransactionScreen(
                 val ok = vm.addTransaction(
                     txType = txType,
                     amountExpr = expr,
-                    currency = currency,
+                    currency = lockedCurrency,
                     accountId = selectedAccountId,
                     transferAccountId = transferTargetId,
                     manualCategoryId = selectedCategoryId,
@@ -352,7 +336,7 @@ fun AddTransactionScreen(
                 else -> "Save Expense"
             }
             Text(
-                text = "$actionLabel (${MoneyFormatter.formatMinor(evaluatedMinor, currency)})",
+                text = "$actionLabel (${MoneyFormatter.formatMinor(evaluatedMinor, lockedCurrency)})",
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
             )

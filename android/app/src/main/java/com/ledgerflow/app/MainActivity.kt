@@ -13,28 +13,25 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
-import androidx.core.app.NotificationManagerCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PieChart
@@ -66,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.navigation.compose.NavHost
@@ -74,13 +72,14 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.AppUpdateDialog
-import com.ledgerflow.app.ui.screens.AccountsHubScreen
+import com.ledgerflow.app.ui.screens.AccountsScreen
 import com.ledgerflow.app.ui.screens.AddTransactionScreen
 import com.ledgerflow.app.ui.screens.BudgetsScreen
 import com.ledgerflow.app.ui.screens.HomeScreen
 import com.ledgerflow.app.ui.screens.InvestScreen
-import com.ledgerflow.app.ui.screens.PrivacyVaultScreen
+import com.ledgerflow.app.ui.screens.OnboardingScreen
 import com.ledgerflow.app.ui.screens.RecordsScreen
+import com.ledgerflow.app.ui.screens.SettingsScreen
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
@@ -159,6 +158,12 @@ class MainActivity : FragmentActivity() {
                     VaultLockOverlay(
                         onTryPin = { vm.unlockWithPin(it) },
                         onRequestBiometric = { promptBiometric() },
+                    )
+                } else if (!vault.onboardingCompleted) {
+                    OnboardingScreen(
+                        onComplete = { name, email, password, currency ->
+                            vm.completeOnboarding(name, email, password, currency)
+                        },
                     )
                 } else {
                     LedgerFlowMainShell(vm = vm)
@@ -274,7 +279,16 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
         return
     }
 
-    val showBottomBar = currentRoute in setOf("home", "records", "budgets", "invest", "hub")
+    val primaryTabs = setOf("home", "records", "budgets", "invest", "accounts")
+    val showBottomBar = currentRoute in primaryTabs
+
+    val navigateTab: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo("home") { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -289,52 +303,47 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                 )
             }
         },
+        floatingActionButton = {
+            if (showBottomBar) {
+                FloatingActionButton(
+                    onClick = {
+                        addInitialType = "EXPENSE"
+                        showAddModal = true
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    containerColor = EmeraldPrimary,
+                    contentColor = Color.White,
+                ) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Add Transaction")
+                }
+            }
+        },
         bottomBar = {
             if (showBottomBar) {
                 Surface(color = Color.White) {
                     Column(modifier = Modifier.navigationBarsPadding()) {
                         HorizontalDivider(color = BorderSubtle, thickness = 1.dp)
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(64.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceEvenly,
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                            ) {
-                                BottomNavTab("Home", Icons.Outlined.Home, currentRoute == "home") {
-                                    navController.navigate("home") { launchSingleTop = true }
-                                }
-                                BottomNavTab("Records", Icons.AutoMirrored.Outlined.ReceiptLong, currentRoute == "records") {
-                                    navController.navigate("records") { launchSingleTop = true }
-                                }
-                                Spacer(Modifier.size(56.dp))
-                                BottomNavTab("Budgets", Icons.Outlined.PieChart, currentRoute == "budgets") {
-                                    navController.navigate("budgets") { launchSingleTop = true }
-                                }
-                                BottomNavTab("Invest", Icons.AutoMirrored.Outlined.TrendingUp, currentRoute == "invest") {
-                                    navController.navigate("invest") { launchSingleTop = true }
-                                }
-                                BottomNavTab("Hub", Icons.Outlined.GridView, currentRoute == "hub") {
-                                    navController.navigate("hub") { launchSingleTop = true }
-                                }
+                            BottomNavTab("Home", Icons.Outlined.Home, currentRoute == "home") {
+                                navigateTab("home")
                             }
-                            FloatingActionButton(
-                                onClick = {
-                                    addInitialType = "EXPENSE"
-                                    showAddModal = true
-                                },
-                                shape = CircleShape,
-                                containerColor = EmeraldPrimary,
-                                contentColor = Color.White,
-                                modifier = Modifier
-                                    .size(50.dp)
-                                    .align(Alignment.TopCenter)
-                                    .offset(y = (-12).dp),
-                            ) {
-                                Icon(Icons.Outlined.Add, contentDescription = "Add Transaction")
+                            BottomNavTab("Records", Icons.AutoMirrored.Outlined.ReceiptLong, currentRoute == "records") {
+                                navigateTab("records")
+                            }
+                            BottomNavTab("Budgets", Icons.Outlined.PieChart, currentRoute == "budgets") {
+                                navigateTab("budgets")
+                            }
+                            BottomNavTab("Invest", Icons.AutoMirrored.Outlined.TrendingUp, currentRoute == "invest") {
+                                navigateTab("invest")
+                            }
+                            BottomNavTab("Accounts", Icons.Outlined.AccountBalanceWallet, currentRoute == "accounts") {
+                                navigateTab("accounts")
                             }
                         }
                     }
@@ -356,29 +365,38 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                         addInitialType = kind
                         showAddModal = true
                     },
-                    onOpenRecords = { navController.navigate("records") { launchSingleTop = true } },
-                    onOpenBudgets = { navController.navigate("budgets") { launchSingleTop = true } },
-                    onOpenHub = { navController.navigate("hub") { launchSingleTop = true } },
-                    onOpenPrivacyVault = { navController.navigate("privacy") { launchSingleTop = true } },
+                    onOpenRecords = { navigateTab("records") },
+                    onOpenBudgets = { navigateTab("budgets") },
+                    onOpenAccounts = { navigateTab("accounts") },
+                    onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
                 )
             }
             composable("records") {
-                RecordsScreen(vm = vm)
-            }
-            composable("budgets") {
-                BudgetsScreen(vm = vm)
-            }
-            composable("invest") {
-                InvestScreen(vm = vm)
-            }
-            composable("hub") {
-                AccountsHubScreen(
+                RecordsScreen(
                     vm = vm,
-                    onOpenPrivacyVault = { navController.navigate("privacy") { launchSingleTop = true } },
+                    onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
                 )
             }
-            composable("privacy") {
-                PrivacyVaultScreen(
+            composable("budgets") {
+                BudgetsScreen(
+                    vm = vm,
+                    onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
+                )
+            }
+            composable("invest") {
+                InvestScreen(
+                    vm = vm,
+                    onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
+                )
+            }
+            composable("accounts") {
+                AccountsScreen(
+                    vm = vm,
+                    onOpenSettings = { navController.navigate("settings") { launchSingleTop = true } },
+                )
+            }
+            composable("settings") {
+                SettingsScreen(
                     vm = vm,
                     onBack = { navController.popBackStack() },
                 )
@@ -399,7 +417,7 @@ private fun BottomNavTab(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Icon(imageVector = icon, contentDescription = label, tint = color, modifier = Modifier.size(21.dp))
         Text(

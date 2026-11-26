@@ -17,10 +17,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -64,7 +68,10 @@ import java.util.Locale
 import kotlin.math.roundToLong
 
 @Composable
-fun InvestScreen(vm: LedgerViewModel) {
+fun InvestScreen(
+    vm: LedgerViewModel,
+    onOpenSettings: () -> Unit,
+) {
     val holdings by vm.holdings.collectAsState()
     val vault by vm.vaultState.collectAsState()
     val baseCurrency = vault.baseCurrency
@@ -98,20 +105,28 @@ fun InvestScreen(vm: LedgerViewModel) {
             ) {
                 Column {
                     Text("Investments", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                    Text("• Tracked in Local Room • Tap position to update price", fontSize = 11.sp, color = EmeraldDark, fontWeight = FontWeight.Medium)
+                    Text("${holdings.size} positions • $baseCurrency", fontSize = 12.sp, color = MutedSlate)
                 }
-                Surface(
-                    onClick = { showAddHolding = true },
-                    shape = RoundedCornerShape(999.dp),
-                    color = EmeraldPrimary,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(
-                        text = "+ Add Holding",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    )
+                    Surface(
+                        onClick = { showAddHolding = true },
+                        shape = RoundedCornerShape(999.dp),
+                        color = EmeraldPrimary,
+                    ) {
+                        Text(
+                            text = "+ Add Holding",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        )
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
+                    }
                 }
             }
         }

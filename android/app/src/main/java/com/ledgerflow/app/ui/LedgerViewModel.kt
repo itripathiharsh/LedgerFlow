@@ -237,15 +237,91 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         _vaultState.value = vault.update { it.copy(hideBalances = !it.hideBalances) }
     }
 
-    fun cycleBaseCurrency() {
-        val supported = listOf("USD", "EUR", "GBP", "INR")
-        val current = _vaultState.value.baseCurrency
-        val next = supported[(supported.indexOf(current) + 1) % supported.size]
-        _vaultState.value = vault.update { it.copy(baseCurrency = next) }
+    fun setBaseCurrency(code: String) {
+        val clean = code.trim().uppercase()
+        if (clean.length != 3) return
+        _vaultState.value = vault.update { it.copy(baseCurrency = clean) }
+        viewModelScope.launch {
+            db.alignStarterWalletCurrencyIfEmpty(clean)
+            SyncWorker.enqueueWhenOnline(app)
+        }
+        _statusMessage.value = "Default currency set to $clean"
     }
 
-    fun setBaseCurrency(code: String) {
-        _vaultState.value = vault.update { it.copy(baseCurrency = code.uppercase()) }
+    fun updateProfileName(name: String) {
+        val clean = name.trim()
+        if (clean.isBlank()) {
+            _statusMessage.value = "Name cannot be empty"
+            return
+        }
+        _vaultState.value = vault.update { it.copy(userName = clean) }
+        _statusMessage.value = "Profile updated"
+    }
+
+    fun completeOnboarding(
+        name: String,
+        email: String,
+        password: String,
+        currency: String,
+    ) {
+        val cleanName = name.trim()
+        val cleanEmail = email.trim()
+        val cleanCur = currency.trim().uppercase()
+        if (cleanName.isBlank()) {
+            _statusMessage.value = "Enter your name"
+            return
+        }
+        if (!cleanEmail.contains("@") || !cleanEmail.contains(".")) {
+            _statusMessage.value = "Enter a valid email address"
+            return
+        }
+        if (password.length < 6) {
+            _statusMessage.value = "Password must be at least 6 characters"
+            return
+        }
+        if (cleanCur.length != 3) {
+            _statusMessage.value = "Choose your currency"
+            return
+        }
+
+        _vaultState.value = vault.update {
+            it.copy(
+                onboardingCompleted = true,
+                userName = cleanName,
+                userEmail = cleanEmail,
+                baseCurrency = cleanCur,
+            )
+        }
+
+        viewModelScope.launch {
+            db.alignStarterWalletCurrencyIfEmpty(cleanCur)
+            if (isOnline.value) {
+                var authRes = remote.signUp(cleanEmail, password)
+                if (!authRes.success || authRes.accessToken.isNullOrBlank()) {
+                    val signInAttempt = remote.signIn(cleanEmail, password)
+                    if (signInAttempt.success && !signInAttempt.accessToken.isNullOrBlank()) {
+                        authRes = signInAttempt
+                    }
+                }
+                if (authRes.success && !authRes.accessToken.isNullOrBlank()) {
+                    _vaultState.value = vault.update {
+                        it.copy(
+                            userId = authRes.userId,
+                            userEmail = authRes.email ?: cleanEmail,
+                            accessToken = authRes.accessToken,
+                            refreshToken = authRes.refreshToken,
+                        )
+                    }
+                    syncNow()
+                } else if (authRes.success) {
+                    _statusMessage.value = "Welcome, $cleanName! Verify your email to enable cloud sync."
+                } else {
+                    _statusMessage.value = "Welcome, $cleanName! Setup saved locally."
+                }
+            } else {
+                _statusMessage.value = "Welcome, $cleanName! Setup saved offline."
+            }
+        }
     }
 
     fun addTransaction(

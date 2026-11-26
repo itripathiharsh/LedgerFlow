@@ -8,27 +8,27 @@ Offline-first personal finance, expense tracking, budgeting, multi-account ledge
 
 Install the latest signed release directly on Android (`minSdk 26` / Android 8.0+):
 
-- **Direct APK Download (`v1.0.5`)**: [**Download `LedgerFlow-v1.0.5.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.5/LedgerFlow-v1.0.5.apk)
+- **Direct APK Download (`v1.0.6`)**: [**Download `LedgerFlow-v1.0.6.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.6/LedgerFlow-v1.0.6.apk)
 - **All Releases**: [github.com/itripathiharsh/LedgerFlow/releases/latest](https://github.com/itripathiharsh/LedgerFlow/releases/latest)
 - **Auto-Update Manifest**: [`update-manifest.json`](https://github.com/itripathiharsh/LedgerFlow/releases/latest/download/update-manifest.json)
 
 | Artifact | Value |
 | --- | --- |
 | Application ID | `com.ledgerflow.app` |
-| Version | `1.0.5` (`versionCode: 6`) |
+| Version | `1.0.6` (`versionCode: 7`) |
 | Distribution Flavor | `direct` (Play Protect sideload-safe — zero SMS, Accessibility, or NotificationListener permissions) |
 | Min / Target SDK | `26` / `36` |
 | APK File Size | `4,333,857` bytes (~`4.13 MiB`) |
-| APK SHA-256 | `c901181b4cf83d97f1484fa2dfecdc3e11530ee1b55aff1dda5a5f297461f180` |
+| APK SHA-256 | `4f36f1a586df42ee76ba70f7d3c431f3c26bb86b6518c5f081cbc3cb083c87df` |
 | Signing Cert SHA-256 (`v2` + `v3` RSA-2048) | `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0` |
 
 ### Verifying & Installing the APK
-1. Download [`LedgerFlow-v1.0.5.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.5/LedgerFlow-v1.0.5.apk) on your Android device (future updates are delivered and installed automatically in-app).
+1. Download [`LedgerFlow-v1.0.6.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.0.6/LedgerFlow-v1.0.6.apk) on your Android device (future updates are delivered and installed automatically in-app).
 2. When prompted, allow installing unknown apps for your browser or file manager.
 3. Optional checksum check before install:
    ```bash
-   sha256sum LedgerFlow-v1.0.5.apk
-   # Expected: c901181b4cf83d97f1484fa2dfecdc3e11530ee1b55aff1dda5a5f297461f180
+   sha256sum LedgerFlow-v1.0.6.apk
+   # Expected: 4f36f1a586df42ee76ba70f7d3c431f3c26bb86b6518c5f081cbc3cb083c87df
    ```
 
 ---

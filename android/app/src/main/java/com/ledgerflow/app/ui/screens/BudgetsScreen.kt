@@ -18,10 +18,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -69,7 +73,10 @@ import java.util.Locale
 import kotlin.math.abs
 
 @Composable
-fun BudgetsScreen(vm: LedgerViewModel) {
+fun BudgetsScreen(
+    vm: LedgerViewModel,
+    onOpenSettings: () -> Unit,
+) {
     val budgets by vm.budgets.collectAsState()
     val planned by vm.plannedPayments.collectAsState()
     val transactions by vm.allTransactions.collectAsState()
@@ -116,19 +123,27 @@ fun BudgetsScreen(vm: LedgerViewModel) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Planning", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                Surface(
-                    onClick = { if (selectedTab == 2) showNewPlanned = true else showNewBudget = true },
-                    shape = RoundedCornerShape(999.dp),
-                    color = EmeraldPrimary,
+                Text("Budgets", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(
-                        text = if (selectedTab == 2) "+ New Bill" else "+ New Budget",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    )
+                    Surface(
+                        onClick = { if (selectedTab == 2) showNewPlanned = true else showNewBudget = true },
+                        shape = RoundedCornerShape(999.dp),
+                        color = EmeraldPrimary,
+                    ) {
+                        Text(
+                            text = if (selectedTab == 2) "+ New Bill" else "+ New Budget",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        )
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
+                    }
                 }
             }
         }

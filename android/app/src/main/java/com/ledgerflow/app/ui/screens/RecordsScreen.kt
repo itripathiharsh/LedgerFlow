@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -74,7 +75,10 @@ import java.util.Locale
 import kotlin.math.abs
 
 @Composable
-fun RecordsScreen(vm: LedgerViewModel) {
+fun RecordsScreen(
+    vm: LedgerViewModel,
+    onOpenSettings: () -> Unit,
+) {
     val context = LocalContext.current
     val transactions by vm.filteredTransactions.collectAsState()
     val accounts by vm.accounts.collectAsState()
@@ -122,9 +126,9 @@ fun RecordsScreen(vm: LedgerViewModel) {
                     Text("Records", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                     StatusPill("${transactions.size}", EmeraldSoft, EmeraldDark)
                 }
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { showRulesDialog = true }) {
-                        Icon(Icons.Outlined.AutoFixHigh, contentDescription = "Magic Rules", tint = SlateInk)
+                        Icon(Icons.Outlined.AutoFixHigh, contentDescription = "Auto-Rules", tint = SlateInk)
                     }
                     IconButton(onClick = {
                         vm.exportAndShare(asCsv = true) { intent ->
@@ -133,6 +137,9 @@ fun RecordsScreen(vm: LedgerViewModel) {
                         }
                     }) {
                         Icon(Icons.Outlined.FileDownload, contentDescription = "Export CSV", tint = SlateInk)
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
                     }
                 }
             }
@@ -166,7 +173,6 @@ fun RecordsScreen(vm: LedgerViewModel) {
                 "GPAY_AUTO" to "GPay Auto",
                 "PLANNED" to "Planned",
                 "IMPORT" to "Imported",
-                "MULTIFX" to "Multi-FX",
             )
             Row(
                 modifier = Modifier

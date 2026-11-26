@@ -44,6 +44,8 @@ data class VaultSessionState(
     val pendingInstallResumeVersionCode: Long = 0L,
     val cachedFxRatesJson: String? = null,
     val cachedFxDate: String? = null,
+    val onboardingCompleted: Boolean = false,
+    val userName: String = "",
 )
 
 interface VaultKeyProvider {
@@ -176,7 +178,6 @@ class VaultStore(context: Context) {
         it.copy(
             userId = null,
             lastCloudUserId = null,
-            userEmail = null,
             accessToken = null,
             refreshToken = null,
             lastSyncEpochMs = 0L,

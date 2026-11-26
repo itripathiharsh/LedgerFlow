@@ -235,4 +235,17 @@ class LedgerDatabaseRobolectricTest {
         assertEquals(-2_000L, db.accountDao().getById(accounts.first().id)!!.balanceMinor)
         assertTrue(db.transactionDao().searchFts("Chai*").any { it.id == txId })
     }
+
+    @Test
+    fun alignStarterWalletCurrencyIfEmpty_updatesUntouchedWalletCurrencyOnly() = runTest {
+        SeedData.ensureMinimalSetup(db, defaultCurrency = "USD", nowMs = 1_700_000_000_000L)
+        db.alignStarterWalletCurrencyIfEmpty("INR", nowMs = 1_700_000_001_000L)
+        val after = db.accountDao().getAllActive().single()
+        assertEquals("INR", after.currency)
+
+        // Once a balance/transaction exists, switching default currency leaves existing account currency untouched
+        db.accountDao().upsert(after.copy(balanceMinor = 50_000L))
+        db.alignStarterWalletCurrencyIfEmpty("EUR", nowMs = 1_700_000_002_000L)
+        assertEquals("INR", db.accountDao().getAllActive().single().currency)
+    }
 }
