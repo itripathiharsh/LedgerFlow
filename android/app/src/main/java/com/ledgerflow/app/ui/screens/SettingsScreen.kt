@@ -184,7 +184,7 @@ fun SettingsScreen(
                         Icon(Icons.Outlined.Person, contentDescription = null, tint = EmeraldDark)
                         Column {
                             Text(
-                                text = vault.userName.ifBlank { "Personal Profile" },
+                                text = MoneyFormatter.toTitleCaseName(vault.userName).ifBlank { "Personal Profile" },
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = SlateInk,

@@ -311,6 +311,26 @@
   - Signed `LedgerFlow-v1.3.0.apk` (`4,657,336` bytes, SHA-256 `f2ec86efdc1900ca4b20b09485bc61d22e2dc8b17c69111c32d33c95891e9acd`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.3.0`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.3.0/LedgerFlow-v1.3.0.apk`.
 
+---
+
+## Navigation Drawer Refactor & Screen Declutter (`v1.4.0`, `versionCode 15`)
+- **Left Navigation Drawer Architecture (`MainActivity.kt`)**:
+  - Removed the 5-tab bottom navigation bar (`Home`, `Records`, `Budgets`, `Invest`, `Accounts`).
+  - Added a `ModalNavigationDrawer` + `ModalDrawerSheet` (`≡` hamburger menu trigger across all primary destinations) featuring the user's Title-Cased Profile header + live `SyncBadge`, `Home`, `Records`, `Accounts`, `Budgets & Planned`, `Investments`, `Analytics & Insights`, global `Smart Paste & Import` sheet, and `Settings`.
+  - Preserved a single bottom-right floating `+` FAB across main screens and removed redundant top-right `+` header pills.
+- **Decluttered Home (`HomeScreen.kt`)**:
+  - Updated header (`≡ Home` + `Hi, <TitleCaseFirstName>`), 2 clean sub-tabs (`Overview` | `Budgets`), and stripped `Overview` to strictly 3 airy modules: horizontal Accounts Strip (+ subtle `+ Add` tile and `Records` / `Manage Accounts` pill buttons), unified Total Balance & Current Cash Flow card, and Last 3 Recent Records with `"See all →"`.
+- **Accounts Detail Sheet & Emerald Payment Capture (`AccountsScreen.kt`, `Charts.kt`, `AnalyticsEngine.kt`)**:
+  - Removed exposed trash icons next to account balances; tapping any account card opens a `ModalBottomSheet` Account Detail view with a real 30-day `BalanceTrendLineChart` (`computeAccountBalanceTrend`), account transactions, **Edit**, **Credit Limit**, **Repay**, and **Delete** controls.
+  - Restyled Payment Capture / Smart Paste Alert from bright cyan to dark-emerald theme tokens (`EmeraldSoft` / `EmeraldPrimary`).
+- **Empty States, Spacing & Title Case Polish (`BudgetsScreen.kt`, `InvestScreen.kt`, `FinanceMath.kt`, `LedgerViewModel.kt`, `SettingsScreen.kt`)**:
+  - Replaced `"₹0.00 left"` on zero budgets with a `"Create your first monthly budget"` card; updated Investments empty `Allocation` copy to `"No portfolio allocation yet."`; increased card spacing to `16.dp`–`18.dp`; added `MoneyFormatter.toTitleCaseName()` normalization.
+- **Verification (`v1.4.0`)**:
+  - Expanded `analyticsEngineAndReports_computeBalancesCashFlowUtilizationDtiAndCsv` in [FinanceMathTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/FinanceMathTest.kt) with `MoneyFormatter.toTitleCaseName()` and `AnalyticsEngine.computeAccountBalanceTrend()` checks.
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --max-workers=1 --no-daemon`: **41 / 41 passed** (`0` failures, `0` errors, `0` skipped), `0` Lint errors (`29` warnings).
+  - Signed `LedgerFlow-v1.4.0.apk` (`4,731,064` bytes, SHA-256 `793e0b3de3f429fb6d8b012b264ad61b87c79b2a6462a0846355995119bfa1d2`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.4.0`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.4.0/LedgerFlow-v1.4.0.apk`.
+
 
 
 

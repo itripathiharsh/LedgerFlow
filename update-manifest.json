@@ -1,16 +1,16 @@
 {
-  "versionCode": 14,
-  "versionName": "1.3.0",
+  "versionCode": 15,
+  "versionName": "1.4.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T03:05:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.3.0/LedgerFlow-v1.3.0.apk",
-  "apkSizeBytes": 4657336,
-  "sha256": "f2ec86efdc1900ca4b20b09485bc61d22e2dc8b17c69111c32d33c95891e9acd",
+  "releasedAt": "2026-11-27T16:34:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.4.0/LedgerFlow-v1.4.0.apk",
+  "apkSizeBytes": 4731064,
+  "sha256": "793e0b3de3f429fb6d8b012b264ad61b87c79b2a6462a0846355995119bfa1d2",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Added Premium Black (pure OLED #000000) as a third theme alongside Light and Flow Dark (Green), with visual swatches and clean reorganized sections in Settings.",
-    "Expanded daily-life categories & 28 subcategories (Fuel & Vehicle, Shopping, Entertainment, Education, Travel, Personal Care, EMI & Debt, Salary, Freelance, Refunds), custom category/subcategory creation, and multi-select split tagging.",
-    "Added a dedicated multi-section Analytics & Reports hub (Overview, Cash Flow, Spending, Credit & Debt, Reports) with Weeks/Months/Custom date range, balance trend & forecast, planned timeline, period comparison, credit utilization & DTI, and downloadable CSV reports."
+    "Moved navigation from the 5-tab bottom bar to a left Navigation Drawer (Home, Records, Accounts, Budgets & Planned, Investments, Analytics & Insights, Smart Paste & Import, Settings) with a single floating + button.",
+    "Decluttered Home with Overview and Budgets tabs: Overview contains only the horizontal Accounts Strip, unified Total Balance & Current Cash Flow card, and Last 3 Recent Records.",
+    "Added tap-to-open Account Detail sheets (30-day balance trendline, account transactions, edit, repay, and delete), emerald-themed Payment Capture, Title Case user names, and clean Budgets & Investments empty states."
   ],
   "mandatory": false
 }

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
@@ -78,6 +79,7 @@ import kotlin.math.abs
 @Composable
 fun RecordsScreen(
     vm: LedgerViewModel,
+    onOpenDrawer: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -114,8 +116,8 @@ fun RecordsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 104.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 92.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
             Row(
@@ -123,8 +125,12 @@ fun RecordsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Records", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = SlateInk)
+                    }
+                    Text("Records", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                    Spacer(Modifier.width(4.dp))
                     StatusPill("${transactions.size}", EmeraldSoft, EmeraldDark)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

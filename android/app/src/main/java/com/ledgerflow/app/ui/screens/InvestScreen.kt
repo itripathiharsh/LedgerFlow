@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -53,6 +54,7 @@ import com.ledgerflow.app.ui.components.CategoryDonutChart
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
 import com.ledgerflow.app.ui.components.PieChartSlice
+import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.EmeraldDark
@@ -71,6 +73,7 @@ import java.util.Locale
 @Composable
 fun InvestScreen(
     vm: LedgerViewModel,
+    onOpenDrawer: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     val holdings by vm.holdings.collectAsState()
@@ -113,8 +116,8 @@ fun InvestScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 104.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 92.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
             Row(
@@ -122,30 +125,20 @@ fun InvestScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text("Investments", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                    Text("${holdings.size} positions • $baseCurrency", fontSize = 12.sp, color = MutedSlate)
-                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Surface(
-                        onClick = { showAddHolding = true },
-                        shape = RoundedCornerShape(999.dp),
-                        color = EmeraldPrimary,
-                    ) {
-                        Text(
-                            text = "+ Add Holding",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        )
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = SlateInk)
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
+                    Column {
+                        Text("Investments", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                        Text("${holdings.size} positions • $baseCurrency", fontSize = 12.sp, color = MutedSlate)
                     }
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
                 }
             }
         }
@@ -204,20 +197,22 @@ fun InvestScreen(
                     currency = baseCurrency,
                     masked = masked,
                     centerSubtitle = "Portfolio",
+                    emptyMessage = "No portfolio allocation yet.",
                 )
             }
         }
 
         // Holdings List
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Holdings", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                Text("${holdings.size} Positions", fontSize = 12.sp, color = MutedSlate)
-            }
+            SectionHeader(
+                title = "Holdings (${holdings.size})",
+                actionText = "+ Add Holding",
+                onActionClick = { showAddHolding = true },
+            )
         }
 
         if (holdings.isEmpty()) {
-            item { EmptyPlaceholder("No holdings tracked", "Tap + Add Holding to track stocks, crypto, or FX reserves.") }
+            item { EmptyPlaceholder("No holdings tracked", "Tap + Add Holding above to track stocks, crypto, or FX reserves.") }
         } else {
             items(holdings, key = { it.id }) { h ->
                 val valLocal = AnalyticsCalculator.safeMultiplyMinor(h.quantity, h.currentPriceMinor)

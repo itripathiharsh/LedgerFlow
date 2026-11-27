@@ -2,6 +2,7 @@ package com.ledgerflow.app.ui.screens
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -22,26 +23,33 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Contactless
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FileUpload
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -62,10 +71,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
+import com.ledgerflow.app.domain.AnalyticsEngine
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.service.PayAndTrackCapture
 import com.ledgerflow.app.ui.LedgerViewModel
+import com.ledgerflow.app.ui.components.BalanceTrendLineChart
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
@@ -73,26 +84,30 @@ import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.rememberDataImportPicker
 import com.ledgerflow.app.ui.theme.AlabasterBg
-import com.ledgerflow.app.ui.theme.AmberSoft
 import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
-import com.ledgerflow.app.ui.theme.LedgerThemeColors
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
 import com.ledgerflow.app.ui.theme.RoseSoft
-import com.ledgerflow.app.ui.theme.SkySoft
-import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
+import com.ledgerflow.app.ui.theme.SurfaceCard
 import com.ledgerflow.app.ui.theme.TabularStyle
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountsScreen(
     vm: LedgerViewModel,
+    openAddOnStart: Boolean = false,
+    onConsumeOpenAdd: () -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -121,17 +136,28 @@ fun AccountsScreen(
     }
 
     var showAddAccount by remember { mutableStateOf(false) }
+    var selectedDetailAccountId by remember { mutableStateOf<String?>(null) }
     var pendingDeleteAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var pendingRepayAccount by remember { mutableStateOf<AccountEntity?>(null) }
+    var pendingEditAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var pendingEditLimitAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var showSmartPaste by remember { mutableStateOf(false) }
     val importBusy by vm.importInProgress.collectAsState()
+
+    LaunchedEffect(openAddOnStart) {
+        if (openAddOnStart) {
+            showAddAccount = true
+            onConsumeOpenAdd()
+        }
+    }
+
     val accountSummary = remember(accounts, baseCurrency) {
         AnalyticsCalculator.computeAccountSummary(accounts, baseCurrency)
     }
     val assetAccounts = remember(accounts) {
         accounts.filter { !AccountTypeCatalog.isLiability(it.accountType) }
     }
+    val dateFmt = remember { SimpleDateFormat("MMM d, h:mm a", Locale.US) }
 
     val launchImportPicker = rememberDataImportPicker(
         onUriSelected = { vm.importCsvUri(it) },
@@ -142,8 +168,8 @@ fun AccountsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 92.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
             Row(
@@ -151,35 +177,24 @@ fun AccountsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text("Accounts", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                    Text("${accounts.size} active • $baseCurrency", fontSize = 12.sp, color = MutedSlate)
-                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Surface(
-                        onClick = { showAddAccount = true },
-                        shape = RoundedCornerShape(999.dp),
-                        color = EmeraldPrimary,
-                    ) {
-                        Text(
-                            text = "+ Add Account",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        )
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = SlateInk)
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
+                    Column {
+                        Text("Accounts", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                        Text("${accounts.size} active • $baseCurrency", fontSize = 12.sp, color = MutedSlate)
                     }
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
                 }
             }
         }
 
-        // Accounts List
         if (accounts.isNotEmpty() && accountSummary.liabilitiesMinor > 0L) {
             item {
                 CleanCard(padding = 14.dp) {
@@ -223,11 +238,16 @@ fun AccountsScreen(
         }
 
         item {
-            SectionHeader(title = "Wallets, Cards, Loans & Banks")
+            SectionHeader(
+                title = "Wallets, Cards, Loans & Banks",
+                actionText = "+ Add Account",
+                onActionClick = { showAddAccount = true },
+            )
         }
+
         if (accounts.isEmpty()) {
             item {
-                EmptyPlaceholder("No active accounts", "Tap + Add Account to create a wallet, debit/credit card, loan, or bank account.")
+                EmptyPlaceholder("No active accounts", "Tap + Add Account above to create a wallet, debit/credit card, loan, or bank account.")
             }
         } else {
             items(accounts, key = { it.id }) { acc ->
@@ -237,11 +257,14 @@ fun AccountsScreen(
                 val tintHex = when (normType) {
                     "CREDIT_CARD" -> "#E11D48"
                     "LOAN" -> "#D97706"
-                    "DEBIT_CARD", "CARD" -> "#0284C7"
+                    "DEBIT_CARD", "CARD" -> "#059669"
                     "CASH" -> "#475569"
                     else -> "#059669"
                 }
-                CleanCard(padding = 14.dp) {
+                CleanCard(
+                    padding = 14.dp,
+                    onClick = { selectedDetailAccountId = acc.id },
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -292,91 +315,63 @@ fun AccountsScreen(
                                     )
                                 }
                             }
-                            if (isCreditCard) {
-                                TextButton(
-                                    onClick = { pendingEditLimitAccount = acc },
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                ) {
-                                    Text("Limit", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = SkySync)
-                                }
-                            }
-                            if (isDebtType && acc.balanceMinor < 0L && assetAccounts.isNotEmpty()) {
-                                TextButton(
-                                    onClick = { pendingRepayAccount = acc },
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                ) {
-                                    Text("Pay", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
-                                }
-                            }
-                            IconButton(
-                                onClick = { pendingDeleteAccount = acc },
-                                modifier = Modifier.size(32.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.DeleteOutline,
-                                    contentDescription = "Delete account",
-                                    tint = MutedSlate,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                                contentDescription = "View details",
+                                tint = MutedSlate,
+                                modifier = Modifier.size(18.dp),
+                            )
                         }
                     }
-                    if (isCreditCard) {
+
+                    if (isCreditCard && acc.creditLimitMinor > 0L) {
                         Spacer(Modifier.height(8.dp))
-                        if (acc.creditLimitMinor > 0L) {
-                            val usedMinor = if (acc.balanceMinor < 0L) abs(acc.balanceMinor) else 0L
-                            val utilRatio = (usedMinor.toFloat() / acc.creditLimitMinor.toFloat()).coerceIn(0f, 1.5f)
-                            val utilPct = (utilRatio * 100f).toInt()
-                            val barColor = when {
-                                utilPct >= 70 -> RoseOutflow
-                                utilPct >= 30 -> AmberWarn
-                                else -> EmeraldPrimary
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    text = "Credit Used: ${MoneyFormatter.formatMinor(usedMinor, acc.currency, masked = masked)} / ${MoneyFormatter.formatMinor(acc.creditLimitMinor, acc.currency, masked = masked)}",
-                                    style = TabularStyle,
-                                    fontSize = 11.sp,
-                                    color = MutedSlate,
-                                )
-                                Text(
-                                    text = "$utilPct% used",
-                                    style = TabularStyle,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = barColor,
-                                )
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            LinearProgressIndicator(
-                                progress = { utilRatio.coerceIn(0f, 1f) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(6.dp)
-                                    .clip(RoundedCornerShape(999.dp)),
-                                color = barColor,
-                                trackColor = SlateTint,
-                            )
-                        } else {
+                        val usedMinor = if (acc.balanceMinor < 0L) abs(acc.balanceMinor) else 0L
+                        val utilRatio = (usedMinor.toFloat() / acc.creditLimitMinor.toFloat()).coerceIn(0f, 1.5f)
+                        val utilPct = (utilRatio * 100f).toInt()
+                        val barColor = when {
+                            utilPct >= 70 -> RoseOutflow
+                            utilPct >= 30 -> AmberWarn
+                            else -> EmeraldPrimary
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
                             Text(
-                                text = "Tap Limit to set your credit limit and track utilization.",
+                                text = "Credit Used: ${MoneyFormatter.formatMinor(usedMinor, acc.currency, masked = masked)} / ${MoneyFormatter.formatMinor(acc.creditLimitMinor, acc.currency, masked = masked)}",
+                                style = TabularStyle,
                                 fontSize = 11.sp,
                                 color = MutedSlate,
                             )
+                            Text(
+                                text = "$utilPct% used",
+                                style = TabularStyle,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = barColor,
+                            )
                         }
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { utilRatio.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(999.dp)),
+                            color = barColor,
+                            trackColor = SlateTint,
+                        )
                     }
                 }
             }
         }
 
-        // Pay & Track Capture Card
+        // Restyled Dark-Emerald Payment Capture Card
         item {
             CleanCard(
-                containerColor = SkySoft,
-                borderColor = if (LedgerThemeColors.isDark) SkySync.copy(alpha = 0.35f) else Color(0xFFBAE6FD),
+                containerColor = EmeraldSoft,
+                borderColor = EmeraldPrimary.copy(alpha = 0.30f),
                 padding = 16.dp,
             ) {
                 Row(
@@ -385,7 +380,7 @@ fun AccountsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CategoryIconBadge("directions_transit", "#0284C7", size = 38.dp)
+                        CategoryIconBadge("directions_transit", "#059669", size = 38.dp)
                         Column {
                             Text("Payment Capture", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                             Spacer(Modifier.height(2.dp))
@@ -395,7 +390,7 @@ fun AccountsScreen(
                                     supportsOsListener -> "Listener Ready"
                                     else -> "Share & Smart Paste ($gpayCapturedCount)"
                                 },
-                                containerColor = EmeraldSoft,
+                                containerColor = SurfaceCard,
                                 contentColor = EmeraldDark,
                                 dotColor = EmeraldPrimary,
                             )
@@ -430,8 +425,9 @@ fun AccountsScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.45f)),
                     ) {
-                        Icon(Icons.Outlined.Contactless, contentDescription = null, tint = SkySync)
+                        Icon(Icons.Outlined.Contactless, contentDescription = null, tint = EmeraldPrimary)
                         Spacer(Modifier.width(6.dp))
                         Text("Notification Access", fontSize = 12.sp, color = SlateInk)
                     }
@@ -440,17 +436,17 @@ fun AccountsScreen(
                         onClick = { showSmartPaste = true },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SkySync),
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                     ) {
                         Icon(Icons.Outlined.Contactless, contentDescription = null, tint = Color.White)
                         Spacer(Modifier.width(6.dp))
-                        Text("Smart Paste Alert", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Smart Paste Alert", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     }
                 }
             }
         }
 
-        // Import Data Card (CSV / TSV / JSON)
+        // Import Data Card (CSV / JSON)
         item {
             CleanCard(
                 padding = 14.dp,
@@ -460,7 +456,7 @@ fun AccountsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(Icons.Outlined.FileUpload, contentDescription = null, tint = SkySync)
+                    Icon(Icons.Outlined.FileUpload, contentDescription = null, tint = EmeraldPrimary)
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Import Data (CSV / JSON)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateInk)
                         Text("Import transactions from other apps or bank statements", fontSize = 12.sp, color = MutedSlate)
@@ -469,6 +465,253 @@ fun AccountsScreen(
                 }
             }
         }
+    }
+
+    // Tap-to-open Account Detail Sheet (Balance Trendline + Account Transactions + Edit/Repay/Delete)
+    val detailAccount = selectedDetailAccountId?.let { id -> accounts.firstOrNull { it.id == id } }
+    if (detailAccount != null) {
+        val normType = AccountTypeCatalog.normalize(detailAccount.accountType)
+        val isCreditCard = normType == "CREDIT_CARD" || normType == "CARD"
+        val isDebtType = AccountTypeCatalog.isLiability(normType) || detailAccount.balanceMinor < 0L
+        val trend = remember(detailAccount, transactions) {
+            AnalyticsEngine.computeAccountBalanceTrend(detailAccount, transactions, days = 30)
+        }
+        val accountTxs = remember(detailAccount.id, transactions) {
+            transactions
+                .filter { it.deletedAtEpochMs == null && (it.accountId == detailAccount.id || it.transferAccountId == detailAccount.id) }
+                .take(15)
+        }
+        val positiveChange = trend.changeMinor >= 0L
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+        ModalBottomSheet(
+            onDismissRequest = { selectedDetailAccountId = null },
+            sheetState = sheetState,
+            containerColor = SurfaceCard,
+            contentColor = SlateInk,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        CategoryIconBadge(AccountTypeCatalog.iconKey(normType), if (isDebtType && detailAccount.balanceMinor < 0L) "#E11D48" else "#059669", size = 42.dp)
+                        Column {
+                            Text(detailAccount.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                            val sub = listOfNotNull(
+                                detailAccount.institution.takeIf { it.isNotBlank() },
+                                AccountTypeCatalog.displayLabel(normType),
+                                detailAccount.lastFour.takeIf { it.isNotBlank() }?.let { "••$it" },
+                            ).joinToString(" • ")
+                            Text(sub, fontSize = 12.sp, color = MutedSlate)
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = if (isDebtType && detailAccount.balanceMinor < 0L) {
+                                "Owed ${MoneyFormatter.formatMinor(abs(detailAccount.balanceMinor), detailAccount.currency, masked = masked)}"
+                            } else {
+                                MoneyFormatter.formatMinor(detailAccount.balanceMinor, detailAccount.currency, masked = masked)
+                            },
+                            style = TabularStyle,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (detailAccount.balanceMinor < 0L) RoseOutflow else EmeraldDark,
+                        )
+                        if (isCreditCard && detailAccount.creditLimitMinor > 0L) {
+                            Text(
+                                text = "Limit ${MoneyFormatter.formatMinor(detailAccount.creditLimitMinor, detailAccount.currency, masked = masked)}",
+                                fontSize = 11.sp,
+                                color = MutedSlate,
+                            )
+                        }
+                    }
+                }
+
+                // Balance Trendline Card
+                CleanCard(containerColor = SlateTint, padding = 14.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("30-Day Balance Trend", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                        StatusPill(
+                            text = MoneyFormatter.formatMinor(trend.changeMinor, detailAccount.currency, showPlus = true, masked = masked),
+                            containerColor = if (positiveChange) EmeraldSoft else RoseSoft,
+                            contentColor = if (positiveChange) EmeraldDark else RoseOutflow,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    BalanceTrendLineChart(
+                        points = trend.points,
+                        lineColor = if (positiveChange) EmeraldPrimary else RoseOutflow,
+                        chartHeight = 104.dp,
+                    )
+                }
+
+                // Actions inside Detail Sheet: Edit / Repay / Limit / Delete
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { pendingEditAccount = detailAccount },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(16.dp), tint = EmeraldPrimary)
+                        Spacer(Modifier.width(5.dp))
+                        Text("Edit", fontSize = 12.sp, color = SlateInk)
+                    }
+                    if (isCreditCard) {
+                        OutlinedButton(
+                            onClick = { pendingEditLimitAccount = detailAccount },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Limit", fontSize = 12.sp, color = EmeraldDark, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    if (isDebtType && detailAccount.balanceMinor < 0L && assetAccounts.isNotEmpty()) {
+                        Button(
+                            onClick = { pendingRepayAccount = detailAccount },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                        ) {
+                            Text("Repay", fontSize = 12.sp)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { pendingDeleteAccount = detailAccount },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, RoseOutflow.copy(alpha = 0.4f)),
+                    ) {
+                        Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete account", tint = RoseOutflow, modifier = Modifier.size(16.dp))
+                    }
+                }
+
+                // Account-specific transactions
+                Text("Recent Activity (${accountTxs.size})", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                if (accountTxs.isEmpty()) {
+                    Text("No transactions recorded on this account yet.", fontSize = 12.sp, color = MutedSlate)
+                } else {
+                    CleanCard(containerColor = SlateTint, padding = 4.dp) {
+                        accountTxs.forEachIndexed { idx, tx ->
+                            if (idx > 0) HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 10.dp))
+                            val incomingTransfer = tx.txType == "TRANSFER" && tx.transferAccountId == detailAccount.id
+                            val signedForAcc = when {
+                                incomingTransfer -> abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, detailAccount.currency))
+                                tx.txType == "INCOME" -> abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, detailAccount.currency))
+                                else -> -abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, detailAccount.currency))
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(tx.merchant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = SlateInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(dateFmt.format(Date(tx.occurredAtEpochMs)), fontSize = 11.sp, color = MutedSlate)
+                                }
+                                Text(
+                                    text = MoneyFormatter.formatMinor(signedForAcc, detailAccount.currency, showPlus = signedForAcc > 0L, masked = masked),
+                                    style = TabularStyle,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (signedForAcc >= 0L) EmeraldDark else RoseOutflow,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pendingEditAccount?.let { editAcc ->
+        val normType = AccountTypeCatalog.normalize(editAcc.accountType)
+        val isCash = normType == "CASH"
+        val isCredit = normType == "CREDIT_CARD" || normType == "CARD"
+        val supportsLastFour = AccountTypeCatalog.supportsLastFour(normType)
+        val isJpy = editAcc.currency.equals("JPY", ignoreCase = true)
+
+        var editName by remember(editAcc.id) { mutableStateOf(editAcc.name) }
+        var editInst by remember(editAcc.id) { mutableStateOf(editAcc.institution) }
+        var editLast4 by remember(editAcc.id) { mutableStateOf(editAcc.lastFour) }
+        var editLimit by remember(editAcc.id) {
+            mutableStateOf(
+                if (editAcc.creditLimitMinor > 0L) {
+                    if (isJpy) editAcc.creditLimitMinor.toString()
+                    else String.format(Locale.US, "%.2f", editAcc.creditLimitMinor / 100.0)
+                } else ""
+            )
+        }
+        val parsedLimit = if (editLimit.isBlank()) 0L else MoneyFormatter.parseDecimalToMinor(editLimit, editAcc.currency)
+
+        AlertDialog(
+            onDismissRequest = { pendingEditAccount = null },
+            title = { Text("Edit Account") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Name") }, singleLine = true)
+                    if (!isCash) {
+                        OutlinedTextField(value = editInst, onValueChange = { editInst = it }, label = { Text("Institution / Bank") }, singleLine = true)
+                    }
+                    if (supportsLastFour) {
+                        OutlinedTextField(
+                            value = editLast4,
+                            onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) editLast4 = it },
+                            label = { Text("Last 4 digits") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                        )
+                    }
+                    if (isCredit) {
+                        OutlinedTextField(
+                            value = editLimit,
+                            onValueChange = { editLimit = MoneyFormatter.sanitizeDecimalInput(it, editAcc.currency, allowNegative = false) },
+                            label = { Text("Credit Limit (${editAcc.currency})") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = editName.isNotBlank() && (!isCredit || parsedLimit != null),
+                    onClick = {
+                        vm.updateAccount(
+                            accountId = editAcc.id,
+                            name = editName,
+                            institution = editInst,
+                            lastFour = editLast4,
+                            creditLimitMinor = (parsedLimit ?: 0L).coerceAtLeast(0L),
+                        )
+                        pendingEditAccount = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { pendingEditAccount = null }) { Text("Cancel") } },
+        )
     }
 
     pendingDeleteAccount?.let { acc ->
@@ -486,6 +729,7 @@ fun AccountsScreen(
                 Button(
                     onClick = {
                         vm.deleteAccount(acc.id)
+                        if (selectedDetailAccountId == acc.id) selectedDetailAccountId = null
                         pendingDeleteAccount = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
@@ -504,7 +748,7 @@ fun AccountsScreen(
             val decimals = if (baseCurrency == "JPY") 0 else 2
             val div = if (decimals == 0) 1.0 else 100.0
             val defaultVal = FxConverter.convertMinor(initialOwed, debtAcc.currency, baseCurrency)
-            val txt = if (decimals == 0) defaultVal.toString() else String.format(java.util.Locale.US, "%.2f", defaultVal / div)
+            val txt = if (decimals == 0) defaultVal.toString() else String.format(Locale.US, "%.2f", defaultVal / div)
             mutableStateOf(txt)
         }
         val parsedRepay = MoneyFormatter.parseDecimalToMinor(repayAmountText, baseCurrency) ?: 0L
@@ -564,10 +808,8 @@ fun AccountsScreen(
             mutableStateOf(
                 if (cardAcc.creditLimitMinor > 0L) {
                     if (isJpy) cardAcc.creditLimitMinor.toString()
-                    else String.format(java.util.Locale.US, "%.2f", cardAcc.creditLimitMinor / 100.0)
-                } else {
-                    ""
-                }
+                    else String.format(Locale.US, "%.2f", cardAcc.creditLimitMinor / 100.0)
+                } else ""
             )
         }
         val parsedLimit = if (limitText.isBlank()) 0L else MoneyFormatter.parseDecimalToMinor(limitText, cardAcc.currency)

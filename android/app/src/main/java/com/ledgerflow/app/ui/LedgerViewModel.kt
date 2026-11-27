@@ -288,7 +288,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateProfileName(name: String) {
-        val clean = name.trim()
+        val clean = MoneyFormatter.toTitleCaseName(name)
         if (clean.isBlank()) {
             _statusMessage.value = "Name cannot be empty"
             return
@@ -303,7 +303,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         password: String,
         currency: String,
     ) {
-        val cleanName = name.trim()
+        val cleanName = MoneyFormatter.toTitleCaseName(name)
         val cleanEmail = email.trim()
         val cleanCur = currency.trim().uppercase()
         if (cleanName.isBlank()) {
@@ -666,6 +666,44 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             )
             SyncWorker.enqueueWhenOnline(app)
             _statusMessage.value = "Credit limit updated for \"${existing.name}\""
+        }
+    }
+
+    fun updateAccount(
+        accountId: String,
+        name: String,
+        institution: String,
+        lastFour: String,
+        creditLimitMinor: Long,
+    ) {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            _statusMessage.value = "Account name required"
+            return
+        }
+        viewModelScope.launch {
+            val existing = db.accountDao().getById(accountId) ?: return@launch
+            if (existing.deletedAtEpochMs != null) return@launch
+            val normType = AccountTypeCatalog.normalize(existing.accountType)
+            val cleanLastFour = if (AccountTypeCatalog.supportsLastFour(normType)) {
+                lastFour.filter(Char::isDigit).take(4)
+            } else {
+                ""
+            }
+            val safeLimit = if (normType == "CREDIT_CARD" || normType == "CARD") creditLimitMinor.coerceAtLeast(0L) else 0L
+            val now = System.currentTimeMillis()
+            db.accountDao().upsert(
+                existing.copy(
+                    name = cleanName,
+                    institution = if (normType == "CASH") "" else institution.trim(),
+                    lastFour = cleanLastFour,
+                    creditLimitMinor = safeLimit,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "Account \"$cleanName\" updated"
         }
     }
 

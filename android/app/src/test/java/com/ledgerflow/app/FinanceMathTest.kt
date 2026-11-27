@@ -482,5 +482,17 @@ class FinanceMathTest {
         // Allocation conservation test for odd minor amounts
         val splitOdd = CategoryHierarchy.allocateAcrossIds(100L, listOf("c1", "c2", "c3"))
         assertEquals(100L, splitOdd.sumOf { it.second })
+
+        // Title-case name formatting & per-account 30-day reverse balance trendline
+        assertEquals("Harsh", MoneyFormatter.toTitleCaseName("harsh"))
+        assertEquals("Harsh Vardhan Tripathi", MoneyFormatter.toTitleCaseName("  harsh   VARDHAN  tripathi "))
+        assertEquals("", MoneyFormatter.toTitleCaseName("   "))
+
+        val bankAcc = accounts.first { it.id == "a_bank" }
+        val bankTrend = AnalyticsEngine.computeAccountBalanceTrend(bankAcc, transactions, days = 30, nowMs = nowMs)
+        assertEquals(8, bankTrend.points.size)
+        assertEquals(500_000L, bankTrend.endBalanceMinor)
+        // Starting net before Nov 5 +1,000,000 salary and Nov 12 -50,000 loan repayment = 500,000 - (1,000,000 - 50,000) = -450,000
+        assertEquals(-450_000L, bankTrend.startBalanceMinor)
     }
 }

@@ -32,17 +32,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.MoneyFormatter
+import com.ledgerflow.app.domain.TrendPoint
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
@@ -74,6 +79,7 @@ fun CategoryDonutChart(
     currency: String,
     masked: Boolean,
     centerSubtitle: String = "Total",
+    emptyMessage: String = "No expense or allocation records yet.",
     modifier: Modifier = Modifier,
 ) {
     if (slices.isEmpty() || totalMinor <= 0L) {
@@ -86,7 +92,7 @@ fun CategoryDonutChart(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "No expense or allocation records yet.",
+                text = emptyMessage,
                 fontSize = 12.sp,
                 color = MutedSlate,
             )
@@ -472,6 +478,86 @@ fun SpendHeatmapCard(
                 }
                 Text("More", fontSize = 10.sp, color = MutedSlate)
             }
+        }
+    }
+}
+
+@Composable
+fun BalanceTrendLineChart(
+    points: List<TrendPoint>,
+    lineColor: Color,
+    modifier: Modifier = Modifier,
+    chartHeight: Dp = 132.dp,
+) {
+    if (points.size < 2) {
+        Text("Not enough points to plot chart.", fontSize = 12.sp, color = MutedSlate)
+        return
+    }
+    val gridColor = BorderSubtle
+    Column(modifier = modifier.fillMaxWidth()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(chartHeight),
+        ) {
+            val minV = points.minOf { it.valueMinor }
+            val maxV = points.maxOf { it.valueMinor }
+            val span = (maxV - minV).coerceAtLeast(1L).toFloat()
+            val padTop = 10f
+            val padBottom = 10f
+            val chartH = (size.height - padTop - padBottom).coerceAtLeast(10f)
+            val stepX = size.width / (points.size - 1).coerceAtLeast(1).toFloat()
+
+            listOf(0.25f, 0.5f, 0.75f).forEach { frac ->
+                val y = padTop + chartH * frac
+                drawLine(color = gridColor, start = Offset(0f, y), end = Offset(size.width, y), strokeWidth = 1f)
+            }
+
+            val linePath = Path()
+            val fillPath = Path()
+            val coords = points.mapIndexed { idx, pt ->
+                val x = idx * stepX
+                val normY = ((pt.valueMinor - minV).toFloat() / span).coerceIn(0f, 1f)
+                val y = padTop + chartH * (1f - normY)
+                Offset(x, y)
+            }
+
+            coords.forEachIndexed { idx, pt ->
+                if (idx == 0) {
+                    linePath.moveTo(pt.x, pt.y)
+                    fillPath.moveTo(pt.x, size.height)
+                    fillPath.lineTo(pt.x, pt.y)
+                } else {
+                    linePath.lineTo(pt.x, pt.y)
+                    fillPath.lineTo(pt.x, pt.y)
+                }
+            }
+            fillPath.lineTo(coords.last().x, size.height)
+            fillPath.close()
+
+            drawPath(
+                path = fillPath,
+                brush = Brush.verticalGradient(
+                    colors = listOf(lineColor.copy(alpha = 0.24f), Color.Transparent),
+                ),
+            )
+            drawPath(
+                path = linePath,
+                color = lineColor,
+                style = Stroke(width = 4.5f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+            coords.forEach { pt ->
+                drawCircle(color = lineColor, radius = 5f, center = pt)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(points.first().label, fontSize = 10.sp, color = MutedSlate)
+            Text(points[points.size / 2].label, fontSize = 10.sp, color = MutedSlate)
+            Text(points.last().label, fontSize = 10.sp, color = MutedSlate)
         }
     }
 }

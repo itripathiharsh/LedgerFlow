@@ -99,6 +99,16 @@ object MoneyFormatter {
         }
         return sb.toString()
     }
+
+    fun toTitleCaseName(raw: String): String = raw
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotEmpty() }
+        .joinToString(" ") { word ->
+            word.lowercase(Locale.US).replaceFirstChar { ch ->
+                if (ch.isLowerCase()) ch.titlecase(Locale.US) else ch.toString()
+            }
+        }
 }
 
 object FxConverter {

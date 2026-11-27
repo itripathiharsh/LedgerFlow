@@ -27,8 +27,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
@@ -62,16 +62,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,8 +75,8 @@ import com.ledgerflow.app.domain.AnalyticsRangePreset
 import com.ledgerflow.app.domain.CardUtilizationRow
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.ReportExporter
-import com.ledgerflow.app.domain.TrendPoint
 import com.ledgerflow.app.ui.LedgerViewModel
+import com.ledgerflow.app.ui.components.BalanceTrendLineChart
 import com.ledgerflow.app.ui.components.CategoryDonutChart
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.PieChartSlice
@@ -117,7 +111,7 @@ import kotlin.math.abs
 fun AnalyticsScreen(
     vm: LedgerViewModel,
     initialSection: Int = 0,
-    onBack: () -> Unit,
+    onOpenDrawer: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -187,8 +181,8 @@ fun AnalyticsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 92.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         // Header
         item {
@@ -202,8 +196,8 @@ fun AnalyticsScreen(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.weight(1f),
                 ) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = SlateInk)
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = SlateInk)
                     }
                     Column {
                         Text("Analytics & Reports", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = SlateInk)
@@ -310,7 +304,7 @@ fun AnalyticsScreen(
                             )
                         }
                         Spacer(Modifier.height(12.dp))
-                        TrendLineChart(
+                        BalanceTrendLineChart(
                             points = trend.points,
                             lineColor = if (positive) EmeraldPrimary else RoseOutflow,
                         )
@@ -476,7 +470,7 @@ fun AnalyticsScreen(
                         }
                         if (fc.curvePoints.size >= 2) {
                             Spacer(Modifier.height(12.dp))
-                            TrendLineChart(
+                            BalanceTrendLineChart(
                                 points = fc.curvePoints,
                                 lineColor = SkySync,
                             )
@@ -678,6 +672,7 @@ fun AnalyticsScreen(
                             currency = baseCurrency,
                             masked = masked,
                             centerSubtitle = bundle.range.label,
+                            emptyMessage = "No spending recorded in this period.",
                         )
                     }
                 }
@@ -1155,85 +1150,6 @@ fun AnalyticsScreen(
             },
             dismissButton = { TextButton(onClick = { editingLimitCard = null }) { Text("Cancel") } },
         )
-    }
-}
-
-@Composable
-private fun TrendLineChart(
-    points: List<TrendPoint>,
-    lineColor: Color,
-) {
-    if (points.size < 2) {
-        Text("Not enough points to plot chart.", fontSize = 12.sp, color = MutedSlate)
-        return
-    }
-    val gridColor = BorderSubtle
-    Column {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(132.dp),
-        ) {
-            val minV = points.minOf { it.valueMinor }
-            val maxV = points.maxOf { it.valueMinor }
-            val span = (maxV - minV).coerceAtLeast(1L).toFloat()
-            val padTop = 10f
-            val padBottom = 10f
-            val chartH = (size.height - padTop - padBottom).coerceAtLeast(10f)
-            val stepX = size.width / (points.size - 1).coerceAtLeast(1).toFloat()
-
-            // Subtle baseline grid lines
-            listOf(0.25f, 0.5f, 0.75f).forEach { frac ->
-                val y = padTop + chartH * frac
-                drawLine(color = gridColor, start = Offset(0f, y), end = Offset(size.width, y), strokeWidth = 1f)
-            }
-
-            val linePath = Path()
-            val fillPath = Path()
-            val coords = points.mapIndexed { idx, pt ->
-                val x = idx * stepX
-                val normY = ((pt.valueMinor - minV).toFloat() / span).coerceIn(0f, 1f)
-                val y = padTop + chartH * (1f - normY)
-                Offset(x, y)
-            }
-
-            coords.forEachIndexed { idx, pt ->
-                if (idx == 0) {
-                    linePath.moveTo(pt.x, pt.y)
-                    fillPath.moveTo(pt.x, size.height)
-                    fillPath.lineTo(pt.x, pt.y)
-                } else {
-                    linePath.lineTo(pt.x, pt.y)
-                    fillPath.lineTo(pt.x, pt.y)
-                }
-            }
-            fillPath.lineTo(coords.last().x, size.height)
-            fillPath.close()
-
-            drawPath(
-                path = fillPath,
-                brush = Brush.verticalGradient(
-                    colors = listOf(lineColor.copy(alpha = 0.24f), Color.Transparent),
-                ),
-            )
-            drawPath(
-                path = linePath,
-                color = lineColor,
-                style = Stroke(width = 4.5f, cap = StrokeCap.Round, join = StrokeJoin.Round),
-            )
-            coords.forEach { pt ->
-                drawCircle(color = lineColor, radius = 5f, center = pt)
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(points.first().label, fontSize = 10.sp, color = MutedSlate)
-            Text(points[points.size / 2].label, fontSize = 10.sp, color = MutedSlate)
-            Text(points.last().label, fontSize = 10.sp, color = MutedSlate)
-        }
     }
 }
 

@@ -1,5 +1,6 @@
 package com.ledgerflow.app.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,15 +24,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
-import androidx.compose.material.icons.outlined.PieChart
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,7 +44,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,20 +61,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
+import com.ledgerflow.app.domain.CategoryHierarchy
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.ads.OnlineOnlyAdBanner
-import com.ledgerflow.app.ui.components.CategoryDonutChart
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
-import com.ledgerflow.app.ui.components.EmptyPlaceholder
-import com.ledgerflow.app.ui.components.PieChartSlice
 import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.SourceTagBadge
-import com.ledgerflow.app.ui.components.SpendHeatmapCard
 import com.ledgerflow.app.ui.components.StatusPill
-import com.ledgerflow.app.ui.components.parseSliceColor
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
@@ -80,10 +81,9 @@ import com.ledgerflow.app.ui.theme.LedgerThemeColors
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
 import com.ledgerflow.app.ui.theme.RoseSoft
-import com.ledgerflow.app.ui.theme.SkySoft
-import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
+import com.ledgerflow.app.ui.theme.SurfaceCard
 import com.ledgerflow.app.ui.theme.TabularStyle
 import com.ledgerflow.app.ui.theme.resolveIsDarkTheme
 import java.util.Calendar
@@ -93,11 +93,11 @@ import kotlin.math.max
 @Composable
 fun HomeScreen(
     vm: LedgerViewModel,
-    onOpenQuickAdd: (initialType: String) -> Unit,
+    onOpenDrawer: () -> Unit,
     onOpenRecords: () -> Unit,
     onOpenBudgets: () -> Unit,
-    onOpenAnalytics: () -> Unit = onOpenBudgets,
     onOpenAccounts: () -> Unit,
+    onOpenAddAccount: () -> Unit = onOpenAccounts,
     onOpenSettings: () -> Unit,
 ) {
     val vault by vm.vaultState.collectAsState()
@@ -109,7 +109,8 @@ fun HomeScreen(
     val baseCurrency = vault.baseCurrency
     val masked = vault.hideBalances
     val firstName = remember(vault.userName) {
-        vault.userName.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotBlank() }
+        val rawFirst = vault.userName.trim().split(Regex("\\s+")).firstOrNull().orEmpty()
+        MoneyFormatter.toTitleCaseName(rawFirst).takeIf { it.isNotBlank() }
     }
     val dayKey = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
     val monthStart = remember(dayKey) { vm.currentMonthStartEpochMs() }
@@ -121,39 +122,42 @@ fun HomeScreen(
     val accountSummary = remember(accounts, baseCurrency) {
         AnalyticsCalculator.computeAccountSummary(accounts, baseCurrency)
     }
-    val budgetProgress = remember(budgets, transactions, baseCurrency, monthStart, monthFraction) {
-        AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction)
+    val budgetProgress = remember(budgets, transactions, categories, baseCurrency, monthStart, monthFraction) {
+        AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction, categories)
     }
     val categoryMap = remember(categories) { categories.associateBy { it.id } }
-    val monthlyHeatmap = remember(transactions, baseCurrency, dayKey) {
-        AnalyticsCalculator.computeMonthlySpendHeatmap(transactions, baseCurrency)
-    }
-    val rollingHeatmap = remember(transactions, baseCurrency, dayKey) {
-        AnalyticsCalculator.computeRollingSpendHeatmap(transactions, baseCurrency, weeks = 12)
-    }
-    val categorySlices = remember(transactions, categories, baseCurrency, monthStart) {
-        AnalyticsCalculator.computeCategoryBreakdown(transactions, categories, baseCurrency, monthStart)
-    }
+
+    var homeTab by remember { mutableIntStateOf(0) } // 0 = Overview, 1 = Budgets
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 92.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
+        // Top Header: Menu + Home (with Title Case greeting) on left; Theme, Mask, Settings on right
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = if (firstName != null) "Hi, $firstName" else "Overview",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = SlateInk,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = SlateInk)
+                    }
+                    Column {
+                        Text("Home", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                        if (firstName != null) {
+                            Text("Hi, $firstName", fontSize = 12.sp, color = MutedSlate)
+                        }
+                    }
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -184,97 +188,71 @@ fun HomeScreen(
             }
         }
 
-        // Hero Balance Card
+        // Top Sub-Tabs: Overview | Budgets
         item {
-            CleanCard(padding = 20.dp) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "TOTAL BALANCE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MutedSlate,
-                        letterSpacing = 0.5.sp,
-                    )
-                    StatusPill(baseCurrency, SlateTint, SlateInk)
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = MoneyFormatter.formatMinor(dashboard.netWorthMinor, baseCurrency, masked = masked),
-                    style = TabularStyle,
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = SlateInk,
-                )
-                if (accountSummary.liabilitiesMinor > 0L) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "Assets ${MoneyFormatter.formatMinor(accountSummary.assetsMinor, baseCurrency, masked = masked)} • Debt ${MoneyFormatter.formatMinor(accountSummary.liabilitiesMinor, baseCurrency, masked = masked)}",
-                        style = TabularStyle,
-                        fontSize = 11.sp,
-                        color = MutedSlate,
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                val netStr = MoneyFormatter.formatMinor(dashboard.netSavingsMinor, baseCurrency, showPlus = true, masked = masked)
-                StatusPill(
-                    text = "${if (dashboard.savingsRatePercent >= 0) "+" else ""}${dashboard.savingsRatePercent}% savings ($netStr this month)",
-                    containerColor = if (dashboard.netSavingsMinor >= 0) EmeraldSoft else RoseSoft,
-                    contentColor = if (dashboard.netSavingsMinor >= 0) EmeraldDark else RoseOutflow,
-                )
-                Spacer(Modifier.height(18.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    QuickActionTile("Expense", Icons.Outlined.Add, primary = true) { onOpenQuickAdd("EXPENSE") }
-                    QuickActionTile("Transfer", Icons.Outlined.SwapHoriz, primary = false) { onOpenQuickAdd("TRANSFER") }
-                    QuickActionTile("Budgets", Icons.Outlined.PieChart, primary = false) { onOpenBudgets() }
-                    QuickActionTile("Accounts", Icons.Outlined.AccountBalanceWallet, primary = false) { onOpenAccounts() }
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = SlateTint,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(modifier = Modifier.padding(4.dp)) {
+                    listOf("Overview", "Budgets").forEachIndexed { idx, label ->
+                        val active = homeTab == idx
+                        Surface(
+                            onClick = { homeTab = idx },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (active) SurfaceCard else Color.Transparent,
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(vertical = 8.dp),
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (active) SlateInk else MutedSlate,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Accounts Carousel
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionHeader(title = "Accounts", actionText = "Manage", onActionClick = onOpenAccounts)
-                if (accounts.isEmpty()) {
-                    EmptyPlaceholder("No accounts yet", "Tap Manage to add a wallet, card, or bank account.")
-                } else {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (homeTab == 0) {
+            // MODULE 1: Accounts Strip + Records / Manage Accounts Pills
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(accounts, key = { it.id }) { acc ->
+                            val isOwed = acc.balanceMinor < 0L
+                            val isDebt = AccountTypeCatalog.isLiability(acc.accountType) || isOwed
                             CleanCard(
-                                modifier = Modifier.width(172.dp),
-                                padding = 14.dp,
+                                modifier = Modifier.width(156.dp),
+                                padding = 12.dp,
                                 onClick = onOpenAccounts,
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    val isDebtAccount = AccountTypeCatalog.isLiability(acc.accountType) || acc.balanceMinor < 0L
                                     CategoryIconBadge(
                                         iconKey = AccountTypeCatalog.iconKey(acc.accountType),
-                                        tintHex = if (isDebtAccount && acc.balanceMinor < 0L) "#E11D48" else "#0284C7",
-                                        size = 32.dp,
+                                        tintHex = if (isDebt && isOwed) "#E11D48" else "#059669",
+                                        size = 28.dp,
                                     )
-                                    StatusPill(AccountTypeCatalog.displayLabel(acc.accountType), SlateTint, MutedSlate)
+                                    Text(
+                                        text = acc.name,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = SlateInk,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                                 Spacer(Modifier.height(10.dp))
-                                Text(
-                                    text = acc.name,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = SlateInk,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                val isOwed = acc.balanceMinor < 0L
                                 Text(
                                     text = if (isOwed && AccountTypeCatalog.isLiability(acc.accountType)) {
                                         "Owed ${MoneyFormatter.formatMinor(abs(acc.balanceMinor), acc.currency, masked = masked)}"
@@ -282,17 +260,201 @@ fun HomeScreen(
                                         MoneyFormatter.formatMinor(acc.balanceMinor, acc.currency, masked = masked)
                                     },
                                     style = TabularStyle,
-                                    fontSize = 17.sp,
+                                    fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (isOwed) RoseOutflow else SlateInk,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                if (acc.currency != baseCurrency) {
-                                    val fxVal = FxConverter.convertMinor(acc.balanceMinor, acc.currency, baseCurrency)
+                            }
+                        }
+                        item(key = "add_account_tile") {
+                            Surface(
+                                onClick = onOpenAddAccount,
+                                modifier = Modifier
+                                    .width(96.dp)
+                                    .height(86.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = SlateTint,
+                                border = BorderStroke(1.dp, BorderSubtle),
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = "Add Account",
+                                        tint = EmeraldPrimary,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Add", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        QuickPillLink(
+                            label = "Records",
+                            icon = Icons.AutoMirrored.Outlined.ReceiptLong,
+                            onClick = onOpenRecords,
+                            modifier = Modifier.weight(1f),
+                        )
+                        QuickPillLink(
+                            label = "Manage Accounts",
+                            icon = Icons.Outlined.AccountBalanceWallet,
+                            onClick = onOpenAccounts,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+
+            // MODULE 2: Unified Total Balance & Current Cash Flow Card
+            item {
+                CleanCard(padding = 18.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "TOTAL BALANCE",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MutedSlate,
+                            letterSpacing = 0.5.sp,
+                        )
+                        StatusPill(baseCurrency, SlateTint, SlateInk)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = MoneyFormatter.formatMinor(dashboard.netWorthMinor, baseCurrency, masked = masked),
+                        style = TabularStyle,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SlateInk,
+                    )
+                    if (accountSummary.liabilitiesMinor > 0L) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Assets ${MoneyFormatter.formatMinor(accountSummary.assetsMinor, baseCurrency, masked = masked)} • Debt ${MoneyFormatter.formatMinor(accountSummary.liabilitiesMinor, baseCurrency, masked = masked)}",
+                            style = TabularStyle,
+                            fontSize = 11.sp,
+                            color = MutedSlate,
+                        )
+                    }
+
+                    HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Current Cash Flow", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                        StatusPill(
+                            text = "${if (dashboard.savingsRatePercent >= 0) "+" else ""}${dashboard.savingsRatePercent}% Saved",
+                            containerColor = if (dashboard.netSavingsMinor >= 0L) EmeraldSoft else RoseSoft,
+                            contentColor = if (dashboard.netSavingsMinor >= 0L) EmeraldDark else RoseOutflow,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CashPill(
+                            label = "EARNED",
+                            value = MoneyFormatter.formatMinor(dashboard.inflowMinor, baseCurrency, showPlus = true, masked = masked),
+                            bg = EmeraldSoft,
+                            fg = EmeraldDark,
+                            modifier = Modifier.weight(1f),
+                        )
+                        CashPill(
+                            label = "SPENT",
+                            value = MoneyFormatter.formatMinor(-dashboard.outflowMinor, baseCurrency, masked = masked),
+                            bg = RoseSoft,
+                            fg = RoseOutflow,
+                            modifier = Modifier.weight(1f),
+                        )
+                        CashPill(
+                            label = "SAVED",
+                            value = MoneyFormatter.formatMinor(dashboard.netSavingsMinor, baseCurrency, showPlus = true, masked = masked),
+                            bg = SlateTint,
+                            fg = if (dashboard.netSavingsMinor >= 0L) EmeraldDark else RoseOutflow,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    WeeklyBarChart(dashboard.weeklyInflow, dashboard.weeklyOutflow)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        LegendDot("Inflow", EmeraldPrimary)
+                        LegendDot("Outflow", LedgerThemeColors.outflowBar)
+                    }
+                }
+            }
+
+            // MODULE 3: Recent Records (Last 3 transactions + "See all →")
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionHeader(
+                        title = "Recent Records",
+                        actionText = "See all →",
+                        onActionClick = onOpenRecords,
+                    )
+                    CleanCard(padding = 4.dp) {
+                        val topTx = transactions.take(3)
+                        if (topTx.isEmpty()) {
+                            Text(
+                                text = "No transactions yet. Tap + to add one.",
+                                color = MutedSlate,
+                                modifier = Modifier.padding(16.dp),
+                                fontSize = 13.sp,
+                            )
+                        } else {
+                            topTx.forEachIndexed { idx, tx ->
+                                if (idx > 0) HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 12.dp))
+                                val assigned = with(CategoryHierarchy) { tx.allAssignedCategoryIds() }.mapNotNull { categoryMap[it] }
+                                val cat = assigned.firstOrNull() ?: categoryMap[tx.categoryId]
+                                val catLabel = assigned.map { it.name }.distinct().joinToString(" + ").ifBlank { cat?.name ?: tx.txType }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onOpenRecords() }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CategoryIconBadge(cat?.iconKey ?: "category", cat?.colorHex ?: "#059669", size = 36.dp)
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = tx.merchant,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = SlateInk,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(catLabel, fontSize = 12.sp, color = MutedSlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            SourceTagBadge(tx.sourceTag)
+                                        }
+                                    }
                                     Text(
-                                        text = "≈ ${MoneyFormatter.formatMinor(fxVal, baseCurrency, masked = masked)}",
+                                        text = MoneyFormatter.formatMinor(tx.amountMinor, tx.currency, showPlus = tx.txType == "INCOME", masked = masked),
                                         style = TabularStyle,
-                                        fontSize = 11.sp,
-                                        color = SkySync,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (tx.txType == "INCOME") EmeraldDark else if (tx.txType == "EXPENSE") RoseOutflow else SlateInk,
                                     )
                                 }
                             }
@@ -300,213 +462,109 @@ fun HomeScreen(
                     }
                 }
             }
-        }
 
-        // Monthly Cash Flow
-        item {
-            CleanCard(padding = 16.dp) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Monthly Cash Flow", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                    StatusPill("This Month", SlateTint, MutedSlate)
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    CashPill("EARNED", MoneyFormatter.formatMinor(dashboard.inflowMinor, baseCurrency, showPlus = true, masked = masked), EmeraldSoft, EmeraldDark, Modifier.weight(1f))
-                    CashPill("SPENT", MoneyFormatter.formatMinor(-dashboard.outflowMinor, baseCurrency, masked = masked), RoseSoft, RoseOutflow, Modifier.weight(1f))
-                    CashPill("SAVED", MoneyFormatter.formatMinor(dashboard.netSavingsMinor, baseCurrency, showPlus = true, masked = masked), SkySoft, SkySync, Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(14.dp))
-                WeeklyBarChart(dashboard.weeklyInflow, dashboard.weeklyOutflow)
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LegendDot("Inflow", EmeraldPrimary)
-                        LegendDot("Outflow", LedgerThemeColors.outflowBar)
+            item {
+                OnlineOnlyAdBanner()
+            }
+        } else {
+            // Sub-Tab 2: Clean Monthly Budgets overview
+            if (budgetProgress.isEmpty()) {
+                item {
+                    CleanCard(padding = 18.dp) {
+                        Text("Create your first monthly budget", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Track overall spending or specific categories like Groceries, Dining, or Fuel.",
+                            fontSize = 13.sp,
+                            color = MutedSlate,
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Button(
+                            onClick = onOpenBudgets,
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Open Budgets & Planned", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
-                    Text(
-                        text = "${if (dashboard.savingsRatePercent > 0) "+" else ""}${dashboard.savingsRatePercent}% Savings Rate",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (dashboard.savingsRatePercent >= 0) EmeraldDark else RoseOutflow,
+                }
+            } else {
+                item {
+                    SectionHeader(
+                        title = "Monthly Budgets (${budgetProgress.size})",
+                        actionText = "Manage →",
+                        onActionClick = onOpenBudgets,
                     )
                 }
-            }
-        }
-
-        // Daily Spend Heatmap (GitHub-style monthly map) + Category Breakdown Pie
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionHeader(title = "Spend Insights", actionText = "Analytics", onActionClick = onOpenAnalytics)
-                SpendHeatmapCard(
-                    monthlyData = monthlyHeatmap,
-                    rollingData = rollingHeatmap,
-                    currency = baseCurrency,
-                    masked = masked,
-                    allowModeSwitch = true,
-                )
-            }
-        }
-
-        if (categorySlices.isNotEmpty()) {
-            item {
-                val totalCatSpend = categorySlices.sumOf { it.amountMinor }
-                val defaultSliceColor = EmeraldPrimary
-                val pieSlices = remember(categorySlices, defaultSliceColor) {
-                    categorySlices.map { s ->
-                        PieChartSlice(
-                            id = s.categoryId ?: s.name,
-                            label = s.name,
-                            valueMinor = s.amountMinor,
-                            color = parseSliceColor(s.colorHex, defaultSliceColor),
-                            ratio = s.ratio,
+                items(budgetProgress, key = { it.budget.id }) { bp ->
+                    val limitBase = FxConverter.convertMinor(bp.budget.limitMinor, bp.budget.currency, baseCurrency)
+                    val isOver = bp.remainingMinor < 0L
+                    CleanCard(padding = 14.dp, onClick = onOpenBudgets) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(bp.budget.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = SlateInk)
+                            Text(
+                                text = if (isOver) {
+                                    "${MoneyFormatter.formatMinor(abs(bp.remainingMinor), baseCurrency, masked = masked)} over"
+                                } else {
+                                    "${MoneyFormatter.formatMinor(bp.remainingMinor, baseCurrency, masked = masked)} left"
+                                },
+                                style = TabularStyle,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldDark else AmberWarn,
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { bp.ratio.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(999.dp)),
+                            color = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldPrimary else AmberWarn,
+                            trackColor = SlateTint,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "${MoneyFormatter.formatMinor(bp.spentMinor, baseCurrency, masked = masked)} spent of ${MoneyFormatter.formatMinor(limitBase, baseCurrency, masked = masked)}",
+                            style = TabularStyle,
+                            fontSize = 11.sp,
+                            color = MutedSlate,
                         )
                     }
                 }
-                CleanCard(padding = 16.dp) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Category Breakdown", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                        StatusPill("This Month", SlateTint, MutedSlate)
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    CategoryDonutChart(
-                        slices = pieSlices,
-                        totalMinor = totalCatSpend,
-                        currency = baseCurrency,
-                        masked = masked,
-                        centerSubtitle = "This Month",
-                    )
-                }
             }
-        }
-
-        // Budgets Watch (only when budgets exist or subtle invite)
-        if (budgetProgress.isNotEmpty()) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionHeader(title = "Budgets Watch", actionText = "Manage", onActionClick = onOpenBudgets)
-                    CleanCard(padding = 14.dp) {
-                        budgetProgress.take(2).forEachIndexed { idx, bp ->
-                            if (idx > 0) HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(bp.budget.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = SlateInk)
-                                val limitBase = FxConverter.convertMinor(bp.budget.limitMinor, bp.budget.currency, baseCurrency)
-                                Text(
-                                    text = "${MoneyFormatter.formatMinor(bp.spentMinor, baseCurrency, masked = masked)} / ${MoneyFormatter.formatMinor(limitBase, baseCurrency, masked = masked)}",
-                                    style = TabularStyle,
-                                    fontSize = 12.sp,
-                                    color = MutedSlate,
-                                )
-                            }
-                            Spacer(Modifier.height(6.dp))
-                            LinearProgressIndicator(
-                                progress = { bp.ratio.coerceIn(0f, 1f) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(7.dp)
-                                    .clip(RoundedCornerShape(999.dp)),
-                                color = if (bp.ratio >= 0.85f) AmberWarn else EmeraldPrimary,
-                                trackColor = SlateTint,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Recent Activity
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionHeader(title = "Recent Activity", actionText = "View All", onActionClick = onOpenRecords)
-                CleanCard(padding = 4.dp) {
-                    val topTx = transactions.take(4)
-                    if (topTx.isEmpty()) {
-                        Text("No transactions yet. Tap + to add one.", color = MutedSlate, modifier = Modifier.padding(14.dp), fontSize = 13.sp)
-                    } else {
-                        topTx.forEachIndexed { idx, tx ->
-                            if (idx > 0) HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 12.dp))
-                            val cat = categoryMap[tx.categoryId]
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onOpenRecords() }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                CategoryIconBadge(cat?.iconKey ?: "category", cat?.colorHex ?: "#059669", size = 38.dp)
-                                Spacer(Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(tx.merchant, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Spacer(Modifier.height(2.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(cat?.name ?: "General", fontSize = 12.sp, color = MutedSlate)
-                                        SourceTagBadge(tx.sourceTag)
-                                    }
-                                }
-                                Text(
-                                    text = MoneyFormatter.formatMinor(tx.amountMinor, tx.currency, showPlus = tx.txType == "INCOME", masked = masked),
-                                    style = TabularStyle,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (tx.txType == "INCOME") EmeraldDark else SlateInk,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            OnlineOnlyAdBanner()
         }
     }
 }
 
 @Composable
-private fun QuickActionTile(
+private fun QuickPillLink(
     label: String,
     icon: ImageVector,
-    primary: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onClick),
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(999.dp),
+        color = SurfaceCard,
+        border = BorderStroke(1.dp, BorderSubtle),
     ) {
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(if (primary) EmeraldPrimary else SlateTint),
-            contentAlignment = Alignment.Center,
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (primary) Color.White else SlateInk,
-                modifier = Modifier.size(22.dp),
-            )
+            Icon(imageVector = icon, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = SlateInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Spacer(Modifier.height(5.dp))
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = SlateInk)
     }
 }
 
@@ -540,7 +598,7 @@ private fun WeeklyBarChart(inflows: List<Long>, outflows: List<Long>) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(84.dp),
+                .height(80.dp),
         ) {
             val slotW = size.width / 4f
             val barW = 14.dp.toPx()

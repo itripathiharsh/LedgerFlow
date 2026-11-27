@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -63,6 +64,7 @@ import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
 import com.ledgerflow.app.ui.components.PieChartSlice
+import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.SpendHeatmapCard
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.parseSliceColor
@@ -92,6 +94,7 @@ import kotlin.math.abs
 fun BudgetsScreen(
     vm: LedgerViewModel,
     initialTab: Int = 0,
+    onOpenDrawer: () -> Unit = {},
     onOpenFullAnalytics: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
@@ -155,8 +158,8 @@ fun BudgetsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(AlabasterBg),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 104.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 92.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
             Row(
@@ -164,27 +167,17 @@ fun BudgetsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Budgets", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Surface(
-                        onClick = { if (selectedTab == 2) showNewPlanned = true else showNewBudget = true },
-                        shape = RoundedCornerShape(999.dp),
-                        color = EmeraldPrimary,
-                    ) {
-                        Text(
-                            text = if (selectedTab == 2) "+ New Bill" else "+ New Budget",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        )
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = SlateInk)
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
-                    }
+                    Text("Budgets & Planned", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
                 }
             }
         }
@@ -212,78 +205,117 @@ fun BudgetsScreen(
 
         when (selectedTab) {
             0 -> {
-                // Safe-to-Spend Hero Card
-                item {
-                    CleanCard(padding = 18.dp) {
-                        Text("Monthly Safe-to-Spend", fontSize = 12.sp, color = MutedSlate, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(6.dp))
-                        StatusPill(
-                            text = when {
-                                progressList.isEmpty() -> "No active monthly budgets"
-                                isOverTotalBudget -> "Over monthly budget"
-                                allBudgetsOnTrack -> "Within monthly budget pace"
-                                else -> "Ahead of monthly budget pace"
-                            },
-                            containerColor = when {
-                                isOverTotalBudget -> RoseSoft
-                                allBudgetsOnTrack || progressList.isEmpty() -> EmeraldSoft
-                                else -> AmberSoft
-                            },
-                            contentColor = when {
-                                isOverTotalBudget -> RoseOutflow
-                                allBudgetsOnTrack || progressList.isEmpty() -> EmeraldDark
-                                else -> AmberWarn
-                            },
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = if (isOverTotalBudget) {
-                                "${MoneyFormatter.formatMinor(abs(netRemaining), baseCurrency, masked = masked)} over"
-                            } else {
-                                "${MoneyFormatter.formatMinor(safeRemaining, baseCurrency, masked = masked)} left"
-                            },
-                            style = TabularStyle,
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isOverTotalBudget) RoseOutflow else SlateInk,
-                        )
-                        Text(
-                            text = if (isOverTotalBudget) {
-                                "Monthly spending exceeded budgeted limit by ${MoneyFormatter.formatMinor(abs(netRemaining), baseCurrency, masked = masked)}"
-                            } else {
-                                "${MoneyFormatter.formatMinor(dailySafe, baseCurrency, masked = masked)} / day for remaining $daysRemaining days"
-                            },
-                            style = TabularStyle,
-                            fontSize = 12.sp,
-                            color = MutedSlate,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        val sumAll = totalSpent + totalPlanned + safeRemaining
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(SlateTint),
-                        ) {
-                            if (sumAll > 0L) {
-                                if (totalSpent > 0L) Box(Modifier.weight(totalSpent.toFloat()).fillMaxHeight().background(SlateInk))
-                                if (totalPlanned > 0L) Box(Modifier.weight(totalPlanned.toFloat()).fillMaxHeight().background(SkySync))
-                                if (safeRemaining > 0L) Box(Modifier.weight(safeRemaining.toFloat()).fillMaxHeight().background(EmeraldPrimary))
+                if (progressList.isEmpty()) {
+                    item {
+                        CleanCard(padding = 18.dp) {
+                            Text(
+                                text = "Create your first monthly budget",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateInk,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "Set an overall spending cap or per-category limit to track daily safe spend.",
+                                fontSize = 13.sp,
+                                color = MutedSlate,
+                            )
+                            if (totalPlanned > 0L) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = "Upcoming planned bills: ${MoneyFormatter.formatMinor(totalPlanned, baseCurrency, masked = masked)}",
+                                    style = TabularStyle,
+                                    fontSize = 12.sp,
+                                    color = SkySync,
+                                )
+                            }
+                            Spacer(Modifier.height(14.dp))
+                            Button(
+                                onClick = { showNewBudget = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Text("Create Budget", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Spent ${MoneyFormatter.formatMinor(totalSpent, baseCurrency, masked = masked)}", fontSize = 11.sp, color = SlateInk)
-                            Text("Bills ${MoneyFormatter.formatMinor(totalPlanned, baseCurrency, masked = masked)}", fontSize = 11.sp, color = SkySync)
-                            Text("Safe ${MoneyFormatter.formatMinor(safeRemaining, baseCurrency, masked = masked)}", fontSize = 11.sp, color = EmeraldDark)
+                    }
+                } else {
+                    // Safe-to-Spend Hero Card (strictly shown when at least 1 budget exists)
+                    item {
+                        CleanCard(padding = 16.dp) {
+                            Text("Monthly Safe-to-Spend", fontSize = 12.sp, color = MutedSlate, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.height(6.dp))
+                            StatusPill(
+                                text = when {
+                                    isOverTotalBudget -> "Over monthly budget"
+                                    allBudgetsOnTrack -> "Within monthly budget pace"
+                                    else -> "Ahead of monthly budget pace"
+                                },
+                                containerColor = when {
+                                    isOverTotalBudget -> RoseSoft
+                                    allBudgetsOnTrack -> EmeraldSoft
+                                    else -> AmberSoft
+                                },
+                                contentColor = when {
+                                    isOverTotalBudget -> RoseOutflow
+                                    allBudgetsOnTrack -> EmeraldDark
+                                    else -> AmberWarn
+                                },
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = if (isOverTotalBudget) {
+                                    "${MoneyFormatter.formatMinor(abs(netRemaining), baseCurrency, masked = masked)} over"
+                                } else {
+                                    "${MoneyFormatter.formatMinor(safeRemaining, baseCurrency, masked = masked)} left"
+                                },
+                                style = TabularStyle,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isOverTotalBudget) RoseOutflow else SlateInk,
+                            )
+                            Text(
+                                text = if (isOverTotalBudget) {
+                                    "Monthly spending exceeded budgeted limit by ${MoneyFormatter.formatMinor(abs(netRemaining), baseCurrency, masked = masked)}"
+                                } else {
+                                    "${MoneyFormatter.formatMinor(dailySafe, baseCurrency, masked = masked)} / day for remaining $daysRemaining days"
+                                },
+                                style = TabularStyle,
+                                fontSize = 12.sp,
+                                color = MutedSlate,
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            val sumAll = totalSpent + totalPlanned + safeRemaining
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(SlateTint),
+                            ) {
+                                if (sumAll > 0L) {
+                                    if (totalSpent > 0L) Box(Modifier.weight(totalSpent.toFloat()).fillMaxHeight().background(SlateInk))
+                                    if (totalPlanned > 0L) Box(Modifier.weight(totalPlanned.toFloat()).fillMaxHeight().background(SkySync))
+                                    if (safeRemaining > 0L) Box(Modifier.weight(safeRemaining.toFloat()).fillMaxHeight().background(EmeraldPrimary))
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Spent ${MoneyFormatter.formatMinor(totalSpent, baseCurrency, masked = masked)}", fontSize = 11.sp, color = SlateInk)
+                                Text("Bills ${MoneyFormatter.formatMinor(totalPlanned, baseCurrency, masked = masked)}", fontSize = 11.sp, color = SkySync)
+                                Text("Safe ${MoneyFormatter.formatMinor(safeRemaining, baseCurrency, masked = masked)}", fontSize = 11.sp, color = EmeraldDark)
+                            }
                         }
                     }
-                }
 
-                if (progressList.isEmpty()) {
-                    item { EmptyPlaceholder("No budgets created", "Tap + New Budget above to add a limit.") }
-                } else {
+                    item {
+                        SectionHeader(
+                            title = "Active Budgets (${progressList.size})",
+                            actionText = "+ New Budget",
+                            onActionClick = { showNewBudget = true },
+                        )
+                    }
+
                     items(progressList, key = { it.budget.id }) { bp ->
                         val cat = catMap[bp.budget.categoryId]
                         val limitBase = FxConverter.convertMinor(bp.budget.limitMinor, bp.budget.currency, baseCurrency)
@@ -438,9 +470,34 @@ fun BudgetsScreen(
             }
 
             else -> {
+                item {
+                    SectionHeader(
+                        title = "Scheduled Bills & Income (${planned.size})",
+                        actionText = "+ New Bill",
+                        onActionClick = { showNewPlanned = true },
+                    )
+                }
                 // Planned Payments Timeline
                 if (planned.isEmpty()) {
-                    item { EmptyPlaceholder("No planned bills", "Tap + New Bill to schedule rent, utilities, EMI, or recurring income.") }
+                    item {
+                        CleanCard(padding = 18.dp) {
+                            Text("No planned bills", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = SlateInk)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Schedule rent, utilities, EMI, or recurring income to track due dates.",
+                                fontSize = 13.sp,
+                                color = MutedSlate,
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Button(
+                                onClick = { showNewPlanned = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Text("Add Planned Bill", fontSize = 13.sp)
+                            }
+                        }
+                    }
                 } else {
                     val (todayStartMs, tomorrowStartMs) = todayBounds
                     items(planned, key = { it.id }) { p ->

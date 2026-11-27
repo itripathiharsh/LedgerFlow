@@ -506,6 +506,63 @@ object AnalyticsEngine {
         )
     }
 
+    fun computeAccountBalanceTrend(
+        account: AccountEntity,
+        transactions: List<TransactionEntity>,
+        days: Int = 30,
+        nowMs: Long = System.currentTimeMillis(),
+    ): BalanceTrendReport {
+        val activeTxs = transactions.filter {
+            it.deletedAtEpochMs == null && (it.accountId == account.id || it.transferAccountId == account.id)
+        }
+        val effectiveSpanDays = days.coerceIn(7, 90)
+        val startMs = nowMs - (effectiveSpanDays.toLong() * 86_400_000L)
+        val bucketCount = 8
+        val spanMs = (nowMs - startMs).coerceAtLeast(86_400_000L)
+        val fmt = SimpleDateFormat("MMM d", Locale.US)
+
+        val timestamps = (0 until bucketCount).map { idx ->
+            if (idx == bucketCount - 1) nowMs
+            else startMs + ((spanMs.toDouble() * idx.toDouble()) / (bucketCount - 1).coerceAtLeast(1)).roundToLong()
+        }
+
+        val points = timestamps.map { t ->
+            val deltaAfter = activeTxs
+                .asSequence()
+                .filter { it.occurredAtEpochMs > t && it.occurredAtEpochMs <= nowMs }
+                .sumOf { tx ->
+                    val magInAccCurrency = abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, account.currency))
+                    when {
+                        tx.accountId == account.id && tx.txType == "INCOME" -> magInAccCurrency
+                        tx.accountId == account.id && (tx.txType == "EXPENSE" || tx.txType == "TRANSFER") -> -magInAccCurrency
+                        tx.txType == "TRANSFER" && tx.transferAccountId == account.id -> magInAccCurrency
+                        else -> 0L
+                    }
+                }
+            TrendPoint(
+                label = fmt.format(Date(t)),
+                epochMs = t,
+                valueMinor = account.balanceMinor - deltaAfter,
+            )
+        }
+
+        val startBal = points.firstOrNull()?.valueMinor ?: account.balanceMinor
+        val endBal = points.lastOrNull()?.valueMinor ?: account.balanceMinor
+        val minBal = points.minOfOrNull { it.valueMinor } ?: account.balanceMinor
+        val maxBal = points.maxOfOrNull { it.valueMinor } ?: account.balanceMinor
+        val change = endBal - startBal
+        val changePct = if (startBal != 0L) ((change.toDouble() / abs(startBal).toDouble()) * 100.0).toFloat() else 0f
+        return BalanceTrendReport(
+            points = points,
+            startBalanceMinor = startBal,
+            endBalanceMinor = endBal,
+            minMinor = minBal,
+            maxMinor = maxBal,
+            changeMinor = change,
+            changePercent = changePct,
+        )
+    }
+
     private fun computeBalanceByAccounts(
         activeAccounts: List<AccountEntity>,
         baseCurrency: String,
