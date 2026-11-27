@@ -57,6 +57,19 @@ object MoneyFormatter {
         return "$sign${currencySymbol(currency)}$formatted"
     }
 
+    fun formatEditableDecimal(
+        amountMinor: Long,
+        currency: String,
+    ): String {
+        val clean = abs(amountMinor)
+        if (clean == 0L) return ""
+        val decimals = if (currency.equals("JPY", ignoreCase = true)) 0 else 2
+        val divisor = if (decimals == 0) 1.0 else 100.0
+        val pattern = if (decimals == 0) "###0" else "###0.00"
+        val raw = DecimalFormat(pattern, symbols).format(clean / divisor)
+        return if (raw.contains('.')) raw.trimEnd('0').trimEnd('.') else raw
+    }
+
     private const val maxSafeMinor = 1_000_000_000_000_00L
 
     fun parseDecimalToMinor(input: String, currency: String = "USD"): Long? {
@@ -725,7 +738,7 @@ object AnalyticsCalculator {
                     val assigned = with(CategoryHierarchy) { tx.allAssignedCategoryIds() }
                     val shares = CategoryHierarchy.allocateAcrossIds(txMag, assigned)
                     shares.sumOf { (cid, share) ->
-                        val matches = cid != null && (cid == budget.categoryId || catMap[cid]?.parentCategoryId == budget.categoryId)
+                        val matches = cid != null && (cid == budget.categoryId || CategoryHierarchy.isDescendantOrSelf(cid, budget.categoryId, catMap))
                         if (matches) share else 0L
                     }
                 }
@@ -771,7 +784,7 @@ object AnalyticsCalculator {
                     val assigned = with(CategoryHierarchy) { tx.allAssignedCategoryIds() }
                     val shares = CategoryHierarchy.allocateAcrossIds(mag, assigned)
                     shares.sumOf { (cid, share) ->
-                        val matches = cid != null && (cid in budgetedCatIds || catMap[cid]?.parentCategoryId in budgetedCatIds)
+                        val matches = cid != null && (cid in budgetedCatIds || budgetedCatIds.any { bId -> CategoryHierarchy.isDescendantOrSelf(cid, bId, catMap) })
                         if (matches) share else 0L
                     }
                 }
@@ -1154,6 +1167,7 @@ object AnalyticsCalculator {
         val uncheckedItems: Int,
         val estimatedTotalMinor: Long,
         val checkedTotalMinor: Long,
+        val remainingTotalMinor: Long = (estimatedTotalMinor - checkedTotalMinor).coerceAtLeast(0L),
     )
 
     fun computeDebtSummary(
@@ -1217,6 +1231,7 @@ object AnalyticsCalculator {
         val checkedList = active.filter { it.checked }
         val estTotal = active.sumOf { abs(it.estimatedPriceMinor) }
         val checkedTotal = checkedList.sumOf { abs(it.estimatedPriceMinor) }
+        val remainingTotal = (estTotal - checkedTotal).coerceAtLeast(0L)
         return ShoppingListSummary(
             list = list,
             totalItems = active.size,
@@ -1224,6 +1239,7 @@ object AnalyticsCalculator {
             uncheckedItems = active.size - checkedList.size,
             estimatedTotalMinor = estTotal,
             checkedTotalMinor = checkedTotal,
+            remainingTotalMinor = remainingTotal,
         )
     }
 

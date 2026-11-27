@@ -1,16 +1,16 @@
 {
-  "versionCode": 19,
-  "versionName": "1.8.0",
+  "versionCode": 20,
+  "versionName": "2.0.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T21:33:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.8.0/LedgerFlow-v1.8.0.apk",
-  "apkSizeBytes": 4945543,
-  "sha256": "d0876408e188e6fdb173dd7aa50c103326d2bcbc38bbcc338752b433fab8f118",
+  "releasedAt": "2026-11-28T00:57:53+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v2.0.0/LedgerFlow-v2.0.0.apk",
+  "apkSizeBytes": 5040368,
+  "sha256": "3de423a4550a425f844a6b32189ee3a1b48791ff57b527b21277390b48fb74f3",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Added two native Android Home Screen Widgets: Compact Action Bar (4x2) and Spend & Active Shopping List (4x3), automatically synced with Flow Dark, Premium Black, and Light themes plus real-time Room database updates.",
-    "Added 1-tap transparent Quick Expense & Income overlays, Voice Shopping List capture (natural spoken/typed item + quantity parsing via VoiceShoppingParser into Room v5 shopping_items), and focus-aware clipboard Smart Paste routing verified alerts to Pending Review.",
-    "Enabled direct home screen shopping checklist toggling without opening the app, Mask Balances lock-screen auto-redaction (with opt-in Settings toggle), and Android 12+ live widget picker previews."
+    "Redesigned Shopping Lists (Room v6) with structured Name, Quantity + 6-group Unit selector (Weight, Volume, Count, Packaging, Length, Other, plus Custom units), optional standalone Estimated Price, full CRUD, and list-preserving duplicate-safe Convert Basket to Expense.",
+    "Added true multi-level Hierarchical Category Trees (arbitrary nesting, Expense & Income separation, streamlined New/Edit Category sheet, recursive CategoriesScreen, Delete Safeguard modal for subtree/usage preservation, and unified HierarchicalCategoryPickerSheet across all flows + analytics drill-down).",
+    "Redesigned Android Home Screen Widgets into 4 crisp responsive widgets (4x2 Finance, 4x3 Interactive Shopping List with per-widget list switcher & progress bar, 2x2 Compact Tile, and 4x1 Quick Expense capsule) with Flow Dark / Premium Black / Light theme sync and lock-screen privacy masking."
   ],
   "mandatory": false
 }

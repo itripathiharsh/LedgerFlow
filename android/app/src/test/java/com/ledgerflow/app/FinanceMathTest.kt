@@ -19,11 +19,13 @@ import com.ledgerflow.app.domain.AnalyticsEngine
 import com.ledgerflow.app.domain.AnalyticsRangePreset
 import com.ledgerflow.app.domain.CalculatorEngine
 import com.ledgerflow.app.domain.CategoryHierarchy
+import com.ledgerflow.app.domain.CategoryTree
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.NotificationParser
 import com.ledgerflow.app.domain.ReportExporter
+import com.ledgerflow.app.domain.ShoppingUnitCatalog
 import com.ledgerflow.app.domain.SupportedPaymentApps
 import com.ledgerflow.app.domain.VoiceShoppingParser
 import com.ledgerflow.app.domain.WidgetMetricsCalculator
@@ -762,5 +764,52 @@ class FinanceMathTest {
         assertEquals("1.5 kg", conversational[4].quantityLabel)
 
         assertTrue(VoiceShoppingParser.parse("   ").isEmpty())
+    }
+
+    @Test
+    fun shoppingUnitCatalog_parsesNormalizesFormatsAndValidatesInputs() {
+        assertEquals(6, ShoppingUnitCatalog.unitGroups.size)
+        assertEquals("litre", ShoppingUnitCatalog.normalizeUnit("Ltrs"))
+        assertEquals("2.5 litres", ShoppingUnitCatalog.formatQuantityLabel(2.5, "litre"))
+        assertEquals("1 piece", ShoppingUnitCatalog.formatQuantityLabel(1.0, "piece"))
+        assertEquals("3 jars", ShoppingUnitCatalog.formatQuantityLabel(3.0, "jars"))
+
+        val legacy = ShoppingUnitCatalog.parseLegacyLabel("500gms")
+        assertEquals(500.0, legacy.quantityValue!!, 0.001)
+        assertEquals("g", legacy.quantityUnit)
+        assertEquals("500 g", legacy.label)
+
+        assertNull(ShoppingUnitCatalog.validateQuantityInput("").second)
+        assertNotNull(ShoppingUnitCatalog.validateQuantityInput("-2").second)
+        assertNotNull(ShoppingUnitCatalog.validateQuantityInput("0").second)
+        assertNotNull(ShoppingUnitCatalog.validateQuantityInput("abc").second)
+        assertEquals(4.0, ShoppingUnitCatalog.validateQuantityInput("4").first!!, 0.001)
+    }
+
+    @Test
+    fun categoryTree_handlesArbitraryDepthSearchAncestorsAndBudgetRollup() {
+        val root = CategoryEntity("c_root", "Education", "EXPENSE", "school", "#6366F1", null, 1L, 1L)
+        val level2 = CategoryEntity("c_l2", "College", "EXPENSE", "school", "#6366F1", root.id, 1L, 1L)
+        val level3 = CategoryEntity("c_l3", "Semester", "EXPENSE", "menu_book", "#6366F1", level2.id, 1L, 1L)
+        val level4 = CategoryEntity("c_l4", "Exam Fees", "EXPENSE", "menu_book", "#6366F1", level3.id, 1L, 1L)
+        val other = CategoryEntity("c_inc", "Salary", "INCOME", "work", "#059669", null, 1L, 1L)
+        val cats = listOf(root, level2, level3, level4, other)
+
+        val expenseTree = CategoryTree.buildTree(cats, kindFilter = "EXPENSE")
+        assertEquals(1, expenseTree.size)
+        assertEquals(3, expenseTree.first().totalDescendantCount)
+
+        // Multi-level search preserves ancestor path down to 4th-level match
+        val matched = CategoryTree.filterTree(expenseTree, "Exam Fees")
+        assertEquals(1, matched.size)
+        assertEquals("College", matched.first().children.first().category.name)
+        assertEquals("Exam Fees", matched.first().children.first().children.first().children.first().category.name)
+
+        // Budget on root category automatically rolls up expenses logged on 4th-level child
+        val now = 1_700_000_050_000L
+        val budgets = listOf(BudgetEntity("b1", root.id, "Edu Cap", 100_000L, "INR", "MONTHLY", 1L, 1L))
+        val txs = listOf(TransactionEntity("t1", "acc1", null, level4.id, level4.id, "EXPENSE", -35_000L, "INR", null, null, "Uni Portal", "", "", "MANUAL", false, now, now, now))
+        val progress = AnalyticsCalculator.computeBudgets(budgets, txs, "INR", 1_700_000_000_000L, 0.5f, cats)
+        assertEquals(35_000L, progress.single().spentMinor)
     }
 }

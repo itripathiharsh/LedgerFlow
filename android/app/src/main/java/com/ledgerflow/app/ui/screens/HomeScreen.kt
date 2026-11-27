@@ -115,6 +115,7 @@ fun HomeScreen(
     val vault by vm.vaultState.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val categories by vm.categories.collectAsState()
+    val allCategoriesLookup by vm.categoriesIncludingDeleted.collectAsState()
     val transactions by vm.allTransactions.collectAsState()
     val pendingReview by vm.pendingReviewTransactions.collectAsState()
     val budgets by vm.budgets.collectAsState()
@@ -139,11 +140,11 @@ fun HomeScreen(
     val accountSummary = remember(accounts, baseCurrency) {
         AnalyticsCalculator.computeAccountSummary(accounts, baseCurrency)
     }
-    val budgetProgress = remember(budgets, transactions, categories, baseCurrency, monthStart, monthFraction) {
-        AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction, categories)
+    val budgetProgress = remember(budgets, transactions, allCategoriesLookup, baseCurrency, monthStart, monthFraction) {
+        AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction, allCategoriesLookup)
     }
     val accMap = remember(accounts) { accounts.associateBy { it.id } }
-    val categoryMap = remember(categories) { categories.associateBy { it.id } }
+    val categoryMap = remember(allCategoriesLookup) { allCategoriesLookup.associateBy { it.id } }
     val pendingDateFmt = remember { SimpleDateFormat("MMM d • h:mm a", Locale.US) }
 
     var homeTab by remember { mutableIntStateOf(0) } // 0 = Overview, 1 = Budgets & Goals

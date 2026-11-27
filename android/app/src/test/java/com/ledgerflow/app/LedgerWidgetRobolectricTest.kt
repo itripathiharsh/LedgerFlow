@@ -23,13 +23,16 @@ import com.ledgerflow.app.security.VaultSessionState
 import com.ledgerflow.app.security.VaultStore
 import com.ledgerflow.app.ui.theme.ThemeModes
 import com.ledgerflow.app.widget.CompactActionBarWidgetProvider
+import com.ledgerflow.app.widget.CompactFinanceWidgetProvider
 import com.ledgerflow.app.widget.LedgerWidgetCoordinator
+import com.ledgerflow.app.widget.QuickExpenseWidgetProvider
 import com.ledgerflow.app.widget.QuickTransactionOverlayActivity
 import com.ledgerflow.app.widget.SmartPasteOutcome
 import com.ledgerflow.app.widget.SmartPasteProcessor
 import com.ledgerflow.app.widget.SmartPasteTrampolineActivity
 import com.ledgerflow.app.widget.SpendShoppingWidgetProvider
 import com.ledgerflow.app.widget.VoiceShoppingOverlayActivity
+import com.ledgerflow.app.widget.WidgetListPickerActivity
 import com.ledgerflow.app.widget.WidgetShoppingActionReceiver
 import com.ledgerflow.app.widget.WidgetThemeStyle
 import kotlinx.coroutines.test.runTest
@@ -212,55 +215,65 @@ class LedgerWidgetRobolectricTest {
         assertEquals(View.GONE, emptyRoot.findViewById<View>(R.id.shopping_items_container).visibility)
         assertEquals("Create Shopping List", emptyRoot.findViewById<TextView>(R.id.btn_create_shopping_list).text.toString())
 
-        // Populate a list with 5 items (1 checked, 4 unchecked)
-        val outcome = db.addParsedShoppingItemsAtomic(
-            listId = null,
-            items = listOf(
-                ParsedShoppingItem("Atta", "2 kg"),
-                ParsedShoppingItem("Milk", "1"),
-                ParsedShoppingItem("Paneer", "500 g"),
-                ParsedShoppingItem("Bread", "1"),
-                ParsedShoppingItem("Eggs", "1 dozen"),
-            ),
-            defaultListTitle = "Sunday Market",
-            nowMs = 5_000L,
-        )
-        val eggs = db.shoppingItemDao().getActiveOrderedForList(outcome.listId).first { it.name == "Eggs" }
+        // Populate a list with 5 items (1 checked, 4 unchecked) + prices
+        val l1 = ShoppingListEntity("list_sun", "Sunday Market", SeedData.CAT_GROCERIES, 5_000L, 5_000L)
+        db.shoppingListDao().upsert(l1)
+        val atta = db.addShoppingItemAtomic(l1.id, "Atta", 2.0, "kg", 12_000L, nowMs = 5_001L)!!
+        db.addShoppingItemAtomic(l1.id, "Milk", 1.0, "litre", 6_500L, nowMs = 5_002L)
+        db.addShoppingItemAtomic(l1.id, "Paneer", 500.0, "g", 22_000L, nowMs = 5_003L)
+        db.addShoppingItemAtomic(l1.id, "Bread", 1.0, "pack", 4_500L, nowMs = 5_004L)
+        val eggs = db.addShoppingItemAtomic(l1.id, "Eggs", 1.0, "dozen", 9_000L, nowMs = 5_005L)!!
         db.toggleShoppingItemCheckedAtomic(eggs.id, nowMs = 6_000L)
+
+        // Second list tests per-widget list switcher selection
+        val l2 = ShoppingListEntity("list_hw", "Hardware Store", SeedData.CAT_GENERAL, 4_000L, 4_000L)
+        db.shoppingListDao().upsert(l2)
+        db.addShoppingItemAtomic(l2.id, "Screws", 2.0, "pack", 15_000L, nowMs = 4_100L)
+        vault.update { it.copy(widgetListSelections = mapOf("77" to l2.id)) }
 
         val populatedSnap = LedgerWidgetCoordinator.loadSnapshot(context, dbOverride = db, vaultOverride = vault, deviceLockedOverride = false)
         assertTrue(populatedSnap.hasActiveList)
         assertEquals("Sunday Market", populatedSnap.activeListTitle)
+        assertEquals(2, populatedSnap.listCount)
         assertEquals(1, populatedSnap.checkedCount)
         assertEquals(5, populatedSnap.totalCount)
-        assertEquals(4, populatedSnap.uncheckedRows.size)
 
-        val normalRoot = LedgerWidgetCoordinator.buildShoppingRemoteViews(context, populatedSnap).apply(context, FrameLayout(context))
+        val customWidgetSnap = LedgerWidgetCoordinator.loadSnapshot(context, dbOverride = db, vaultOverride = vault, deviceLockedOverride = false, appWidgetId = 77)
+        assertEquals("Hardware Store", customWidgetSnap.activeListTitle)
+
+        val normalRoot = LedgerWidgetCoordinator.buildShoppingRemoteViews(context, populatedSnap, appWidgetId = 10).apply(context, FrameLayout(context))
         assertEquals("1/5", normalRoot.findViewById<TextView>(R.id.shopping_progress_badge).text.toString())
-        assertEquals("2 kg Atta", normalRoot.findViewById<TextView>(R.id.shopping_item_text_0).text.toString())
+        assertEquals(View.VISIBLE, normalRoot.findViewById<View>(R.id.shopping_switch_icon).visibility)
+        assertEquals(View.VISIBLE, normalRoot.findViewById<View>(R.id.shopping_est_total).visibility)
+        assertEquals("Atta", normalRoot.findViewById<TextView>(R.id.shopping_item_text_0).text.toString())
+        assertEquals("2 kg", normalRoot.findViewById<TextView>(R.id.shopping_item_qty_0).text.toString())
         assertEquals("Milk", normalRoot.findViewById<TextView>(R.id.shopping_item_text_1).text.toString())
-        assertEquals("500 g Paneer", normalRoot.findViewById<TextView>(R.id.shopping_item_text_2).text.toString())
-        assertEquals(View.VISIBLE, normalRoot.findViewById<View>(R.id.shopping_more_count).visibility)
-        assertEquals("+1 more items", normalRoot.findViewById<TextView>(R.id.shopping_more_count).text.toString())
+        assertEquals("Paneer", normalRoot.findViewById<TextView>(R.id.shopping_item_text_2).text.toString())
+        assertEquals("+2 more items", normalRoot.findViewById<TextView>(R.id.shopping_more_count).text.toString())
+        assertEquals("+ Add Item", normalRoot.findViewById<TextView>(R.id.btn_shopping_add_item).text.toString())
+        assertEquals("Open List", normalRoot.findViewById<TextView>(R.id.btn_shopping_open_list).text.toString())
 
-        // Compact height resize (<165dp) trims safely to 2 rows + "+2 more items" and narrow width condenses "+ Exp"
+        // Compact height resize (<=155dp) trims safely to 2 rows + "+3 more items"
         val tightOptions = Bundle().apply {
-            putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 150)
+            putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 145)
             putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 195)
         }
-        val resizedRoot = LedgerWidgetCoordinator.buildShoppingRemoteViews(context, populatedSnap, tightOptions).apply(context, FrameLayout(context))
-        assertEquals("+ Exp", resizedRoot.findViewById<TextView>(R.id.btn_add_expense).text.toString())
-        assertEquals(View.GONE, resizedRoot.findViewById<View>(R.id.shopping_row_2).visibility)
-        assertEquals("+2 more items", resizedRoot.findViewById<TextView>(R.id.shopping_more_count).text.toString())
+        val resizedShoppingRoot = LedgerWidgetCoordinator.buildShoppingRemoteViews(context, populatedSnap, tightOptions, appWidgetId = 10).apply(context, FrameLayout(context))
+        assertEquals(View.GONE, resizedShoppingRoot.findViewById<View>(R.id.shopping_row_2).visibility)
+        assertEquals("+3 more items", resizedShoppingRoot.findViewById<TextView>(R.id.shopping_more_count).text.toString())
+        val resizedCompactRoot = LedgerWidgetCoordinator.buildCompactRemoteViews(context, populatedSnap, tightOptions).apply(context, FrameLayout(context))
+        assertEquals("+ Exp", resizedCompactRoot.findViewById<TextView>(R.id.btn_add_expense).text.toString())
 
-        // Check all remaining items -> switches cleanly to completed state
-        for (item in db.shoppingItemDao().getActiveOrderedForList(outcome.listId)) {
+        // Check remaining items -> 5/5 completed with strikethrough visible cleanly
+        for (item in db.shoppingItemDao().getActiveOrderedForList(l1.id)) {
             if (!item.checked) db.toggleShoppingItemCheckedAtomic(item.id, nowMs = 7_000L)
         }
         val doneSnap = LedgerWidgetCoordinator.loadSnapshot(context, dbOverride = db, vaultOverride = vault, deviceLockedOverride = false)
+        assertEquals(5, doneSnap.checkedCount)
         val doneRoot = LedgerWidgetCoordinator.buildShoppingRemoteViews(context, doneSnap).apply(context, FrameLayout(context))
-        assertEquals(View.VISIBLE, doneRoot.findViewById<View>(R.id.shopping_all_done_container).visibility)
-        assertEquals(View.GONE, doneRoot.findViewById<View>(R.id.shopping_items_container).visibility)
+        assertEquals("5/5", doneRoot.findViewById<TextView>(R.id.shopping_progress_badge).text.toString())
+        assertTrue((doneRoot.findViewById<TextView>(R.id.shopping_item_text_0).paintFlags and android.graphics.Paint.STRIKE_THRU_TEXT_FLAG) != 0)
+        assertNotNull(atta.id)
     }
 
     @Test
@@ -329,6 +342,7 @@ class LedgerWidgetRobolectricTest {
                 LedgerDatabase.MIGRATION_2_3,
                 LedgerDatabase.MIGRATION_3_4,
                 LedgerDatabase.MIGRATION_4_5,
+                LedgerDatabase.MIGRATION_5_6,
             )
             .allowMainThreadQueries()
             .build()
@@ -350,6 +364,7 @@ class LedgerWidgetRobolectricTest {
                 LedgerDatabase.MIGRATION_2_3,
                 LedgerDatabase.MIGRATION_3_4,
                 LedgerDatabase.MIGRATION_4_5,
+                LedgerDatabase.MIGRATION_5_6,
             )
             .allowMainThreadQueries()
             .build()
@@ -359,34 +374,51 @@ class LedgerWidgetRobolectricTest {
         reopenedDb.close()
         dbFile.delete()
 
-        // Bind both widget providers with ShadowAppWidgetManager and verify RemoteViews update + actions
+        // Bind all 4 widget providers with ShadowAppWidgetManager and verify RemoteViews & actions
         val appWidgetManager = AppWidgetManager.getInstance(context)
         val shadowAvm = Shadows.shadowOf(appWidgetManager)
         val compactId = shadowAvm.createWidget(CompactActionBarWidgetProvider::class.java, R.layout.widget_compact_action_bar)
         val shoppingId = shadowAvm.createWidget(SpendShoppingWidgetProvider::class.java, R.layout.widget_spend_shopping_list)
+        val miniId = shadowAvm.createWidget(CompactFinanceWidgetProvider::class.java, R.layout.widget_compact_finance)
+        val quickId = shadowAvm.createWidget(QuickExpenseWidgetProvider::class.java, R.layout.widget_quick_expense)
 
         val snap = LedgerWidgetCoordinator.loadSnapshot(context, dbOverride = db, vaultOverride = vault, deviceLockedOverride = false)
         appWidgetManager.updateAppWidget(compactId, LedgerWidgetCoordinator.buildCompactRemoteViews(context, snap))
-        appWidgetManager.updateAppWidget(shoppingId, LedgerWidgetCoordinator.buildShoppingRemoteViews(context, snap))
+        appWidgetManager.updateAppWidget(shoppingId, LedgerWidgetCoordinator.buildShoppingRemoteViews(context, snap, appWidgetId = shoppingId))
+        appWidgetManager.updateAppWidget(miniId, LedgerWidgetCoordinator.buildCompactFinanceRemoteViews(context, snap))
+        appWidgetManager.updateAppWidget(quickId, LedgerWidgetCoordinator.buildQuickExpenseRemoteViews(context, snap))
 
         val compactView = shadowAvm.getViewFor(compactId)
         val shoppingView = shadowAvm.getViewFor(shoppingId)
+        val miniView = shadowAvm.getViewFor(miniId)
+        val quickView = shadowAvm.getViewFor(quickId)
         assertNotNull(compactView.findViewById<View>(R.id.btn_add_expense))
         assertNotNull(compactView.findViewById<View>(R.id.btn_voice_list))
         assertNotNull(compactView.findViewById<View>(R.id.btn_smart_paste))
         assertNotNull(compactView.findViewById<View>(R.id.btn_add_income))
         assertNotNull(shoppingView.findViewById<View>(R.id.shopping_empty_container))
+        assertNotNull(miniView.findViewById<View>(R.id.btn_mini_add_expense))
+        assertNotNull(miniView.findViewById<View>(R.id.btn_mini_voice))
+        assertNotNull(quickView.findViewById<View>(R.id.btn_quick_add_expense))
+        assertNotNull(quickView.findViewById<View>(R.id.btn_quick_voice_expense))
 
-        // Verify quick intents construct clean launcher overlay targets
-        val expIntent = QuickTransactionOverlayActivity.newIntent(context, "EXPENSE")
+        // Verify quick & list picker intents construct clean overlay targets
+        val expIntent = QuickTransactionOverlayActivity.newIntent(context, "EXPENSE", startVoice = true)
         assertEquals(ComponentName(context, QuickTransactionOverlayActivity::class.java), expIntent.component)
         assertEquals("EXPENSE", expIntent.getStringExtra(QuickTransactionOverlayActivity.EXTRA_TX_TYPE))
+        assertTrue(expIntent.getBooleanExtra(QuickTransactionOverlayActivity.EXTRA_START_VOICE, false))
 
         val incIntent = QuickTransactionOverlayActivity.newIntent(context, "INCOME")
         assertEquals("INCOME", incIntent.getStringExtra(QuickTransactionOverlayActivity.EXTRA_TX_TYPE))
 
-        val voiceIntent = VoiceShoppingOverlayActivity.newIntent(context)
+        val voiceIntent = VoiceShoppingOverlayActivity.newIntent(context, listId = "list_1", initialMode = VoiceShoppingOverlayActivity.MODE_MANUAL)
         assertEquals(ComponentName(context, VoiceShoppingOverlayActivity::class.java), voiceIntent.component)
+        assertEquals("list_1", voiceIntent.getStringExtra(VoiceShoppingOverlayActivity.EXTRA_LIST_ID))
+        assertEquals(VoiceShoppingOverlayActivity.MODE_MANUAL, voiceIntent.getStringExtra(VoiceShoppingOverlayActivity.EXTRA_INITIAL_MODE))
+
+        val pickerIntent = WidgetListPickerActivity.newIntent(context, shoppingId)
+        assertEquals(ComponentName(context, WidgetListPickerActivity::class.java), pickerIntent.component)
+        assertEquals(shoppingId, pickerIntent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1))
 
         val pasteIntent = SmartPasteTrampolineActivity.newIntent(context)
         assertEquals(ComponentName(context, SmartPasteTrampolineActivity::class.java), pasteIntent.component)

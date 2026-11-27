@@ -49,12 +49,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.CalculatorEngine
+import com.ledgerflow.app.domain.CategoryTree
 import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.MoneyFormatter
 import kotlin.math.abs
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CategoryEditorBottomSheet
 import com.ledgerflow.app.ui.components.CleanCard
+import com.ledgerflow.app.ui.components.HierarchicalCategoryPickerSheet
+import com.ledgerflow.app.ui.components.HierarchicalCategorySelectorField
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.BorderSubtle
@@ -97,6 +100,9 @@ fun AddTransactionScreen(
     var selectedCategoryIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var activeParentId by remember { mutableStateOf<String?>(null) }
     var showCreateCategoryDialog by remember { mutableStateOf(false) }
+    var showCategoryPicker by remember { mutableStateOf(false) }
+    var createInitialParentId by remember { mutableStateOf<String?>(null) }
+    var createInitialKind by remember { mutableStateOf(initialType) }
     var merchant by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
@@ -321,7 +327,11 @@ fun AddTransactionScreen(
                                 )
                             }
                             Surface(
-                                onClick = { showCreateCategoryDialog = true },
+                                onClick = {
+                                    createInitialParentId = activeParentId
+                                    createInitialKind = if (txType == "INCOME") "INCOME" else "EXPENSE"
+                                    showCreateCategoryDialog = true
+                                },
                                 shape = RoundedCornerShape(999.dp),
                                 color = SlateTint,
                                 border = BorderStroke(1.dp, BorderSubtle),
@@ -336,11 +346,23 @@ fun AddTransactionScreen(
                             }
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(6.dp))
+
+                    val displaySelectedId = effectiveCatIds.firstOrNull()
+                    HierarchicalCategorySelectorField(
+                        label = "",
+                        selectedCategoryId = displaySelectedId,
+                        allCategories = selectableCategories,
+                        nullOptionLabel = "Tap to browse full category tree",
+                        onClick = { showCategoryPicker = true },
+                    )
+                    Spacer(Modifier.height(6.dp))
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         parentCategories.forEach { cat ->
-                            val hasSelectedChild = childrenByParent[cat.id].orEmpty().any { it.id in effectiveCatIds }
-                            val isSelected = cat.id in effectiveCatIds || (activeParentId == cat.id && hasSelectedChild)
+                            val hasSelectedDescendant = effectiveCatIds.any { cid ->
+                                CategoryTree.isDescendantOrSelf(cid, cat.id, catById)
+                            }
+                            val isSelected = cat.id in effectiveCatIds || (activeParentId == cat.id && hasSelectedDescendant)
                             FilterChip(
                                 selected = isSelected,
                                 onClick = {
@@ -364,7 +386,7 @@ fun AddTransactionScreen(
                     val branchSubs = branchParentId?.let { childrenByParent[it] }.orEmpty()
                     if (branchSubs.isNotEmpty()) {
                         Spacer(Modifier.height(6.dp))
-                        val parentTitle = branchParentId?.let { catById[it]?.name }.orEmpty()
+                        val parentTitle = branchParentId?.let { CategoryTree.breadcrumbPath(it, catById) }.orEmpty()
                         Text(
                             text = if (parentTitle.isNotBlank()) "Subcategories • $parentTitle" else "Subcategories",
                             fontSize = 11.sp,
@@ -374,10 +396,16 @@ fun AddTransactionScreen(
                         Spacer(Modifier.height(4.dp))
                         Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             branchSubs.forEach { sub ->
-                                val subSelected = sub.id in effectiveCatIds
+                                val subSelected = sub.id in effectiveCatIds || effectiveCatIds.any { cid ->
+                                    CategoryTree.isDescendantOrSelf(cid, sub.id, catById)
+                                }
                                 FilterChip(
                                     selected = subSelected,
                                     onClick = {
+                                        val hasGrandchildren = childrenByParent[sub.id].orEmpty().isNotEmpty()
+                                        if (!multiSelectMode && hasGrandchildren) {
+                                            activeParentId = sub.id
+                                        }
                                         selectedCategoryIds = if (multiSelectMode) {
                                             if (sub.id in selectedCategoryIds) {
                                                 selectedCategoryIds - sub.id
@@ -386,11 +414,7 @@ fun AddTransactionScreen(
                                                 trimmed + sub.id
                                             }
                                         } else {
-                                            if (sub.id in selectedCategoryIds && branchParentId != null) {
-                                                listOf(branchParentId)
-                                            } else {
-                                                listOf(sub.id)
-                                            }
+                                            listOf(sub.id)
                                         }
                                     },
                                     label = { Text(sub.name, fontSize = 11.sp) },
@@ -402,7 +426,7 @@ fun AddTransactionScreen(
 
                     if (multiSelectMode && selectedCategoryIds.size > 1) {
                         Spacer(Modifier.height(4.dp))
-                        val names = selectedCategoryIds.mapNotNull { catById[it]?.name }.joinToString(", ")
+                        val names = selectedCategoryIds.mapNotNull { CategoryTree.breadcrumbPath(it, catById).ifBlank { catById[it]?.name } }.joinToString(", ")
                         Text(
                             text = "Split evenly: $names",
                             fontSize = 11.sp,
@@ -517,20 +541,50 @@ fun AddTransactionScreen(
         }
     }
 
+    if (showCategoryPicker && txType != "TRANSFER") {
+        HierarchicalCategoryPickerSheet(
+            title = if (multiSelectMode) "Select Categories" else "Select Category",
+            categories = categories,
+            kindFilter = if (txType == "INCOME") "INCOME" else "EXPENSE",
+            selectedIds = effectiveCatIds,
+            multiSelect = multiSelectMode,
+            onSelectSingle = { chosen ->
+                selectedCategoryIds = listOf(chosen.id)
+                activeParentId = chosen.parentCategoryId ?: chosen.id
+            },
+            onConfirmMulti = { ids ->
+                selectedCategoryIds = ids
+            },
+            onQuickCreate = { parentCatId, kindResolved ->
+                showCategoryPicker = false
+                createInitialParentId = parentCatId
+                createInitialKind = kindResolved
+                showCreateCategoryDialog = true
+            },
+            onDismiss = { showCategoryPicker = false },
+        )
+    }
+
     if (showCreateCategoryDialog) {
         CategoryEditorBottomSheet(
             editingCategory = null,
-            initialKind = if (txType == "INCOME") "INCOME" else "EXPENSE",
-            initialParentId = activeParentId,
+            initialKind = createInitialKind.ifBlank { if (txType == "INCOME") "INCOME" else "EXPENSE" },
+            initialParentId = createInitialParentId,
             allCategories = categories,
             onDismiss = { showCreateCategoryDialog = false },
-            onSave = { name, kind, parentId, iconKey, colorHex ->
+            onSave = { name, kind, parentId, iconKey, colorHex, description ->
                 vm.addCategory(
                     name = name,
                     kind = kind,
                     parentCategoryId = parentId,
                     iconKey = iconKey,
                     colorHex = colorHex,
+                    description = description,
+                    onResult = { ok, _ ->
+                        if (ok) {
+                            showCreateCategoryDialog = false
+                        }
+                    },
                     onCreated = { created ->
                         if (created.kind == txType) {
                             selectedCategoryIds = if (multiSelectMode) {
@@ -538,13 +592,10 @@ fun AddTransactionScreen(
                             } else {
                                 listOf(created.id)
                             }
-                            if (created.parentCategoryId != null) {
-                                activeParentId = created.parentCategoryId
-                            }
+                            activeParentId = created.parentCategoryId ?: created.id
                         }
                     },
                 )
-                showCreateCategoryDialog = false
             },
         )
     }

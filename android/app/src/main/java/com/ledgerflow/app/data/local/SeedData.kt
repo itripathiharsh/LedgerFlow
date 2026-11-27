@@ -62,10 +62,39 @@ object SeedData {
     const val SUB_MOVIES = "33333333-3333-4333-8333-333333331101"
     const val SUB_GAMES = "33333333-3333-4333-8333-333333331102"
     const val SUB_SALON = "33333333-3333-4333-8333-333333331401"
+    const val SUB_CLUBS = SUB_FITNESS
+    const val SUB_RESTAURANT_DINING_OUT = "33333333-3333-4333-8333-333333330111"
+    const val SUB_RESTAURANT_FINE_DINING = "33333333-3333-4333-8333-333333330112"
+
+    const val SUB_HOME_MAINTENANCE = "33333333-3333-4333-8333-333333330505"
+    const val SUB_UTILITIES = "33333333-3333-4333-8333-333333330506"
+
     const val SUB_BOOKS_COURSES = "33333333-3333-4333-8333-333333331301"
+    const val SUB_EDU_SCHOOL = "33333333-3333-4333-8333-333333331302"
+    const val SUB_EDU_COLLEGE = "33333333-3333-4333-8333-333333331303"
+    const val SUB_EDU_ONLINE = "33333333-3333-4333-8333-333333331304"
+    const val SUB_EDU_CAREER = "33333333-3333-4333-8333-333333331305"
+    const val SUB_EDU_SCHOOL_BOOKS = "33333333-3333-4333-8333-333333331311"
+    const val SUB_EDU_SCHOOL_STATIONERY = "33333333-3333-4333-8333-333333331312"
+    const val SUB_EDU_SCHOOL_FEES = "33333333-3333-4333-8333-333333331313"
+    const val SUB_EDU_COLLEGE_TUITION = "33333333-3333-4333-8333-333333331321"
+    const val SUB_EDU_COLLEGE_BOOKS = "33333333-3333-4333-8333-333333331322"
+    const val SUB_EDU_COLLEGE_HOSTEL = "33333333-3333-4333-8333-333333331323"
+    const val SUB_EDU_ONLINE_COURSES = "33333333-3333-4333-8333-333333331331"
+    const val SUB_EDU_ONLINE_CERTS = "33333333-3333-4333-8333-333333331332"
+
+    const val SUB_INSURANCE = "33333333-3333-4333-8333-333333331501"
+    const val SUB_BANKING_FEES = "33333333-3333-4333-8333-333333331502"
+    const val SUB_SAVINGS_INVEST = "33333333-3333-4333-8333-333333331503"
+    const val SUB_MISC = "33333333-3333-4333-8333-333333330801"
+
+    const val SUB_INCOME_BONUS = "33333333-3333-4333-8333-333333331701"
+    const val SUB_INCOME_CLIENT_PROJECTS = "33333333-3333-4333-8333-333333331801"
+    const val SUB_INCOME_DIVIDENDS = "33333333-3333-4333-8333-333333330601"
+    const val SUB_INCOME_RENTAL = "33333333-3333-4333-8333-333333330602"
 
     fun starterCategories(nowMs: Long): List<CategoryEntity> = listOf(
-        // Parents
+        // Parents (preserving legacy top-level IDs so budgets, transactions, and rules stay intact)
         CategoryEntity(CAT_DINING, "Dining & Coffee", "EXPENSE", "cafe", "#D97706", null, nowMs, nowMs),
         CategoryEntity(CAT_GROCERIES, "Groceries", "EXPENSE", "shopping_cart", "#059669", null, nowMs, nowMs),
         CategoryEntity(CAT_FUEL, "Fuel & Vehicle", "EXPENSE", "fuel", "#F59E0B", null, nowMs, nowMs),
@@ -78,16 +107,18 @@ object SeedData {
         CategoryEntity(CAT_TRAVEL, "Travel & Stay", "EXPENSE", "flight", "#0EA5E9", null, nowMs, nowMs),
         CategoryEntity(CAT_PERSONAL_CARE, "Personal Care", "EXPENSE", "spa", "#14B8A6", null, nowMs, nowMs),
         CategoryEntity(CAT_EDUCATION, "Education", "EXPENSE", "school", "#4F46E5", null, nowMs, nowMs),
-        CategoryEntity(CAT_EMI_DEBT, "EMI & Debt", "EXPENSE", "loan", "#BE123C", null, nowMs, nowMs),
+        CategoryEntity(CAT_EMI_DEBT, "Finance & Debt", "EXPENSE", "loan", "#BE123C", null, nowMs, nowMs),
         CategoryEntity(CAT_GIFTS, "Gifts & Charity", "EXPENSE", "gift", "#F43F5E", null, nowMs, nowMs),
         CategoryEntity(CAT_GENERAL, "General", "EXPENSE", "category", "#64748B", null, nowMs, nowMs),
         // Income parents
-        CategoryEntity(CAT_INCOME, "Income", "INCOME", "payments", "#059669", null, nowMs, nowMs),
+        CategoryEntity(CAT_INCOME, "Investments & Passive", "INCOME", "payments", "#059669", null, nowMs, nowMs),
         CategoryEntity(CAT_SALARY, "Salary", "INCOME", "payments", "#10B981", null, nowMs, nowMs),
         CategoryEntity(CAT_FREELANCE, "Freelance & Business", "INCOME", "work", "#0D9488", null, nowMs, nowMs),
         CategoryEntity(CAT_REFUNDS, "Refunds & Cashback", "INCOME", "payments", "#0284C7", null, nowMs, nowMs),
-        // Subcategories
+        // Subcategories (Level 2) + nested children (Level 3)
         CategoryEntity(SUB_RESTAURANTS, "Restaurants", "EXPENSE", "cafe", "#D97706", CAT_DINING, nowMs, nowMs),
+        CategoryEntity(SUB_RESTAURANT_DINING_OUT, "Dining Out", "EXPENSE", "cafe", "#D97706", SUB_RESTAURANTS, nowMs, nowMs),
+        CategoryEntity(SUB_RESTAURANT_FINE_DINING, "Fine Dining", "EXPENSE", "cafe", "#B45309", SUB_RESTAURANTS, nowMs, nowMs),
         CategoryEntity(SUB_COFFEE, "Coffee & Snacks", "EXPENSE", "cafe", "#B45309", CAT_DINING, nowMs, nowMs),
         CategoryEntity(SUB_FOOD_DELIVERY, "Food Delivery", "EXPENSE", "cafe", "#F59E0B", CAT_DINING, nowMs, nowMs),
         CategoryEntity(SUB_PRODUCE, "Vegetables & Fruits", "EXPENSE", "shopping_cart", "#059669", CAT_GROCERIES, nowMs, nowMs),
@@ -97,12 +128,14 @@ object SeedData {
         CategoryEntity(SUB_EV_CHARGING, "EV Charging", "EXPENSE", "fuel", "#10B981", CAT_FUEL, nowMs, nowMs),
         CategoryEntity(SUB_VEHICLE_SERVICE, "Service & Repair", "EXPENSE", "fuel", "#D97706", CAT_FUEL, nowMs, nowMs),
         CategoryEntity(SUB_PARKING_TOLLS, "Parking & Tolls", "EXPENSE", "fuel", "#64748B", CAT_FUEL, nowMs, nowMs),
-        CategoryEntity(SUB_TRANSIT, "Metro & Bus", "EXPENSE", "directions_transit", "#0284C7", CAT_TRANSPORT, nowMs, nowMs),
+        CategoryEntity(SUB_TRANSIT, "Public Transport", "EXPENSE", "directions_transit", "#0284C7", CAT_TRANSPORT, nowMs, nowMs),
         CategoryEntity(SUB_CAB_AUTO, "Cab & Auto", "EXPENSE", "directions_transit", "#0EA5E9", CAT_TRANSPORT, nowMs, nowMs),
-        CategoryEntity(SUB_RENT, "Rent & Maintenance", "EXPENSE", "home", "#475569", CAT_BILLS, nowMs, nowMs),
-        CategoryEntity(SUB_ELECTRICITY, "Electricity", "EXPENSE", "home", "#F59E0B", CAT_BILLS, nowMs, nowMs),
-        CategoryEntity(SUB_INTERNET_MOBILE, "Internet & Mobile", "EXPENSE", "home", "#0284C7", CAT_BILLS, nowMs, nowMs),
-        CategoryEntity(SUB_WATER_GAS, "Water & Cooking Gas", "EXPENSE", "home", "#0EA5E9", CAT_BILLS, nowMs, nowMs),
+        CategoryEntity(SUB_RENT, "Rent & Society", "EXPENSE", "home", "#475569", CAT_BILLS, nowMs, nowMs),
+        CategoryEntity(SUB_UTILITIES, "Utilities", "EXPENSE", "home", "#0284C7", CAT_BILLS, nowMs, nowMs),
+        CategoryEntity(SUB_ELECTRICITY, "Electricity", "EXPENSE", "home", "#F59E0B", SUB_UTILITIES, nowMs, nowMs),
+        CategoryEntity(SUB_WATER_GAS, "Water & Cooking Gas", "EXPENSE", "home", "#0EA5E9", SUB_UTILITIES, nowMs, nowMs),
+        CategoryEntity(SUB_INTERNET_MOBILE, "Internet & Mobile", "EXPENSE", "home", "#0284C7", SUB_UTILITIES, nowMs, nowMs),
+        CategoryEntity(SUB_HOME_MAINTENANCE, "Home Maintenance", "EXPENSE", "home", "#64748B", CAT_BILLS, nowMs, nowMs),
         CategoryEntity(SUB_STREAMING, "Streaming & OTT", "EXPENSE", "auto_awesome", "#6366F1", CAT_SUBS, nowMs, nowMs),
         CategoryEntity(SUB_APPS_CLOUD, "Apps & Cloud", "EXPENSE", "auto_awesome", "#8B5CF6", CAT_SUBS, nowMs, nowMs),
         CategoryEntity(SUB_PHARMACY, "Medicines & Pharmacy", "EXPENSE", "medical_services", "#E11D48", CAT_HEALTH, nowMs, nowMs),
@@ -113,7 +146,30 @@ object SeedData {
         CategoryEntity(SUB_MOVIES, "Movies & Outings", "EXPENSE", "movie", "#8B5CF6", CAT_ENTERTAINMENT, nowMs, nowMs),
         CategoryEntity(SUB_GAMES, "Games & Hobbies", "EXPENSE", "movie", "#A855F7", CAT_ENTERTAINMENT, nowMs, nowMs),
         CategoryEntity(SUB_SALON, "Salon & Grooming", "EXPENSE", "spa", "#14B8A6", CAT_PERSONAL_CARE, nowMs, nowMs),
-        CategoryEntity(SUB_BOOKS_COURSES, "Courses & Books", "EXPENSE", "school", "#4F46E5", CAT_EDUCATION, nowMs, nowMs),
+        // Education 3-level nested hierarchy
+        CategoryEntity(SUB_EDU_SCHOOL, "School", "EXPENSE", "school", "#4F46E5", CAT_EDUCATION, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_SCHOOL_FEES, "School Fees", "EXPENSE", "school", "#4F46E5", SUB_EDU_SCHOOL, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_SCHOOL_BOOKS, "Books", "EXPENSE", "school", "#6366F1", SUB_EDU_SCHOOL, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_SCHOOL_STATIONERY, "Stationery", "EXPENSE", "school", "#818CF8", SUB_EDU_SCHOOL, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_COLLEGE, "College", "EXPENSE", "school", "#4338CA", CAT_EDUCATION, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_COLLEGE_TUITION, "Tuition Fees", "EXPENSE", "school", "#4338CA", SUB_EDU_COLLEGE, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_COLLEGE_BOOKS, "Books", "EXPENSE", "school", "#6366F1", SUB_EDU_COLLEGE, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_COLLEGE_HOSTEL, "Hostel", "EXPENSE", "school", "#4F46E5", SUB_EDU_COLLEGE, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_ONLINE, "Online Learning", "EXPENSE", "school", "#0284C7", CAT_EDUCATION, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_ONLINE_COURSES, "Courses", "EXPENSE", "school", "#0284C7", SUB_EDU_ONLINE, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_ONLINE_CERTS, "Certifications", "EXPENSE", "school", "#0EA5E9", SUB_EDU_ONLINE, nowMs, nowMs),
+        CategoryEntity(SUB_BOOKS_COURSES, "Books & Learning", "EXPENSE", "school", "#4F46E5", CAT_EDUCATION, nowMs, nowMs),
+        CategoryEntity(SUB_EDU_CAREER, "Career Development", "EXPENSE", "work", "#0D9488", CAT_EDUCATION, nowMs, nowMs),
+        // Finance & General children
+        CategoryEntity(SUB_INSURANCE, "Insurance", "EXPENSE", "loan", "#BE123C", CAT_EMI_DEBT, nowMs, nowMs),
+        CategoryEntity(SUB_BANKING_FEES, "Banking & Fees", "EXPENSE", "bank", "#9F1239", CAT_EMI_DEBT, nowMs, nowMs),
+        CategoryEntity(SUB_SAVINGS_INVEST, "Savings & SIP", "EXPENSE", "savings", "#059669", CAT_EMI_DEBT, nowMs, nowMs),
+        CategoryEntity(SUB_MISC, "Miscellaneous", "EXPENSE", "category", "#64748B", CAT_GENERAL, nowMs, nowMs),
+        // Income subcategories
+        CategoryEntity(SUB_INCOME_BONUS, "Bonus & Incentives", "INCOME", "payments", "#10B981", CAT_SALARY, nowMs, nowMs),
+        CategoryEntity(SUB_INCOME_CLIENT_PROJECTS, "Client Projects", "INCOME", "work", "#0D9488", CAT_FREELANCE, nowMs, nowMs),
+        CategoryEntity(SUB_INCOME_DIVIDENDS, "Dividends & Interest", "INCOME", "payments", "#059669", CAT_INCOME, nowMs, nowMs),
+        CategoryEntity(SUB_INCOME_RENTAL, "Rental Income", "INCOME", "home", "#0284C7", CAT_INCOME, nowMs, nowMs),
     )
 
     suspend fun ensureMinimalSetup(

@@ -201,6 +201,7 @@ fun ReviewTransactionBottomSheet(
     var spendingPurpose by remember(tx.id) { mutableStateOf(tx.spendingPurpose) }
     var note by remember(tx.id) { mutableStateOf(tx.note) }
     var labelsCsv by remember(tx.id) { mutableStateOf(tx.labelsCsv) }
+    var showCategoryPicker by remember { mutableStateOf(false) }
 
     val parsedMag = MoneyFormatter.parseDecimalToMinor(amountText, tx.currency) ?: 0L
     val typeOptions = if (tx.txType == "TRANSFER") {
@@ -426,12 +427,19 @@ fun ReviewTransactionBottomSheet(
                         StatusPill("Select a category", RoseSoft, RoseOutflow)
                     }
                 }
+                HierarchicalCategorySelectorField(
+                    label = "",
+                    selectedCategoryId = selectedCategoryId,
+                    allCategories = categories,
+                    nullOptionLabel = "Tap to browse full category tree",
+                    onClick = { showCategoryPicker = true },
+                )
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    parentCategories.forEach { cat ->
-                        val isSelected = selectedCategoryId == cat.id || activeParentId == cat.id
+                    parentCategories.take(6).forEach { cat ->
+                        val isSelected = selectedCategoryId == cat.id
                         FilterChip(
                             selected = isSelected,
                             onClick = {
@@ -444,26 +452,6 @@ fun ReviewTransactionBottomSheet(
                                 selectedLabelColor = Color.White,
                             ),
                         )
-                    }
-                }
-                if (childCategories.isNotEmpty()) {
-                    Text("Subcategory (Optional)", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MutedSlate)
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        childCategories.forEach { sub ->
-                            val isSelected = selectedCategoryId == sub.id
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { selectedCategoryId = sub.id },
-                                label = { Text(sub.name, fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = EmeraldSoft,
-                                    selectedLabelColor = EmeraldDark,
-                                ),
-                            )
-                        }
                     }
                 }
             }
@@ -522,5 +510,20 @@ fun ReviewTransactionBottomSheet(
                 }
             }
         }
+    }
+
+    if (showCategoryPicker && txType != "TRANSFER") {
+        HierarchicalCategoryPickerSheet(
+            title = "Classify Transaction",
+            categories = categories,
+            kindFilter = if (txType == "INCOME") "INCOME" else "EXPENSE",
+            selectedIds = listOfNotNull(selectedCategoryId).toSet(),
+            multiSelect = false,
+            onSelectSingle = { chosen ->
+                selectedCategoryId = chosen.id
+                activeParentId = chosen.parentCategoryId ?: chosen.id
+            },
+            onDismiss = { showCategoryPicker = false },
+        )
     }
 }

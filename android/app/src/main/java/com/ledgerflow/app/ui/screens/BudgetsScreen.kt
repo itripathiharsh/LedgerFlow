@@ -136,6 +136,7 @@ fun BudgetsScreen(
     val savingsGoals by vm.savingsGoals.collectAsState()
     val transactions by vm.allTransactions.collectAsState()
     val categories by vm.categories.collectAsState()
+    val allCategoriesLookup by vm.categoriesIncludingDeleted.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val vault by vm.vaultState.collectAsState()
 
@@ -147,15 +148,15 @@ fun BudgetsScreen(
     val monthFraction = remember(dayKey) { vm.currentMonthFraction() }
     val daysRemaining = remember(dayKey) { vm.daysRemainingInMonth() }
 
-    val progressList = remember(budgets, transactions, categories, baseCurrency, monthStart, monthFraction) {
-        AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction, categories)
+    val progressList = remember(budgets, transactions, allCategoriesLookup, baseCurrency, monthStart, monthFraction) {
+        AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction, allCategoriesLookup)
     }
 
     val totalLimit = remember(budgets, baseCurrency) {
         AnalyticsCalculator.computeTotalBudgetLimit(budgets, baseCurrency)
     }
-    val totalSpent = remember(budgets, transactions, categories, baseCurrency, monthStart) {
-        AnalyticsCalculator.computeTotalBudgetedSpent(budgets, transactions, baseCurrency, monthStart, categories)
+    val totalSpent = remember(budgets, transactions, allCategoriesLookup, baseCurrency, monthStart) {
+        AnalyticsCalculator.computeTotalBudgetedSpent(budgets, transactions, baseCurrency, monthStart, allCategoriesLookup)
     }
     val totalPlanned = remember(planned, baseCurrency, monthStart, monthEnd) {
         AnalyticsCalculator.computeMonthlyPlannedExpenseMinor(planned, baseCurrency, monthStart, monthEnd)
@@ -166,7 +167,7 @@ fun BudgetsScreen(
     val dailySafe = safeRemaining / daysRemaining.coerceAtLeast(1)
     val allBudgetsOnTrack = progressList.isNotEmpty() && progressList.all { it.onTrack }
 
-    val catMap = remember(categories) { categories.associateBy { it.id } }
+    val catMap = remember(allCategoriesLookup) { allCategoriesLookup.associateBy { it.id } }
     val accMap = remember(accounts) { accounts.associateBy { it.id } }
     val dateFmt = remember { SimpleDateFormat("MMM d", Locale.US) }
     val todayBounds = remember(dayKey) {
@@ -795,14 +796,15 @@ fun BudgetsScreen(
         var name by remember { mutableStateOf("") }
         var amount by remember { mutableStateOf("") }
         var selectedCatId by remember { mutableStateOf<String?>(null) }
+        var showBudgetCatPicker by remember { mutableStateOf(false) }
         val parsedLimit = MoneyFormatter.parseDecimalToMinor(amount, baseCurrency) ?: 0L
-        val existingCatSpent = remember(transactions, selectedCatId, baseCurrency, monthStart) {
+        val existingCatSpent = remember(transactions, selectedCatId, baseCurrency, monthStart, catMap) {
             transactions
                 .filter {
                     it.deletedAtEpochMs == null &&
                         it.txType == "EXPENSE" &&
                         it.occurredAtEpochMs >= monthStart &&
-                        (selectedCatId == null || it.categoryId == selectedCatId)
+                        (selectedCatId == null || com.ledgerflow.app.domain.CategoryTree.isDescendantOrSelf(it.categoryId, selectedCatId, catMap))
                 }
                 .sumOf { abs(FxConverter.convertMinor(it.amountMinor, it.currency, baseCurrency)) }
         }
@@ -830,16 +832,13 @@ fun BudgetsScreen(
                     if (amount.isNotBlank() && parsedLimit <= 0L) {
                         Text("Enter a positive budget limit greater than 0.", fontSize = 11.sp, color = RoseOutflow)
                     }
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(
-                            selected = selectedCatId == null,
-                            onClick = { selectedCatId = null },
-                            label = { Text("All Categories", fontSize = 11.sp) },
-                        )
-                        categories.filter { it.kind == "EXPENSE" && it.parentCategoryId == null }.forEach { c ->
-                            FilterChip(selected = selectedCatId == c.id, onClick = { selectedCatId = c.id }, label = { Text(c.name, fontSize = 11.sp) })
-                        }
-                    }
+                    com.ledgerflow.app.ui.components.HierarchicalCategorySelectorField(
+                        label = "Budget Scope (includes nested subcategories)",
+                        selectedCategoryId = selectedCatId,
+                        allCategories = categories,
+                        nullOptionLabel = "All Categories (Overall)",
+                        onClick = { showBudgetCatPicker = true },
+                    )
                     if (existingCatSpent > 0L) {
                         val scopeLabel = selectedCatId?.let { catMap[it]?.name } ?: "all expenses"
                         Text(
@@ -871,6 +870,21 @@ fun BudgetsScreen(
             },
             dismissButton = { TextButton(onClick = { showNewBudget = false }) { Text("Cancel") } },
         )
+
+        if (showBudgetCatPicker) {
+            com.ledgerflow.app.ui.components.HierarchicalCategoryPickerSheet(
+                title = "Select Budget Scope",
+                categories = categories,
+                kindFilter = "EXPENSE",
+                selectedIds = listOfNotNull(selectedCatId).toSet(),
+                multiSelect = false,
+                nullOptionLabel = "All Categories (Overall)",
+                nullSelected = selectedCatId == null,
+                onSelectNull = { selectedCatId = null },
+                onSelectSingle = { selectedCatId = it.id },
+                onDismiss = { showBudgetCatPicker = false },
+            )
+        }
     }
 
     if (showNewPlanned) {
@@ -880,6 +894,7 @@ fun BudgetsScreen(
         var cadence by remember { mutableStateOf("MONTHLY") }
         var startMode by remember { mutableStateOf("CYCLE") } // TODAY, PLUS_7D, CYCLE
         var autoPay by remember { mutableStateOf(false) }
+        var showPlannedCatPicker by remember { mutableStateOf(false) }
         var selectedAccountId by remember(accounts) {
             mutableStateOf(
                 accounts.firstOrNull { !AccountTypeCatalog.isLiability(it.accountType) }?.id
@@ -938,16 +953,13 @@ fun BudgetsScreen(
                             )
                         }
                     }
-                    Text("Category", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        filteredCats.forEach { c ->
-                            FilterChip(
-                                selected = selectedCatId == c.id,
-                                onClick = { selectedCatId = c.id },
-                                label = { Text(c.name, fontSize = 11.sp) },
-                            )
-                        }
-                    }
+                    com.ledgerflow.app.ui.components.HierarchicalCategorySelectorField(
+                        label = "Category",
+                        selectedCategoryId = selectedCatId,
+                        allCategories = categories,
+                        nullOptionLabel = "Select category",
+                        onClick = { showPlannedCatPicker = true },
+                    )
                     Text("Repeat Cadence", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("WEEKLY", "MONTHLY", "YEARLY").forEach { c ->
@@ -1010,6 +1022,18 @@ fun BudgetsScreen(
             },
             dismissButton = { TextButton(onClick = { showNewPlanned = false }) { Text("Cancel") } },
         )
+
+        if (showPlannedCatPicker) {
+            com.ledgerflow.app.ui.components.HierarchicalCategoryPickerSheet(
+                title = "Select Category",
+                categories = categories,
+                kindFilter = txType,
+                selectedIds = listOfNotNull(selectedCatId).toSet(),
+                multiSelect = false,
+                onSelectSingle = { selectedCatId = it.id },
+                onDismiss = { showPlannedCatPicker = false },
+            )
+        }
     }
 
     if (showGoalEditor) {

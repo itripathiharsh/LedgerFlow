@@ -47,8 +47,14 @@ interface CategoryDao {
     @Query("SELECT * FROM categories WHERE deletedAtEpochMs IS NULL ORDER BY name ASC")
     fun observeActive(): Flow<List<CategoryEntity>>
 
+    @Query("SELECT * FROM categories ORDER BY name ASC")
+    fun observeAllIncludingDeleted(): Flow<List<CategoryEntity>>
+
     @Query("SELECT * FROM categories WHERE deletedAtEpochMs IS NULL")
     suspend fun getAllActive(): List<CategoryEntity>
+
+    @Query("SELECT * FROM categories")
+    suspend fun getAllIncludingDeleted(): List<CategoryEntity>
 
     @Query("SELECT * FROM categories WHERE id IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<CategoryEntity>

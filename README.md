@@ -8,35 +8,37 @@ Offline-first personal finance, expense tracking, budgeting, multi-account ledge
 
 Install the latest signed release directly on Android (`minSdk 26` / Android 8.0+):
 
-- **Direct APK Download (`v1.8.0`)**: [**Download `LedgerFlow-v1.8.0.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.8.0/LedgerFlow-v1.8.0.apk)
+- **Direct APK Download (`v2.0.0`)**: [**Download `LedgerFlow-v2.0.0.apk`**](https://github.com/itripathiharsh/LedgerFlow/releases/download/v2.0.0/LedgerFlow-v2.0.0.apk)
 - **All Releases**: [github.com/itripathiharsh/LedgerFlow/releases/latest](https://github.com/itripathiharsh/LedgerFlow/releases/latest)
 - **Auto-Update Manifest**: [`update-manifest.json`](https://github.com/itripathiharsh/LedgerFlow/releases/latest/download/update-manifest.json)
 
 | Artifact | Value |
 | --- | --- |
 | Application ID | `com.ledgerflow.app` |
-| Version | `1.8.0` (`versionCode: 19`) |
+| Version | `2.0.0` (`versionCode: 20`) |
 | Distribution Flavor | `direct` (zero SMS/CallLog/Storage permissions; opt-in on-device Notification Access + Share-to-Track, Smart Paste & Voice Shopping List) |
 | Min / Target SDK | `26` / `36` |
-| APK File Size | `4,945,543` bytes (~`4.72 MiB`) |
-| APK SHA-256 | `d0876408e188e6fdb173dd7aa50c103326d2bcbc38bbcc338752b433fab8f118` |
+| APK File Size | `5,040,368` bytes (~`4.81 MiB`) |
+| APK SHA-256 | `3de423a4550a425f844a6b32189ee3a1b48791ff57b527b21277390b48fb74f3` |
 | Signing Cert SHA-256 (`v2` + `v3` RSA-2048) | `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0` |
 
 ### Verifying & Installing the APK
-1. Download [`LedgerFlow-v1.8.0.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.8.0/LedgerFlow-v1.8.0.apk) on your Android device (future updates are delivered and installed automatically in-app).
+1. Download [`LedgerFlow-v2.0.0.apk`](https://github.com/itripathiharsh/LedgerFlow/releases/download/v2.0.0/LedgerFlow-v2.0.0.apk) on your Android device (future updates are delivered and installed automatically in-app).
 2. When prompted, allow installing unknown apps for your browser or file manager.
 3. Optional checksum check before install:
    ```bash
-   sha256sum LedgerFlow-v1.8.0.apk
-   # Expected: d0876408e188e6fdb173dd7aa50c103326d2bcbc38bbcc338752b433fab8f118
+   sha256sum LedgerFlow-v2.0.0.apk
+   # Expected: 3de423a4550a425f844a6b32189ee3a1b48791ff57b527b21277390b48fb74f3
    ```
 
 ---
 
 ## Key Architecture & Features
 
-- **Offline-First Core (`android/`)**: Local-first Room SQLite ledger (`v5`) with FTS4 transaction search, WorkManager background sync & update checks, and Material 3 Compose UI starting cleanly at zero balance.
-- **Native Android Home Screen Widgets (`4×2` & `4×3`)**: Interactive Compact Action Bar (`4×2`) and Spend + Active Shopping List (`4×3`) widgets displaying Today's Spend and Liquid Balance with 1-tap transparent overlays (`+ Expense`, `+ Income`, Voice Shopping List, clipboard Smart Paste), direct home-screen checklist toggling, Flow Dark / Premium Black / Light theme sync, and automatic lock-screen balance masking.
+- **Offline-First Core (`android/`)**: Local-first Room SQLite ledger (`v6`) with FTS4 transaction search, WorkManager background sync & update checks, and Material 3 Compose UI starting cleanly at zero balance.
+- **Structured Shopping Lists & Expense Conversion**: Supports structured items (`Item Name`, numeric `Quantity` + grouped `Unit` selector across Weight/Volume/Count/Packaging/Length/Other + custom units, and standalone `Estimated Price`), live completion totals, full CRUD, and list-preserving duplicate-safe **Convert Basket to Expense**.
+- **Hierarchical Multi-Level Categories**: Unlimited-depth recursive Expense & Income trees, clean `New Category` / `Edit Category` forms with cycle & sibling-duplicate validation, deletion safeguard sheets (move children or delete subtree while reassigning or preserving historical references), and a unified `HierarchicalCategoryPickerSheet` integrated across transactions, budgets, auto-rules, shopping conversions, analytics drill-down, and widget quick-entry overlays.
+- **4 Native Android Home Screen Widgets (`4×2`, `4×3`, `2×2`, `4×1`)**: Finance (`4×2`), Interactive Shopping List (`4×3` with per-widget list switcher, progress bar, and direct item checkboxes), Compact Balance Tile (`2×2`), and Quick Expense Capsule (`4×1`), synced live with Room, Flow Dark / Premium Black / Light themes, and lock-screen privacy redaction.
 - **Privacy-First Payment Detection & Pending Review**: Opt-in local `NotificationListenerService` for supported apps (Google Pay India, PhonePe, Paytm, BHIM, Google Wallet, major banks) plus **Share-to-Track** (`ACTION_SEND`) and **Smart Paste** fallbacks. Detected payments save strictly as `PENDING_REVIEW` without guessing category or spending purpose, handle duplicate/updated/failed notifications and `Unassigned Account` states atomically, and keep raw notification metadata strictly on-device.
 - **Security & Encrypted Storage**: AES-256-GCM `VaultStore` (`VaultSecurity.kt`), live ECB FX caching (`api.frankfurter.dev`), strict release AdMob gating (`OnlineAdBanner.kt`), and zero embedded backend service-role secrets.
 - **Verified In-App Auto-Updater**: Checks on launch and every 12h via WorkManager (`UpdateCheckWorker.kt`), modal dialog (**Update Now** / **Later** in `UpdateDialog.kt`), SHA-256 + signing certificate pinning verification (`AppUpdateManager.kt`, `AppUpdatePolicy.kt`), and `PackageInstaller` session restart flow (`UpdateInstallReceivers.kt`).

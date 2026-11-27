@@ -90,6 +90,7 @@ fun RecordsScreen(
     val pendingReview by vm.pendingReviewTransactions.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val categories by vm.categories.collectAsState()
+    val allCategoriesLookup by vm.categoriesIncludingDeleted.collectAsState()
     val magicRules by vm.magicRules.collectAsState()
     val vault by vm.vaultState.collectAsState()
     val query by vm.searchQuery.collectAsState()
@@ -98,7 +99,7 @@ fun RecordsScreen(
     val baseCurrency = vault.baseCurrency
     val masked = vault.hideBalances
     val accMap = remember(accounts) { accounts.associateBy { it.id } }
-    val catMap = remember(categories) { categories.associateBy { it.id } }
+    val catMap = remember(allCategoriesLookup) { allCategoriesLookup.associateBy { it.id } }
 
     var editingTx by remember { mutableStateOf<TransactionEntity?>(null) }
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
@@ -402,6 +403,7 @@ fun RecordsScreen(
         var newPattern by remember { mutableStateOf("") }
         var newLabel by remember { mutableStateOf("") }
         var selectedCatId by remember { mutableStateOf(categories.firstOrNull()?.id) }
+        var showRuleCatPicker by remember { mutableStateOf(false) }
 
         AlertDialog(
             onDismissRequest = { showRulesDialog = false },
@@ -419,8 +421,11 @@ fun RecordsScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
+                                    val catTrail = r.targetCategoryId?.let {
+                                        com.ledgerflow.app.domain.CategoryTree.breadcrumbPath(it, catMap).ifBlank { catMap[it]?.name }
+                                    } ?: "Rule"
                                     Text(
-                                        text = "\"${r.matchPattern}\" → ${catMap[r.targetCategoryId]?.name ?: "Rule"}",
+                                        text = "\"${r.matchPattern}\" → $catTrail",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = SlateInk,
@@ -449,15 +454,13 @@ fun RecordsScreen(
                         label = { Text("Optional tag") },
                         singleLine = true,
                     )
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        categories.take(6).forEach { c ->
-                            FilterChip(
-                                selected = selectedCatId == c.id,
-                                onClick = { selectedCatId = c.id },
-                                label = { Text(c.name, fontSize = 11.sp) },
-                            )
-                        }
-                    }
+                    com.ledgerflow.app.ui.components.HierarchicalCategorySelectorField(
+                        label = "Target Category",
+                        selectedCategoryId = selectedCatId,
+                        allCategories = categories,
+                        nullOptionLabel = "Select target category",
+                        onClick = { showRuleCatPicker = true },
+                    )
                 }
             },
             confirmButton = {
@@ -473,6 +476,18 @@ fun RecordsScreen(
                 TextButton(onClick = { showRulesDialog = false }) { Text("Close") }
             },
         )
+
+        if (showRuleCatPicker) {
+            com.ledgerflow.app.ui.components.HierarchicalCategoryPickerSheet(
+                title = "Rule Target Category",
+                categories = categories,
+                kindFilter = null,
+                selectedIds = listOfNotNull(selectedCatId).toSet(),
+                multiSelect = false,
+                onSelectSingle = { selectedCatId = it.id },
+                onDismiss = { showRuleCatPicker = false },
+            )
+        }
     }
 }
 

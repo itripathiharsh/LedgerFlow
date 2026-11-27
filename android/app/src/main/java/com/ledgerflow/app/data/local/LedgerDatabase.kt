@@ -9,9 +9,13 @@ import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
+import com.ledgerflow.app.domain.CategoryTree
 import com.ledgerflow.app.domain.FxConverter
+import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.ParsedShoppingItem
+import com.ledgerflow.app.domain.ShoppingUnitCatalog
 import com.ledgerflow.app.domain.VoiceShoppingParser
+import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
 
@@ -30,7 +34,7 @@ import kotlin.math.abs
         ShoppingListEntity::class,
         ShoppingItemEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class LedgerDatabase : RoomDatabase() {
@@ -618,9 +622,412 @@ abstract class LedgerDatabase : RoomDatabase() {
         }
     }
 
+    enum class ChildDeleteStrategy { MOVE_CHILDREN_TO_PARENT_OR_TARGET, DELETE_CHILDREN_SUBTREE }
+
+    enum class UsageDeleteStrategy { REASSIGN_TO_TARGET, PRESERVE_HISTORICAL_REFERENCE }
+
+    data class CategoryDeletionImpact(
+        val category: CategoryEntity,
+        val directChildrenCount: Int,
+        val totalDescendantsCount: Int,
+        val linkedTransactionsCount: Int,
+        val linkedBudgetsCount: Int,
+        val linkedPlannedCount: Int,
+        val linkedMagicRulesCount: Int,
+        val linkedShoppingListsCount: Int,
+    ) {
+        val hasChildren: Boolean get() = totalDescendantsCount > 0
+        val hasLinkedUsages: Boolean
+            get() = (linkedTransactionsCount + linkedBudgetsCount + linkedPlannedCount +
+                linkedMagicRulesCount + linkedShoppingListsCount) > 0
+    }
+
+    sealed class CategoryMutationResult {
+        data class Success(val category: CategoryEntity) : CategoryMutationResult()
+        data class Error(val message: String) : CategoryMutationResult()
+    }
+
+    data class CategoryDeleteResult(
+        val deletedCount: Int,
+        val movedChildrenCount: Int,
+        val reassignedUsagesCount: Int,
+    )
+
+    private fun parseCsvIds(csv: String): List<String> =
+        csv.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
+    suspend fun inspectCategoryDeletionImpact(categoryId: String): CategoryDeletionImpact? {
+        val allCats = categoryDao().getAllActive()
+        val target = allCats.firstOrNull { it.id == categoryId } ?: return null
+        val descendantIds = CategoryTree.collectDescendantIds(categoryId, allCats, includeSelf = false)
+        val subtreeIds = descendantIds + categoryId
+        val directChildrenCount = allCats.count { it.parentCategoryId == categoryId }
+
+        val linkedTxCount = transactionDao().getAllActive().count { tx ->
+            tx.categoryId in subtreeIds || parseCsvIds(tx.categoryIdsCsv).any { it in subtreeIds }
+        }
+        val linkedBudgetsCount = budgetDao().getAllActive().count { it.categoryId in subtreeIds }
+        val linkedPlannedCount = plannedPaymentDao().getAllActive().count { it.categoryId in subtreeIds }
+        val linkedRulesCount = magicRuleDao().getAllActive().count { it.targetCategoryId in subtreeIds }
+        val linkedListsCount = shoppingListDao().getAllActive().count { it.defaultCategoryId in subtreeIds }
+
+        return CategoryDeletionImpact(
+            category = target,
+            directChildrenCount = directChildrenCount,
+            totalDescendantsCount = descendantIds.size,
+            linkedTransactionsCount = linkedTxCount,
+            linkedBudgetsCount = linkedBudgetsCount,
+            linkedPlannedCount = linkedPlannedCount,
+            linkedMagicRulesCount = linkedRulesCount,
+            linkedShoppingListsCount = linkedListsCount,
+        )
+    }
+
+    suspend fun upsertCategorySafeAtomic(
+        categoryId: String?,
+        name: String,
+        kind: String,
+        parentCategoryId: String?,
+        iconKey: String,
+        colorHex: String,
+        description: String = "",
+        nowMs: Long = System.currentTimeMillis(),
+    ): CategoryMutationResult {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) return CategoryMutationResult.Error("Category name is required")
+        val cleanIcon = iconKey.trim().ifBlank { "category" }
+        val cleanColor = colorHex.trim().ifBlank { "#059669" }
+        val cleanDescription = description.trim()
+
+        return withTransaction {
+            val allActive = categoryDao().getAllActive()
+            val existing = if (categoryId != null) {
+                allActive.firstOrNull { it.id == categoryId }
+                    ?: return@withTransaction CategoryMutationResult.Error("Category no longer exists")
+            } else {
+                null
+            }
+
+            val resolvedParent = if (!parentCategoryId.isNullOrBlank()) {
+                val p = allActive.firstOrNull { it.id == parentCategoryId }
+                    ?: return@withTransaction CategoryMutationResult.Error("Selected parent category was not found")
+                if (categoryId != null && CategoryTree.wouldCreateCycle(categoryId, p.id, allActive)) {
+                    return@withTransaction CategoryMutationResult.Error(
+                        "Cannot move a category inside itself or one of its subcategories"
+                    )
+                }
+                p
+            } else {
+                null
+            }
+
+            val resolvedKind = resolvedParent?.kind
+                ?: if (kind.trim().equals("INCOME", ignoreCase = true)) "INCOME" else "EXPENSE"
+
+            if (CategoryTree.hasDuplicateSibling(cleanName, resolvedKind, resolvedParent?.id, categoryId, allActive)) {
+                val scopeLabel = resolvedParent?.let { "under \"${it.name}\"" } ?: "at the top level"
+                return@withTransaction CategoryMutationResult.Error(
+                    "\"$cleanName\" already exists $scopeLabel"
+                )
+            }
+
+            val saved = if (existing == null) {
+                CategoryEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = cleanName,
+                    kind = resolvedKind,
+                    iconKey = cleanIcon,
+                    colorHex = cleanColor,
+                    parentCategoryId = resolvedParent?.id,
+                    createdAtEpochMs = nowMs,
+                    updatedAtEpochMs = nowMs,
+                    pendingSync = true,
+                    description = cleanDescription,
+                )
+            } else {
+                existing.copy(
+                    name = cleanName,
+                    kind = resolvedKind,
+                    iconKey = cleanIcon,
+                    colorHex = cleanColor,
+                    parentCategoryId = resolvedParent?.id,
+                    updatedAtEpochMs = nowMs,
+                    pendingSync = true,
+                    description = cleanDescription,
+                )
+            }
+
+            val toUpsert = mutableListOf(saved)
+            if (existing != null && saved.kind != existing.kind) {
+                val descendantIds = CategoryTree.collectDescendantIds(existing.id, allActive, includeSelf = false)
+                allActive.filter { it.id in descendantIds && it.kind != saved.kind }.forEach { child ->
+                    toUpsert += child.copy(kind = saved.kind, updatedAtEpochMs = nowMs, pendingSync = true)
+                }
+            }
+            categoryDao().upsertAll(toUpsert)
+            CategoryMutationResult.Success(saved)
+        }
+    }
+
+    suspend fun deleteCategoryWithSafeguardsAtomic(
+        categoryId: String,
+        childStrategy: ChildDeleteStrategy = ChildDeleteStrategy.MOVE_CHILDREN_TO_PARENT_OR_TARGET,
+        moveChildrenTargetParentId: String? = null,
+        usageStrategy: UsageDeleteStrategy = UsageDeleteStrategy.PRESERVE_HISTORICAL_REFERENCE,
+        reassignCategoryId: String? = null,
+        nowMs: Long = System.currentTimeMillis(),
+    ): CategoryDeleteResult = withTransaction {
+        val allCats = categoryDao().getAllActive()
+        val target = allCats.firstOrNull { it.id == categoryId }
+            ?: return@withTransaction CategoryDeleteResult(0, 0, 0)
+        val descendantIds = CategoryTree.collectDescendantIds(categoryId, allCats, includeSelf = false)
+        val deletedIds: Set<String> = if (childStrategy == ChildDeleteStrategy.DELETE_CHILDREN_SUBTREE) {
+            descendantIds + categoryId
+        } else {
+            setOf(categoryId)
+        }
+
+        val catUpdates = mutableListOf<CategoryEntity>()
+        allCats.filter { it.id in deletedIds }.forEach { cat ->
+            catUpdates += cat.copy(deletedAtEpochMs = nowMs, updatedAtEpochMs = nowMs, pendingSync = true)
+        }
+
+        var movedChildrenCount = 0
+        if (childStrategy == ChildDeleteStrategy.MOVE_CHILDREN_TO_PARENT_OR_TARGET) {
+            val safeTargetParent = moveChildrenTargetParentId
+                ?.takeIf { it !in deletedIds && it !in descendantIds }
+                ?.let { pid -> allCats.firstOrNull { it.id == pid } }
+            val newParentId = safeTargetParent?.id
+                ?: if (moveChildrenTargetParentId == null) target.parentCategoryId?.takeIf { it !in deletedIds } else null
+            val targetKind = safeTargetParent?.kind
+                ?: newParentId?.let { pid -> allCats.firstOrNull { it.id == pid }?.kind }
+            val directKids = allCats.filter { it.parentCategoryId == categoryId }
+            directKids.forEach { kid ->
+                movedChildrenCount++
+                val nextKind = targetKind ?: kid.kind
+                catUpdates += kid.copy(
+                    parentCategoryId = newParentId,
+                    kind = nextKind,
+                    updatedAtEpochMs = nowMs,
+                    pendingSync = true,
+                )
+                if (nextKind != kid.kind) {
+                    val kidSubtree = CategoryTree.collectDescendantIds(kid.id, allCats, includeSelf = false)
+                    allCats.filter { it.id in kidSubtree && it.kind != nextKind }.forEach { sub ->
+                        catUpdates += sub.copy(kind = nextKind, updatedAtEpochMs = nowMs, pendingSync = true)
+                    }
+                }
+            }
+        }
+
+        if (catUpdates.isNotEmpty()) {
+            categoryDao().upsertAll(catUpdates.distinctBy { it.id })
+        }
+
+        val validReplacementId = reassignCategoryId
+            ?.takeIf { it !in deletedIds }
+            ?.let { rid -> allCats.firstOrNull { it.id == rid }?.id }
+
+        var reassignedUsagesCount = 0
+        if (usageStrategy == UsageDeleteStrategy.REASSIGN_TO_TARGET && validReplacementId != null) {
+            val txUpdates = transactionDao().getAllActive().mapNotNull { tx ->
+                val oldCsv = parseCsvIds(tx.categoryIdsCsv)
+                val touchesPrimary = tx.categoryId in deletedIds
+                val touchesCsv = oldCsv.any { it in deletedIds }
+                if (!touchesPrimary && !touchesCsv) {
+                    null
+                } else {
+                    reassignedUsagesCount++
+                    val newPrimary = if (touchesPrimary) validReplacementId else tx.categoryId
+                    val mappedCsv = oldCsv
+                        .map { id -> if (id in deletedIds) validReplacementId else id }
+                        .distinct()
+                        .ifEmpty { listOfNotNull(newPrimary) }
+                    tx.copy(
+                        categoryId = newPrimary,
+                        categoryIdsCsv = mappedCsv.joinToString(","),
+                        updatedAtEpochMs = nowMs,
+                        pendingSync = true,
+                    )
+                }
+            }
+            if (txUpdates.isNotEmpty()) transactionDao().upsertAll(txUpdates)
+
+            val budgetUpdates = budgetDao().getAllActive()
+                .filter { it.categoryId in deletedIds }
+                .map {
+                    reassignedUsagesCount++
+                    it.copy(categoryId = validReplacementId, updatedAtEpochMs = nowMs, pendingSync = true)
+                }
+            if (budgetUpdates.isNotEmpty()) budgetDao().upsertAll(budgetUpdates)
+
+            val plannedUpdates = plannedPaymentDao().getAllActive()
+                .filter { it.categoryId in deletedIds }
+                .map {
+                    reassignedUsagesCount++
+                    it.copy(categoryId = validReplacementId, updatedAtEpochMs = nowMs, pendingSync = true)
+                }
+            if (plannedUpdates.isNotEmpty()) plannedPaymentDao().upsertAll(plannedUpdates)
+
+            val ruleUpdates = magicRuleDao().getAllActive()
+                .filter { it.targetCategoryId in deletedIds }
+                .map {
+                    reassignedUsagesCount++
+                    it.copy(targetCategoryId = validReplacementId, updatedAtEpochMs = nowMs, pendingSync = true)
+                }
+            if (ruleUpdates.isNotEmpty()) magicRuleDao().upsertAll(ruleUpdates)
+
+            val listUpdates = shoppingListDao().getAllActive()
+                .filter { it.defaultCategoryId in deletedIds }
+                .map {
+                    reassignedUsagesCount++
+                    it.copy(defaultCategoryId = validReplacementId, updatedAtEpochMs = nowMs, pendingSync = true)
+                }
+            if (listUpdates.isNotEmpty()) shoppingListDao().upsertAll(listUpdates)
+        }
+
+        CategoryDeleteResult(
+            deletedCount = deletedIds.size,
+            movedChildrenCount = movedChildrenCount,
+            reassignedUsagesCount = reassignedUsagesCount,
+        )
+    }
+
+    enum class ConvertShoppingOutcomeStatus {
+        SUCCESS,
+        INVALID_INPUT,
+        MISSING_ACCOUNT,
+        NO_MATCHING_ITEMS,
+        DUPLICATE_ALREADY_CONVERTED,
+    }
+
+    data class ConvertShoppingExpenseResult(
+        val status: ConvertShoppingOutcomeStatus,
+        val transactionId: String? = null,
+        val convertedItemCount: Int = 0,
+    ) {
+        val succeeded: Boolean get() = status == ConvertShoppingOutcomeStatus.SUCCESS
+    }
+
+    suspend fun addShoppingItemAtomic(
+        listId: String,
+        name: String,
+        quantityValue: Double?,
+        quantityUnit: String,
+        estimatedPriceMinor: Long,
+        legacyQuantityLabel: String = "",
+        nowMs: Long = System.currentTimeMillis(),
+    ): ShoppingItemEntity? {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) return null
+        val cleanPrice = estimatedPriceMinor.coerceAtLeast(0L)
+        val parsedFallback = if (quantityValue == null && quantityUnit.isBlank() && legacyQuantityLabel.isNotBlank()) {
+            ShoppingUnitCatalog.parseLegacyLabel(legacyQuantityLabel)
+        } else {
+            null
+        }
+        val finalQty = (quantityValue ?: parsedFallback?.quantityValue)?.takeIf { it.isFinite() && it > 0.0 }
+        val finalUnit = ShoppingUnitCatalog.normalizeUnit(quantityUnit.ifBlank { parsedFallback?.quantityUnit.orEmpty() })
+        val finalLabel = ShoppingUnitCatalog.formatQuantityLabel(finalQty, finalUnit, legacyQuantityLabel)
+
+        return withTransaction {
+            val parentList = shoppingListDao().getById(listId)?.takeIf { it.deletedAtEpochMs == null }
+                ?: return@withTransaction null
+            val item = ShoppingItemEntity(
+                id = UUID.randomUUID().toString(),
+                listId = parentList.id,
+                name = cleanName,
+                estimatedPriceMinor = cleanPrice,
+                checked = false,
+                createdAtEpochMs = nowMs,
+                updatedAtEpochMs = nowMs,
+                pendingSync = true,
+                quantityLabel = finalLabel,
+                quantityValue = finalQty,
+                quantityUnit = finalUnit,
+            )
+            shoppingItemDao().upsert(item)
+            shoppingListDao().upsert(parentList.copy(updatedAtEpochMs = nowMs, pendingSync = true))
+            item
+        }
+    }
+
+    suspend fun updateShoppingItemAtomic(
+        itemId: String,
+        name: String,
+        quantityValue: Double?,
+        quantityUnit: String,
+        estimatedPriceMinor: Long,
+        nowMs: Long = System.currentTimeMillis(),
+    ): ShoppingItemEntity? {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) return null
+        val cleanPrice = estimatedPriceMinor.coerceAtLeast(0L)
+        val cleanQty = quantityValue?.takeIf { it.isFinite() && it > 0.0 }
+        val cleanUnit = ShoppingUnitCatalog.normalizeUnit(quantityUnit)
+        val cleanLabel = ShoppingUnitCatalog.formatQuantityLabel(cleanQty, cleanUnit)
+
+        return withTransaction {
+            val existing = shoppingItemDao().getById(itemId)?.takeIf { it.deletedAtEpochMs == null }
+                ?: return@withTransaction null
+            val updated = existing.copy(
+                name = cleanName,
+                quantityValue = cleanQty,
+                quantityUnit = cleanUnit,
+                quantityLabel = cleanLabel,
+                estimatedPriceMinor = cleanPrice,
+                updatedAtEpochMs = nowMs,
+                pendingSync = true,
+            )
+            shoppingItemDao().upsert(updated)
+            shoppingListDao().getById(existing.listId)?.takeIf { it.deletedAtEpochMs == null }?.let { list ->
+                shoppingListDao().upsert(list.copy(updatedAtEpochMs = nowMs, pendingSync = true))
+            }
+            updated
+        }
+    }
+
+    suspend fun clearCompletedShoppingItemsAtomic(
+        listId: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Int = withTransaction {
+        val checked = shoppingItemDao().getActiveForList(listId).filter { it.checked }
+        if (checked.isEmpty()) return@withTransaction 0
+        shoppingItemDao().upsertAll(
+            checked.map { it.copy(deletedAtEpochMs = nowMs, updatedAtEpochMs = nowMs, pendingSync = true) }
+        )
+        shoppingListDao().getById(listId)?.takeIf { it.deletedAtEpochMs == null }?.let { list ->
+            shoppingListDao().upsert(list.copy(updatedAtEpochMs = nowMs, pendingSync = true))
+        }
+        checked.size
+    }
+
+    suspend fun clearAllShoppingItemsAtomic(
+        listId: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Int = withTransaction {
+        val items = shoppingItemDao().getActiveForList(listId)
+        if (items.isNotEmpty()) {
+            shoppingItemDao().upsertAll(
+                items.map { it.copy(deletedAtEpochMs = nowMs, updatedAtEpochMs = nowMs, pendingSync = true) }
+            )
+        }
+        shoppingListDao().getById(listId)?.takeIf { it.deletedAtEpochMs == null }?.let { list ->
+            shoppingListDao().upsert(
+                list.copy(
+                    lastConvertedTxId = null,
+                    lastConvertedSignature = "",
+                    updatedAtEpochMs = nowMs,
+                    pendingSync = true,
+                )
+            )
+        }
+        items.size
+    }
+
     /**
-     * Converts checked shopping list items into a real EXPENSE transaction and clears those converted
-     * items from the active checklist inside a single SQLite transaction.
+     * Converts selected/completed shopping list items into an EXPENSE transaction while preserving
+     * the original shopping list by default and guarding against duplicate conversions.
      */
     suspend fun convertShoppingItemsToExpenseAtomic(
         listId: String,
@@ -630,29 +1037,65 @@ abstract class LedgerDatabase : RoomDatabase() {
         totalMinor: Long,
         currency: String,
         merchantTitle: String,
-        removeConvertedItems: Boolean = true,
+        removeConvertedItems: Boolean = false,
+        allowDuplicate: Boolean = false,
         nowMs: Long = System.currentTimeMillis(),
-    ): Boolean {
+    ): ConvertShoppingExpenseResult {
         val cleanMag = abs(totalMinor)
-        if (cleanMag <= 0L || itemIds.isEmpty()) return false
+        if (cleanMag <= 0L || itemIds.isEmpty()) {
+            return ConvertShoppingExpenseResult(ConvertShoppingOutcomeStatus.INVALID_INPUT)
+        }
         return withTransaction {
             val account = accountDao().getById(accountId)?.takeIf { it.deletedAtEpochMs == null }
-                ?: return@withTransaction false
+                ?: return@withTransaction ConvertShoppingExpenseResult(ConvertShoppingOutcomeStatus.MISSING_ACCOUNT)
             val listItems = shoppingItemDao().getActiveForList(listId).filter { it.id in itemIds }
-            if (listItems.isEmpty()) return@withTransaction false
+            if (listItems.isEmpty()) {
+                return@withTransaction ConvertShoppingExpenseResult(ConvertShoppingOutcomeStatus.NO_MATCHING_ITEMS)
+            }
+
+            val signature = buildString {
+                append(listId).append('|')
+                append(cleanMag).append('|')
+                append(currency.trim().uppercase(Locale.US)).append('|')
+                append(categoryId.orEmpty()).append('|')
+                listItems.sortedBy { it.id }.forEach { item ->
+                    val qLabel = ShoppingUnitCatalog.formatQuantityLabel(item.quantityValue, item.quantityUnit, item.quantityLabel)
+                    append(item.id).append(':')
+                        .append(item.name.trim()).append(':')
+                        .append(qLabel).append(':')
+                        .append(item.estimatedPriceMinor).append(';')
+                }
+            }
+
+            val parentList = shoppingListDao().getById(listId)?.takeIf { it.deletedAtEpochMs == null }
+            if (!allowDuplicate && parentList != null &&
+                parentList.lastConvertedSignature == signature &&
+                !parentList.lastConvertedTxId.isNullOrBlank()
+            ) {
+                val existingTx = transactionDao().getById(parentList.lastConvertedTxId)
+                    ?.takeIf { it.deletedAtEpochMs == null }
+                if (existingTx != null) {
+                    return@withTransaction ConvertShoppingExpenseResult(
+                        status = ConvertShoppingOutcomeStatus.DUPLICATE_ALREADY_CONVERTED,
+                        transactionId = existingTx.id,
+                    )
+                }
+            }
 
             val itemizedNote = listItems.joinToString(", ") { item ->
-                val display = ParsedShoppingItem.formatDisplay(item.name, item.quantityLabel)
+                val qtyLabel = ShoppingUnitCatalog.formatQuantityLabel(item.quantityValue, item.quantityUnit, item.quantityLabel)
+                val display = ParsedShoppingItem.formatDisplay(item.name, qtyLabel)
                 if (item.estimatedPriceMinor > 0L) {
-                    "$display (${com.ledgerflow.app.domain.MoneyFormatter.formatMinor(item.estimatedPriceMinor, currency)})"
+                    "$display (${MoneyFormatter.formatMinor(item.estimatedPriceMinor, currency)})"
                 } else {
                     display
                 }
             }.take(300)
 
+            val txId = UUID.randomUUID().toString()
             recordTransactionAtomic(
                 TransactionEntity(
-                    id = UUID.randomUUID().toString(),
+                    id = txId,
                     accountId = account.id,
                     categoryId = categoryId,
                     categoryIdsCsv = categoryId.orEmpty(),
@@ -669,13 +1112,28 @@ abstract class LedgerDatabase : RoomDatabase() {
                 )
             )
 
+            parentList?.let { list ->
+                shoppingListDao().upsert(
+                    list.copy(
+                        lastConvertedTxId = txId,
+                        lastConvertedSignature = signature,
+                        updatedAtEpochMs = nowMs,
+                        pendingSync = true,
+                    )
+                )
+            }
+
             if (removeConvertedItems) {
                 val cleared = listItems.map {
                     it.copy(deletedAtEpochMs = nowMs, updatedAtEpochMs = nowMs, pendingSync = true)
                 }
                 shoppingItemDao().upsertAll(cleared)
             }
-            true
+            ConvertShoppingExpenseResult(
+                status = ConvertShoppingOutcomeStatus.SUCCESS,
+                transactionId = txId,
+                convertedItemCount = listItems.size,
+            )
         }
     }
 
@@ -749,11 +1207,14 @@ abstract class LedgerDatabase : RoomDatabase() {
                     return@forEachIndexed
                 }
                 val itemTs = nowMs + index.toLong()
+                val parsedQty = ShoppingUnitCatalog.parseLegacyLabel(parsed.quantityLabel)
                 toInsert += ShoppingItemEntity(
                     id = UUID.randomUUID().toString(),
                     listId = targetList.id,
                     name = cleanName,
-                    quantityLabel = parsed.quantityLabel.trim(),
+                    quantityLabel = parsedQty.label,
+                    quantityValue = parsedQty.quantityValue,
+                    quantityUnit = parsedQty.quantityUnit,
                     estimatedPriceMinor = 0L,
                     checked = false,
                     createdAtEpochMs = itemTs,
@@ -878,6 +1339,17 @@ abstract class LedgerDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE categories ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_categories_parentCategoryId` ON `categories` (`parentCategoryId`)")
+                db.execSQL("ALTER TABLE shopping_lists ADD COLUMN lastConvertedTxId TEXT")
+                db.execSQL("ALTER TABLE shopping_lists ADD COLUMN lastConvertedSignature TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE shopping_items ADD COLUMN quantityValue REAL")
+                db.execSQL("ALTER TABLE shopping_items ADD COLUMN quantityUnit TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long =
             AnalyticsCalculator.advanceDueDate(currentDueMs, cadence)
 
@@ -891,7 +1363,7 @@ abstract class LedgerDatabase : RoomDatabase() {
                     LedgerDatabase::class.java,
                     "ledgerflow_vault.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
                     .also { INSTANCE = it }

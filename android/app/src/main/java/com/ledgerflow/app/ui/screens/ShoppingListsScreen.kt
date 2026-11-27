@@ -4,17 +4,21 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,21 +28,28 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -67,13 +78,23 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ledgerflow.app.data.local.AccountEntity
+import com.ledgerflow.app.data.local.CategoryEntity
+import com.ledgerflow.app.data.local.ShoppingItemEntity
+import com.ledgerflow.app.data.local.ShoppingListEntity
 import com.ledgerflow.app.domain.AnalyticsCalculator
+import com.ledgerflow.app.domain.CategoryTree
 import com.ledgerflow.app.domain.MoneyFormatter
-import com.ledgerflow.app.domain.ParsedShoppingItem
+import com.ledgerflow.app.domain.ShoppingUnitCatalog
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
+import com.ledgerflow.app.ui.components.HierarchicalCategoryPickerSheet
+import com.ledgerflow.app.ui.components.HierarchicalCategorySelectorField
+import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.theme.AlabasterBg
+import com.ledgerflow.app.ui.theme.AmberSoft
+import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
@@ -91,6 +112,8 @@ import java.util.Locale
 fun ShoppingListsScreen(
     vm: LedgerViewModel,
     addTrigger: Int = 0,
+    initialListId: String? = null,
+    onConsumeInitialList: () -> Unit = {},
     onOpenDrawer: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
 ) {
@@ -98,20 +121,34 @@ fun ShoppingListsScreen(
     val allItems by vm.shoppingItems.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val categories by vm.categories.collectAsState()
+    val allCategoriesLookup by vm.categoriesIncludingDeleted.collectAsState()
     val vault by vm.vaultState.collectAsState()
 
     val baseCurrency = vault.baseCurrency
     val masked = vault.hideBalances
-    val catMap = remember(categories) { categories.associateBy { it.id } }
+    val catMap = remember(allCategoriesLookup) { allCategoriesLookup.associateBy { it.id } }
 
     var activeListId by remember { mutableStateOf<String?>(null) }
     var showNewListSheet by remember { mutableStateOf(false) }
     var showAddItemSheet by remember { mutableStateOf(false) }
+    var editingItem by remember { mutableStateOf<ShoppingItemEntity?>(null) }
+    var convertScopeCheckedOnly by remember { mutableStateOf(true) }
     var showConvertSheet by remember { mutableStateOf(false) }
     var checkedExpanded by remember { mutableStateOf(true) }
+    var listPendingDelete by remember { mutableStateOf<ShoppingListEntity?>(null) }
+    var showClearChecklistConfirm by remember { mutableStateOf(false) }
 
     val activeList = remember(lists, activeListId) {
         lists.firstOrNull { it.id == activeListId }
+    }
+
+    LaunchedEffect(initialListId, lists) {
+        if (!initialListId.isNullOrBlank()) {
+            if (lists.any { it.id == initialListId }) {
+                activeListId = initialListId
+            }
+            onConsumeInitialList()
+        }
     }
 
     LaunchedEffect(addTrigger) {
@@ -135,7 +172,7 @@ fun ShoppingListsScreen(
                 .fillMaxSize()
                 .background(AlabasterBg),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 92.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
                 Row(
@@ -152,8 +189,26 @@ fun ShoppingListsScreen(
                         }
                         Text("Shopping Lists", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (lists.isNotEmpty()) {
+                            Surface(
+                                onClick = { showNewListSheet = true },
+                                shape = RoundedCornerShape(999.dp),
+                                color = EmeraldPrimary,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(Icons.Outlined.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                    Text("New List", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
+                        }
                     }
                 }
             }
@@ -175,7 +230,7 @@ fun ShoppingListsScreen(
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                text = "Create reusable checklists with estimated prices and turn your checked basket into an expense in one tap.",
+                                text = "Track items with structured quantities, units, and estimated total prices, then log completed items as an expense without losing your checklist.",
                                 fontSize = 13.sp,
                                 color = MutedSlate,
                             )
@@ -185,6 +240,8 @@ fun ShoppingListsScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                                 shape = RoundedCornerShape(12.dp),
                             ) {
+                                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text("Create Checklist", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
@@ -199,53 +256,85 @@ fun ShoppingListsScreen(
                         (summary.checkedItems.toFloat() / summary.totalItems.toFloat()).coerceIn(0f, 1f)
                     } else 0f
                     val defaultCat = list.defaultCategoryId?.let { catMap[it] }
+                    val categoryTrail = remember(list.defaultCategoryId, catMap) {
+                        list.defaultCategoryId?.let { CategoryTree.breadcrumbPath(it, catMap) }.orEmpty()
+                    }
+                    val totalEstText = if (masked) "••••" else MoneyFormatter.formatMinor(summary.estimatedTotalMinor, baseCurrency)
 
-                    CleanCard(
-                        padding = 16.dp,
-                        onClick = { activeListId = list.id },
-                    ) {
+                    CleanCard(padding = 14.dp, onClick = { activeListId = list.id }) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.weight(1f),
                             ) {
                                 CategoryIconBadge(
                                     iconKey = defaultCat?.iconKey ?: "checklist",
                                     tintHex = defaultCat?.colorHex ?: "#059669",
-                                    size = 40.dp,
+                                    size = 38.dp,
                                 )
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Text(
+                                            text = list.title,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = SlateInk,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                        )
+                                        if (!list.lastConvertedTxId.isNullOrBlank()) {
+                                            StatusPill("Logged", EmeraldSoft, EmeraldDark)
+                                        }
+                                    }
                                     Text(
-                                        text = list.title,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = SlateInk,
+                                        text = if (categoryTrail.isNotBlank()) categoryTrail else "${summary.totalItems} item(s)",
+                                        fontSize = 11.sp,
+                                        color = MutedSlate,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    val sub = listOfNotNull(
-                                        "${summary.checkedItems} / ${summary.totalItems} items",
-                                        defaultCat?.name,
-                                    ).joinToString(" • ")
-                                    Text(sub, fontSize = 12.sp, color = MutedSlate)
                                 }
                             }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = MoneyFormatter.formatMinor(summary.estimatedTotalMinor, baseCurrency, masked = masked),
-                                    style = TabularStyle,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = SlateInk,
-                                )
-                                Text("Est. total", fontSize = 10.sp, color = MutedSlate)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = totalEstText,
+                                        style = TabularStyle,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = SlateInk,
+                                    )
+                                    Text(
+                                        text = "${summary.checkedItems}/${summary.totalItems} done",
+                                        style = TabularStyle,
+                                        fontSize = 11.sp,
+                                        color = EmeraldPrimary,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { listPendingDelete = list },
+                                    modifier = Modifier.size(34.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.DeleteOutline,
+                                        contentDescription = "Delete checklist",
+                                        tint = MutedSlate,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
                             }
                         }
+
                         if (summary.totalItems > 0) {
                             Spacer(Modifier.height(10.dp))
                             LinearProgressIndicator(
@@ -263,34 +352,31 @@ fun ShoppingListsScreen(
             }
         }
     } else {
-        // ---- Checklist Detail View ----
+        // ---- Checklist Detail Screen ----
         val listItems = remember(allItems, activeList.id) {
             allItems.filter { it.listId == activeList.id }
         }
-        val uncheckedItems = remember(listItems) { listItems.filter { !it.checked } }
+        val remainingItems = remember(listItems) { listItems.filter { !it.checked } }
         val checkedItems = remember(listItems) { listItems.filter { it.checked } }
-        val checkedTotalMinor = remember(checkedItems) {
-            checkedItems.sumOf { kotlin.math.abs(it.estimatedPriceMinor) }
+        val summary = remember(activeList, listItems) {
+            AnalyticsCalculator.summarizeShoppingList(activeList, listItems)
         }
+        val progress = if (summary.totalItems > 0) {
+            (summary.checkedItems.toFloat() / summary.totalItems.toFloat()).coerceIn(0f, 1f)
+        } else 0f
 
-        var quickItemName by remember(activeList.id) { mutableStateOf("") }
-        var quickItemPrice by remember(activeList.id) { mutableStateOf("") }
-
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(AlabasterBg),
+                .background(AlabasterBg)
+                .imePadding(),
         ) {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 12.dp,
-                    bottom = if (checkedItems.isNotEmpty()) 156.dp else 92.dp,
-                ),
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // Header
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -299,170 +385,187 @@ fun ShoppingListsScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.weight(1f),
                         ) {
                             IconButton(onClick = { activeListId = null }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                    contentDescription = "Back to lists",
-                                    tint = SlateInk,
-                                )
+                                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = SlateInk)
                             }
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = activeList.title,
-                                    fontSize = 20.sp,
+                                    fontSize = 19.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = SlateInk,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                activeList.defaultCategoryId?.let { cid ->
+                                    val trail = CategoryTree.breadcrumbPath(cid, catMap)
+                                    if (trail.isNotBlank()) {
+                                        Text(
+                                            text = trail,
+                                            fontSize = 11.sp,
+                                            color = MutedSlate,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (checkedItems.isNotEmpty()) {
+                                TextButton(onClick = { vm.clearCompletedShoppingItems(activeList.id) }) {
+                                    Text("Clear Done", fontSize = 11.sp, color = MutedSlate, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                            if (listItems.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { showClearChecklistConfirm = true },
+                                    modifier = Modifier.size(34.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ClearAll,
+                                        contentDescription = "Clear checklist",
+                                        tint = MutedSlate,
+                                        modifier = Modifier.size(19.dp),
+                                    )
+                                }
+                            }
+                            Surface(
+                                onClick = { showAddItemSheet = true },
+                                shape = RoundedCornerShape(999.dp),
+                                color = EmeraldPrimary,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Icon(Icons.Outlined.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                    Text("Add", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Live Summary Card
+                item {
+                    CleanCard(padding = 14.dp) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                Text("ESTIMATED TOTAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MutedSlate, letterSpacing = 0.6.sp)
+                                Spacer(Modifier.height(2.dp))
                                 Text(
-                                    text = "${checkedItems.size} of ${listItems.size} checked",
-                                    fontSize = 12.sp,
+                                    text = if (masked) "••••" else MoneyFormatter.formatMinor(summary.estimatedTotalMinor, baseCurrency),
+                                    style = TabularStyle,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateInk,
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                StatusPill(
+                                    text = "${summary.checkedItems}/${summary.totalItems} Completed",
+                                    containerColor = EmeraldSoft,
+                                    contentColor = EmeraldDark,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "${summary.uncheckedItems} remaining",
+                                    style = TabularStyle,
+                                    fontSize = 11.sp,
                                     color = MutedSlate,
                                 )
                             }
                         }
-                        IconButton(
-                            onClick = {
-                                val targetId = activeList.id
-                                activeListId = null
-                                vm.deleteShoppingList(targetId)
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.DeleteOutline,
-                                contentDescription = "Delete checklist",
-                                tint = RoseOutflow,
-                            )
-                        }
-                    }
-                }
-
-                // Quick-Add Item Bar at top
-                item {
-                    CleanCard(padding = 12.dp) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            OutlinedTextField(
-                                value = quickItemName,
-                                onValueChange = { quickItemName = it },
-                                label = { Text("Item name", fontSize = 12.sp) },
-                                placeholder = { Text("Milk, Bread...") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1.4f),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                                shape = RoundedCornerShape(12.dp),
-                            )
-                            OutlinedTextField(
-                                value = quickItemPrice,
-                                onValueChange = {
-                                    quickItemPrice = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false)
-                                },
-                                label = { Text("Est. ${MoneyFormatter.currencySymbol(baseCurrency)}", fontSize = 12.sp) },
-                                placeholder = { Text("0") },
-                                singleLine = true,
-                                modifier = Modifier.weight(0.9f),
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Decimal,
-                                    imeAction = ImeAction.Done,
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onDone = {
-                                        if (quickItemName.isNotBlank()) {
-                                            val minor = MoneyFormatter.parseDecimalToMinor(quickItemPrice, baseCurrency) ?: 0L
-                                            vm.addShoppingItem(activeList.id, quickItemName, minor)
-                                            quickItemName = ""
-                                            quickItemPrice = ""
-                                        }
-                                    }
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                            )
-                            Surface(
-                                onClick = {
-                                    if (quickItemName.isNotBlank()) {
-                                        val minor = MoneyFormatter.parseDecimalToMinor(quickItemPrice, baseCurrency) ?: 0L
-                                        vm.addShoppingItem(activeList.id, quickItemName, minor)
-                                        quickItemName = ""
-                                        quickItemPrice = ""
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = EmeraldPrimary,
-                                modifier = Modifier.size(48.dp),
+                        Spacer(Modifier.height(10.dp))
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(999.dp)),
+                            color = EmeraldPrimary,
+                            trackColor = SlateTint,
+                        )
+                        if (summary.checkedTotalMinor > 0L && summary.remainingTotalMinor > 0L) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Outlined.Add, contentDescription = "Add item", tint = Color.White)
-                                }
+                                Text(
+                                    text = "Done: ${if (masked) "••••" else MoneyFormatter.formatMinor(summary.checkedTotalMinor, baseCurrency)}",
+                                    style = TabularStyle,
+                                    fontSize = 11.sp,
+                                    color = EmeraldDark,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "Remaining: ${if (masked) "••••" else MoneyFormatter.formatMinor(summary.remainingTotalMinor, baseCurrency)}",
+                                    style = TabularStyle,
+                                    fontSize = 11.sp,
+                                    color = MutedSlate,
+                                )
                             }
                         }
                     }
                 }
 
+                // Empty State or Structured Item Lists
                 if (listItems.isEmpty()) {
                     item {
                         CleanCard(padding = 20.dp) {
-                            Text("Your checklist is empty", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = "Add items above with optional estimated prices as you plan your trip.",
-                                fontSize = 13.sp,
-                                color = MutedSlate,
-                            )
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text("No items in this checklist", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Add items with quantity, unit (kg, litre, pack, custom), and estimated total price.",
+                                    fontSize = 12.sp,
+                                    color = MutedSlate,
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Button(
+                                    onClick = { showAddItemSheet = true },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                ) {
+                                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Add First Item", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
                         }
                     }
                 } else {
-                    items(uncheckedItems, key = { it.id }) { item ->
-                        CleanCard(padding = 8.dp, onClick = { vm.toggleShoppingItem(item.id) }) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Checkbox(
-                                        checked = false,
-                                        onCheckedChange = { vm.toggleShoppingItem(item.id) },
-                                        colors = CheckboxDefaults.colors(checkedColor = EmeraldPrimary),
-                                    )
-                                    Text(
-                                        text = ParsedShoppingItem.formatDisplay(item.name, item.quantityLabel),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = SlateInk,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (item.estimatedPriceMinor > 0L) {
-                                        Text(
-                                            text = MoneyFormatter.formatMinor(item.estimatedPriceMinor, baseCurrency, masked = masked),
-                                            style = TabularStyle,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = SlateInk,
-                                        )
-                                    }
-                                    IconButton(onClick = { vm.deleteShoppingItem(item.id) }) {
-                                        Icon(
-                                            Icons.Outlined.Close,
-                                            contentDescription = "Remove item",
-                                            tint = MutedSlate,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                }
-                            }
+                    if (remainingItems.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "TO BUY (${remainingItems.size})",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp,
+                                color = MutedSlate,
+                            )
+                        }
+                        items(remainingItems, key = { it.id }) { item ->
+                            ShoppingItemRow(
+                                item = item,
+                                baseCurrency = baseCurrency,
+                                masked = masked,
+                                onToggle = { vm.toggleShoppingItem(item.id) },
+                                onEdit = { editingItem = item },
+                                onDelete = { vm.deleteShoppingItem(item.id) },
+                            )
                         }
                     }
 
@@ -471,319 +574,785 @@ fun ShoppingListsScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { checkedExpanded = !checkedExpanded }
-                                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    .padding(top = 4.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "Checked (${checkedItems.size}) • ${MoneyFormatter.formatMinor(checkedTotalMinor, baseCurrency, masked = masked)}",
-                                    style = TabularStyle,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    text = "COMPLETED (${checkedItems.size})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.6.sp,
                                     color = MutedSlate,
                                 )
-                                Icon(
-                                    imageVector = if (checkedExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                                    contentDescription = "Toggle checked items",
-                                    tint = MutedSlate,
-                                )
-                            }
-                        }
-
-                        if (checkedExpanded) {
-                            items(checkedItems, key = { it.id }) { item ->
-                                Surface(
-                                    onClick = { vm.toggleShoppingItem(item.id) },
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = SlateTint,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.weight(1f),
-                                        ) {
-                                            Checkbox(
-                                                checked = true,
-                                                onCheckedChange = { vm.toggleShoppingItem(item.id) },
-                                                colors = CheckboxDefaults.colors(checkedColor = EmeraldPrimary),
-                                            )
-                                            Text(
-                                                text = ParsedShoppingItem.formatDisplay(item.name, item.quantityLabel),
-                                                fontSize = 14.sp,
-                                                color = MutedSlate,
-                                                textDecoration = TextDecoration.LineThrough,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            if (item.estimatedPriceMinor > 0L) {
-                                                Text(
-                                                    text = MoneyFormatter.formatMinor(item.estimatedPriceMinor, baseCurrency, masked = masked),
-                                                    style = TabularStyle,
-                                                    fontSize = 12.sp,
-                                                    color = MutedSlate,
-                                                    textDecoration = TextDecoration.LineThrough,
-                                                )
-                                            }
-                                            IconButton(onClick = { vm.deleteShoppingItem(item.id) }) {
-                                                Icon(
-                                                    Icons.Outlined.Close,
-                                                    contentDescription = "Remove checked item",
-                                                    tint = MutedSlate,
-                                                    modifier = Modifier.size(18.dp),
-                                                )
-                                            }
-                                        }
-                                    }
+                                TextButton(onClick = { checkedExpanded = !checkedExpanded }) {
+                                    Text(if (checkedExpanded) "Hide" else "Show", fontSize = 11.sp, color = MutedSlate)
+                                    Icon(
+                                        imageVector = if (checkedExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                        contentDescription = null,
+                                        tint = MutedSlate,
+                                        modifier = Modifier.size(16.dp),
+                                    )
                                 }
                             }
                         }
+                        if (checkedExpanded) {
+                            items(checkedItems, key = { it.id }) { item ->
+                                ShoppingItemRow(
+                                    item = item,
+                                    baseCurrency = baseCurrency,
+                                    masked = masked,
+                                    onToggle = { vm.toggleShoppingItem(item.id) },
+                                    onEdit = { editingItem = item },
+                                    onDelete = { vm.deleteShoppingItem(item.id) },
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            // Sticky Bottom Bar: Convert checked items into real Expense transaction
-            AnimatedVisibility(
-                visible = checkedItems.isNotEmpty(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-            ) {
+            // Bottom Action Bar (Convert to Expense + Preserve Checklist)
+            if (listItems.isNotEmpty()) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
                     color = SurfaceCard,
-                    border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.35f)),
-                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Column {
-                            Text(
-                                text = "${checkedItems.size} item(s) ready",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MutedSlate,
-                            )
-                            Text(
-                                text = if (checkedTotalMinor > 0L) {
-                                    MoneyFormatter.formatMinor(checkedTotalMinor, baseCurrency, masked = masked)
-                                } else {
-                                    "Enter total on checkout"
-                                },
-                                style = TabularStyle,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateInk,
-                            )
-                        }
+                        val hasChecked = checkedItems.isNotEmpty()
                         Button(
-                            onClick = { showConvertSheet = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                            onClick = {
+                                convertScopeCheckedOnly = hasChecked
+                                showConvertSheet = true
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp),
                             shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                         ) {
-                            Text("Log as Expense", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Icon(Icons.AutoMirrored.Outlined.ReceiptLong, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(8.dp))
+                            val estToLog = if (hasChecked) summary.checkedTotalMinor else summary.estimatedTotalMinor
+                            val label = if (hasChecked) {
+                                if (estToLog > 0L) {
+                                    "Convert ${checkedItems.size} Completed (${if (masked) "••••" else MoneyFormatter.formatMinor(estToLog, baseCurrency)})"
+                                } else {
+                                    "Convert ${checkedItems.size} Completed to Expense"
+                                }
+                            } else {
+                                "Convert Entire List (${listItems.size} items)"
+                            }
+                            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                        if (hasChecked && remainingItems.isNotEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    convertScopeCheckedOnly = false
+                                    showConvertSheet = true
+                                },
+                                modifier = Modifier.align(Alignment.CenterHorizontally),
+                            ) {
+                                Text(
+                                    text = "Or convert entire list (${listItems.size} items • ${if (masked) "••••" else MoneyFormatter.formatMinor(summary.estimatedTotalMinor, baseCurrency)})",
+                                    fontSize = 11.sp,
+                                    color = EmeraldDark,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
                         }
                     }
                 }
-            }
-
-            if (showAddItemSheet) {
-                QuickAddItemBottomSheet(
-                    baseCurrency = baseCurrency,
-                    onDismiss = { showAddItemSheet = false },
-                    onAdd = { name, priceMinor ->
-                        vm.addShoppingItem(activeList.id, name, priceMinor)
-                        showAddItemSheet = false
-                    },
-                )
-            }
-
-            if (showConvertSheet && checkedItems.isNotEmpty()) {
-                ConvertShoppingExpenseBottomSheet(
-                    listTitle = activeList.title,
-                    defaultCategoryId = activeList.defaultCategoryId,
-                    initialTotalMinor = checkedTotalMinor,
-                    checkedCount = checkedItems.size,
-                    baseCurrency = baseCurrency,
-                    accounts = accounts,
-                    categories = categories.filter { it.kind == "EXPENSE" },
-                    onDismiss = { showConvertSheet = false },
-                    onConfirm = { accountId, categoryId, totalMinor, merchantTitle ->
-                        vm.convertCheckedShoppingToExpense(
-                            listId = activeList.id,
-                            itemIds = checkedItems.map { it.id },
-                            accountId = accountId,
-                            categoryId = categoryId,
-                            totalMinor = totalMinor,
-                            currency = baseCurrency,
-                            merchantTitle = merchantTitle,
-                            onSuccess = { showConvertSheet = false },
-                        )
-                    },
-                )
             }
         }
     }
 
-    if (showNewListSheet) {
-        NewShoppingListBottomSheet(
-            categories = categories.filter { it.kind == "EXPENSE" && it.parentCategoryId == null },
-            onDismiss = { showNewListSheet = false },
-            onCreate = { title, defaultCatId ->
-                vm.createShoppingList(title, defaultCatId) { createdId ->
-                    activeListId = createdId
+    // Delete List Confirmation
+    listPendingDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { listPendingDelete = null },
+            containerColor = SurfaceCard,
+            title = { Text("Delete \"${target.title}\"?", color = SlateInk) },
+            text = {
+                Text(
+                    "This removes the checklist and its items from Shopping Lists. Logged expenses in Records are kept safely.",
+                    color = MutedSlate,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.deleteShoppingList(target.id)
+                        if (activeListId == target.id) activeListId = null
+                        listPendingDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
+                ) {
+                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
                 }
-                showNewListSheet = false
+            },
+            dismissButton = {
+                TextButton(onClick = { listPendingDelete = null }) { Text("Cancel") }
             },
         )
+    }
+
+    // Clear Entire Checklist Confirmation
+    if (showClearChecklistConfirm && activeList != null) {
+        AlertDialog(
+            onDismissRequest = { showClearChecklistConfirm = false },
+            containerColor = SurfaceCard,
+            title = { Text("Clear all items in \"${activeList.title}\"?", color = SlateInk) },
+            text = {
+                Text(
+                    "Removes all items from this checklist. The checklist container stays ready to reuse.",
+                    color = MutedSlate,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.clearAllShoppingItems(activeList.id)
+                        showClearChecklistConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
+                ) {
+                    Text("Clear All", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearChecklistConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (showNewListSheet) {
+        NewShoppingListBottomSheet(
+            categories = categories,
+            onDismiss = { showNewListSheet = false },
+            onSave = { title, catId ->
+                vm.createShoppingList(title, catId) { newId ->
+                    activeListId = newId
+                    showNewListSheet = false
+                }
+            },
+        )
+    }
+
+    if (showAddItemSheet && activeList != null) {
+        ShoppingItemEditorBottomSheet(
+            editingItem = null,
+            baseCurrency = baseCurrency,
+            onDismiss = { showAddItemSheet = false },
+            onSave = { name, qtyVal, qtyUnit, priceMinor, keepOpen, onComplete ->
+                vm.addShoppingItem(
+                    listId = activeList.id,
+                    name = name,
+                    estimatedPriceMinor = priceMinor,
+                    quantityValue = qtyVal,
+                    quantityUnit = qtyUnit,
+                    onAdded = { ok ->
+                        onComplete(ok)
+                        if (ok && !keepOpen) {
+                            showAddItemSheet = false
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    editingItem?.let { targetItem ->
+        ShoppingItemEditorBottomSheet(
+            editingItem = targetItem,
+            baseCurrency = baseCurrency,
+            onDismiss = { editingItem = null },
+            onSave = { name, qtyVal, qtyUnit, priceMinor, _, onComplete ->
+                vm.updateShoppingItem(
+                    itemId = targetItem.id,
+                    name = name,
+                    quantityValue = qtyVal,
+                    quantityUnit = qtyUnit,
+                    estimatedPriceMinor = priceMinor,
+                    onUpdated = { ok ->
+                        onComplete(ok)
+                        if (ok) {
+                            editingItem = null
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    if (showConvertSheet && activeList != null) {
+        val currentListItems = allItems.filter { it.listId == activeList.id }
+        val itemsToConvert = if (convertScopeCheckedOnly) {
+            currentListItems.filter { it.checked }.ifEmpty { currentListItems }
+        } else {
+            currentListItems
+        }
+        ConvertShoppingExpenseBottomSheet(
+            list = activeList,
+            itemsToConvert = itemsToConvert,
+            accounts = accounts,
+            categories = categories,
+            baseCurrency = baseCurrency,
+            onDismiss = { showConvertSheet = false },
+            onConfirm = { accId, catId, totalMinor, merchant, allowDup, onDupBlocked ->
+                vm.convertCheckedShoppingToExpense(
+                    listId = activeList.id,
+                    itemIds = itemsToConvert.map { it.id },
+                    accountId = accId,
+                    categoryId = catId,
+                    totalMinor = totalMinor,
+                    currency = baseCurrency,
+                    merchantTitle = merchant,
+                    removeConvertedItems = false,
+                    allowDuplicate = allowDup,
+                    onDuplicateBlocked = onDupBlocked,
+                    onSuccess = { showConvertSheet = false },
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun ShoppingItemRow(
+    item: ShoppingItemEntity,
+    baseCurrency: String,
+    masked: Boolean,
+    onToggle: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val qtyText = remember(item.quantityValue, item.quantityUnit, item.quantityLabel) {
+        ShoppingUnitCatalog.formatQuantityLabel(item.quantityValue, item.quantityUnit, item.quantityLabel)
+    }
+    val hasPrice = item.estimatedPriceMinor > 0L
+
+    CleanCard(
+        padding = 10.dp,
+        containerColor = if (item.checked) SlateTint.copy(alpha = 0.65f) else SurfaceCard,
+        onClick = onToggle,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Checkbox(
+                checked = item.checked,
+                onCheckedChange = { onToggle() },
+                colors = CheckboxDefaults.colors(
+                    checkedColor = EmeraldPrimary,
+                    uncheckedColor = MutedSlate,
+                ),
+                modifier = Modifier.size(26.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.name,
+                    fontSize = 14.sp,
+                    fontWeight = if (item.checked) FontWeight.Normal else FontWeight.SemiBold,
+                    color = if (item.checked) MutedSlate else SlateInk,
+                    textDecoration = if (item.checked) TextDecoration.LineThrough else TextDecoration.None,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (qtyText.isNotEmpty() || hasPrice) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (qtyText.isNotEmpty()) {
+                            StatusPill(
+                                text = qtyText,
+                                containerColor = if (item.checked) SurfaceCard else SlateTint,
+                                contentColor = if (item.checked) MutedSlate else SlateInk,
+                            )
+                        }
+                        if (hasPrice) {
+                            val priceFormatted = if (masked) "••••" else MoneyFormatter.formatMinor(item.estimatedPriceMinor, baseCurrency)
+                            StatusPill(
+                                text = priceFormatted,
+                                containerColor = if (item.checked) SurfaceCard else EmeraldSoft,
+                                contentColor = if (item.checked) MutedSlate else EmeraldDark,
+                            )
+                        }
+                    }
+                }
+            }
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.size(30.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Edit,
+                    contentDescription = "Edit ${item.name}",
+                    tint = MutedSlate,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(30.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.DeleteOutline,
+                    contentDescription = "Remove ${item.name}",
+                    tint = RoseOutflow.copy(alpha = 0.8f),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NewShoppingListBottomSheet(
-    categories: List<com.ledgerflow.app.data.local.CategoryEntity>,
+    categories: List<CategoryEntity>,
     onDismiss: () -> Unit,
-    onCreate: (title: String, defaultCategoryId: String?) -> Unit,
+    onSave: (title: String, categoryId: String?) -> Unit,
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val expenseCats = remember(categories) { categories.filter { it.kind == "EXPENSE" } }
     var title by remember { mutableStateOf("") }
-    var selectedCatId by remember(categories) {
+    var selectedCategoryId by remember(expenseCats) {
         mutableStateOf(
-            categories.firstOrNull { it.name.equals("Groceries", ignoreCase = true) }?.id
-                ?: categories.firstOrNull { it.name.equals("Shopping", ignoreCase = true) }?.id
-                ?: categories.firstOrNull()?.id
+            expenseCats.firstOrNull { it.name.contains("Groceries", ignoreCase = true) }?.id
+                ?: expenseCats.firstOrNull()?.id
         )
     }
+    var showCatPicker by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = SurfaceCard,
         contentColor = SlateInk,
+        tonalElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("New Shopping List", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = SlateInk)
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Checklist Name") },
-                placeholder = { Text("e.g. Weekly Groceries, Weekend Hardware") },
+                label = { Text("List Name") },
+                placeholder = { Text("e.g. Weekly Groceries, Home Hardware") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
             )
-            Text("Default Expense Category", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            HierarchicalCategorySelectorField(
+                label = "Default Expense Category",
+                selectedCategoryId = selectedCategoryId,
+                allCategories = expenseCats,
+                nullOptionLabel = "None selected",
+                onClick = { showCatPicker = true },
+            )
+            Button(
+                enabled = title.isNotBlank(),
+                onClick = { onSave(title, selectedCategoryId) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
             ) {
-                categories.forEach { cat ->
-                    FilterChip(
-                        selected = selectedCatId == cat.id,
-                        onClick = { selectedCatId = cat.id },
-                        label = { Text(cat.name, fontSize = 11.sp) },
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    enabled = title.isNotBlank(),
-                    onClick = { onCreate(title, selectedCatId) },
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text("Create Checklist", fontWeight = FontWeight.SemiBold)
-                }
+                Text("Create Checklist", fontWeight = FontWeight.Bold, color = Color.White)
             }
         }
     }
+
+    if (showCatPicker) {
+        HierarchicalCategoryPickerSheet(
+            title = "Default Checklist Category",
+            categories = expenseCats,
+            kindFilter = "EXPENSE",
+            selectedIds = listOfNotNull(selectedCategoryId).toSet(),
+            multiSelect = false,
+            nullOptionLabel = "No default category",
+            nullSelected = selectedCategoryId == null,
+            onSelectNull = { selectedCategoryId = null },
+            onSelectSingle = { selectedCategoryId = it.id },
+            onDismiss = { showCatPicker = false },
+        )
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun QuickAddItemBottomSheet(
+private fun ShoppingItemEditorBottomSheet(
+    editingItem: ShoppingItemEntity?,
     baseCurrency: String,
     onDismiss: () -> Unit,
-    onAdd: (name: String, estimatedPriceMinor: Long) -> Unit,
+    onSave: (
+        name: String,
+        qtyVal: Double?,
+        qtyUnit: String,
+        priceMinor: Long,
+        keepOpen: Boolean,
+        onComplete: (Boolean) -> Unit,
+    ) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var price by remember { mutableStateOf("") }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val initialParsed = remember(editingItem) {
+        if (editingItem == null) null
+        else if (editingItem.quantityValue != null || editingItem.quantityUnit.isNotBlank()) {
+            Triple(
+                editingItem.quantityValue?.let { ShoppingUnitCatalog.formatNumber(it) }.orEmpty(),
+                editingItem.quantityUnit,
+                MoneyFormatter.formatEditableDecimal(editingItem.estimatedPriceMinor, baseCurrency),
+            )
+        } else {
+            val legacy = ShoppingUnitCatalog.parseLegacyLabel(editingItem.quantityLabel)
+            Triple(
+                legacy.quantityValue?.let { ShoppingUnitCatalog.formatNumber(it) }.orEmpty(),
+                legacy.quantityUnit,
+                MoneyFormatter.formatEditableDecimal(editingItem.estimatedPriceMinor, baseCurrency),
+            )
+        }
+    }
+
+    var name by remember(editingItem) { mutableStateOf(editingItem?.name.orEmpty()) }
+    var qtyText by remember(editingItem) { mutableStateOf(initialParsed?.first.orEmpty()) }
+    val initUnit = initialParsed?.second.orEmpty()
+    val isInitCustom = initUnit.isNotBlank() && initUnit !in ShoppingUnitCatalog.allPredefinedUnits
+    var selectedUnit by remember(editingItem) {
+        mutableStateOf(if (isInitCustom) ShoppingUnitCatalog.UNIT_CUSTOM_SENTINEL else initUnit)
+    }
+    var customUnitText by remember(editingItem) {
+        mutableStateOf(if (isInitCustom) initUnit else "")
+    }
+    var priceText by remember(editingItem) {
+        val seed = initialParsed?.third.orEmpty()
+        mutableStateOf(if (editingItem != null && editingItem.estimatedPriceMinor > 0L) seed else "")
+    }
+    var showUnitSheet by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+
+    val (parsedQty, qtyError) = remember(qtyText) { ShoppingUnitCatalog.validateQuantityInput(qtyText) }
+    val resolvedUnit = remember(selectedUnit, customUnitText) {
+        when (selectedUnit) {
+            ShoppingUnitCatalog.UNIT_CUSTOM_SENTINEL -> customUnitText.trim()
+            else -> selectedUnit.trim()
+        }
+    }
+    val parsedPriceMinor = remember(priceText, baseCurrency) {
+        if (priceText.isBlank()) 0L
+        else (MoneyFormatter.parseDecimalToMinor(priceText, baseCurrency) ?: -1L)
+    }
+    val priceError = if (priceText.isNotBlank() && parsedPriceMinor < 0L) "Enter a valid price" else null
+    val canSubmit = !isSaving && name.isNotBlank() && qtyError == null && priceError == null
+
+    fun submit(keepOpen: Boolean) {
+        if (!canSubmit) return
+        isSaving = true
+        onSave(
+            name.trim(),
+            parsedQty,
+            resolvedUnit,
+            parsedPriceMinor.coerceAtLeast(0L),
+            keepOpen,
+        ) { ok ->
+            isSaving = false
+            if (ok && keepOpen) {
+                name = ""
+                qtyText = ""
+                priceText = ""
+            }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = SurfaceCard,
         contentColor = SlateInk,
+        tonalElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Add Shopping Item", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+            Text(
+                text = if (editingItem == null) "Add Shopping Item" else "Edit Item",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = SlateInk,
+            )
+
+            // A. Item Name
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Item Name") },
-                placeholder = { Text("e.g. Organic Milk 1L") },
+                placeholder = { Text("Milk, Bread, Rice...") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
             )
+
+            // B. Quantity + Unit Selector
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Quantity & Unit", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    OutlinedTextField(
+                        value = qtyText,
+                        onValueChange = { raw ->
+                            val filtered = buildString {
+                                var seenDot = false
+                                raw.forEach { ch ->
+                                    if (ch.isDigit()) append(ch)
+                                    else if (ch == '.' && !seenDot) {
+                                        seenDot = true
+                                        append(ch)
+                                    }
+                                }
+                            }
+                            qtyText = filtered
+                        },
+                        label = { Text("Qty") },
+                        placeholder = { Text("1") },
+                        isError = qtyError != null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(0.95f),
+                    )
+                    Surface(
+                        onClick = { showUnitSheet = true },
+                        modifier = Modifier
+                            .weight(1.25f)
+                            .height(56.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = SlateTint,
+                        border = BorderStroke(1.dp, BorderSubtle),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column {
+                                Text("Unit", fontSize = 10.sp, color = MutedSlate)
+                                Text(
+                                    text = when {
+                                        selectedUnit == ShoppingUnitCatalog.UNIT_CUSTOM_SENTINEL ->
+                                            customUnitText.ifBlank { "Custom unit" }
+                                        selectedUnit.isNotBlank() -> selectedUnit
+                                        else -> "None"
+                                    },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateInk,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Icon(Icons.Outlined.ExpandMore, contentDescription = "Choose unit", tint = MutedSlate, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+                if (qtyError != null) {
+                    Text(qtyError, fontSize = 11.sp, color = RoseOutflow)
+                }
+
+                // Quick 1-tap unit pills
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf("kg", "g", "litre", "ml", "piece", "packet", "pack", "dozen", ShoppingUnitCatalog.UNIT_CUSTOM_SENTINEL).forEach { unitOption ->
+                        val active = selectedUnit == unitOption
+                        FilterChip(
+                            selected = active,
+                            onClick = {
+                                selectedUnit = if (active && unitOption != ShoppingUnitCatalog.UNIT_CUSTOM_SENTINEL) "" else unitOption
+                            },
+                            label = {
+                                Text(
+                                    text = if (unitOption == ShoppingUnitCatalog.UNIT_CUSTOM_SENTINEL) "Custom" else unitOption,
+                                    fontSize = 11.sp,
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = EmeraldSoft,
+                                selectedLabelColor = EmeraldDark,
+                            ),
+                        )
+                    }
+                }
+
+                AnimatedVisibility(visible = selectedUnit == ShoppingUnitCatalog.UNIT_CUSTOM_SENTINEL) {
+                    OutlinedTextField(
+                        value = customUnitText,
+                        onValueChange = { customUnitText = it },
+                        label = { Text("Custom Unit") },
+                        placeholder = { Text("e.g. jar, bunch, tray, tin") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            // C. Estimated Total Price (Optional)
             OutlinedTextField(
-                value = price,
-                onValueChange = { price = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
-                label = { Text("Estimated Price ($baseCurrency, optional)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                value = priceText,
+                onValueChange = { priceText = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
+                label = { Text("Estimated Total Price ($baseCurrency, Optional)") },
+                placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
+                supportingText = {
+                    Text(
+                        text = priceError ?: "Total price for the entered quantity (not multiplied automatically)",
+                        fontSize = 11.sp,
+                        color = if (priceError != null) RoseOutflow else MutedSlate,
+                    )
+                },
+                isError = priceError != null,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit(keepOpen = editingItem == null) }),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
             )
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-                Spacer(Modifier.width(8.dp))
+                if (editingItem == null) {
+                    OutlinedButton(
+                        enabled = canSubmit,
+                        onClick = { submit(keepOpen = true) },
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.45f)),
+                    ) {
+                        Text("Add & Next", color = EmeraldDark, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
                 Button(
-                    enabled = name.isNotBlank(),
-                    onClick = {
-                        val minor = MoneyFormatter.parseDecimalToMinor(price, baseCurrency) ?: 0L
-                        onAdd(name, minor)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                    enabled = canSubmit,
+                    onClick = { submit(keepOpen = false) },
+                    modifier = Modifier.weight(1f).height(46.dp),
                     shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                 ) {
-                    Text("Add Item", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = if (editingItem == null) "Add Item" else "Save Item",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+
+    if (showUnitSheet) {
+        ModalBottomSheet(
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            onDismissRequest = { showUnitSheet = false },
+            containerColor = SurfaceCard,
+            contentColor = SlateInk,
+            tonalElevation = 0.dp,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Select Unit", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                    TextButton(
+                        onClick = {
+                            selectedUnit = ""
+                            customUnitText = ""
+                            showUnitSheet = false
+                        },
+                    ) {
+                        Text("No Unit", fontSize = 12.sp, color = MutedSlate)
+                    }
+                }
+                ShoppingUnitCatalog.unitGroups.forEach { group ->
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = group.categoryName.uppercase(Locale.US),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp,
+                            color = MutedSlate,
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            group.units.forEach { u ->
+                                val active = selectedUnit == u
+                                FilterChip(
+                                    selected = active,
+                                    onClick = {
+                                        selectedUnit = u
+                                        showUnitSheet = false
+                                    },
+                                    label = {
+                                        Text(
+                                            text = if (u == ShoppingUnitCatalog.UNIT_CUSTOM_SENTINEL) "Custom..." else u,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = EmeraldSoft,
+                                        selectedLabelColor = EmeraldDark,
+                                    ),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -793,100 +1362,213 @@ private fun QuickAddItemBottomSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConvertShoppingExpenseBottomSheet(
-    listTitle: String,
-    defaultCategoryId: String?,
-    initialTotalMinor: Long,
-    checkedCount: Int,
+    list: ShoppingListEntity,
+    itemsToConvert: List<ShoppingItemEntity>,
+    accounts: List<AccountEntity>,
+    categories: List<CategoryEntity>,
     baseCurrency: String,
-    accounts: List<com.ledgerflow.app.data.local.AccountEntity>,
-    categories: List<com.ledgerflow.app.data.local.CategoryEntity>,
     onDismiss: () -> Unit,
-    onConfirm: (accountId: String, categoryId: String?, totalMinor: Long, merchantTitle: String) -> Unit,
+    onConfirm: (
+        accountId: String,
+        categoryId: String?,
+        totalMinor: Long,
+        merchant: String,
+        allowDuplicate: Boolean,
+        onDuplicateBlocked: () -> Unit,
+    ) -> Unit,
 ) {
-    var merchant by remember(listTitle) { mutableStateOf(listTitle) }
-    var totalText by remember(initialTotalMinor) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val expenseCats = remember(categories) { categories.filter { it.kind == "EXPENSE" } }
+    val estimatedSum = remember(itemsToConvert) { itemsToConvert.sumOf { it.estimatedPriceMinor.coerceAtLeast(0L) } }
+
+    var merchant by remember(list) { mutableStateOf(list.title) }
+    var totalText by remember(estimatedSum) {
         mutableStateOf(
-            if (initialTotalMinor > 0L) {
-                val div = if (baseCurrency.equals("JPY", ignoreCase = true)) 1.0 else 100.0
-                if (baseCurrency.equals("JPY", ignoreCase = true)) initialTotalMinor.toString()
-                else String.format(Locale.US, "%.2f", initialTotalMinor / div)
-            } else ""
+            if (estimatedSum > 0L) MoneyFormatter.formatEditableDecimal(estimatedSum, baseCurrency) else ""
         )
     }
     var selectedAccountId by remember(accounts) { mutableStateOf(accounts.firstOrNull()?.id) }
-    var selectedCategoryId by remember(defaultCategoryId, categories) {
-        mutableStateOf(
-            defaultCategoryId?.takeIf { id -> categories.any { it.id == id } }
-                ?: categories.firstOrNull { it.name.equals("Groceries", ignoreCase = true) }?.id
-                ?: categories.firstOrNull { it.name.equals("Shopping", ignoreCase = true) }?.id
-                ?: categories.firstOrNull()?.id
-        )
+    var selectedCategoryId by remember(list, expenseCats) {
+        mutableStateOf(list.defaultCategoryId ?: expenseCats.firstOrNull()?.id)
     }
+    var showCatPicker by remember { mutableStateOf(false) }
+    var duplicateDetected by remember { mutableStateOf(false) }
+
     val parsedTotal = MoneyFormatter.parseDecimalToMinor(totalText, baseCurrency) ?: 0L
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = SurfaceCard,
         contentColor = SlateInk,
+        tonalElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Log Checked Items as Expense", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-            Text(
-                text = "Converts $checkedCount checked item(s) into a single ledger expense and clears them from this list.",
-                fontSize = 12.sp,
-                color = MutedSlate,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(EmeraldSoft),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = EmeraldPrimary)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Convert Basket to Expense", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                    Text(
+                        text = "${itemsToConvert.size} item(s) • Original checklist will stay saved",
+                        fontSize = 12.sp,
+                        color = MutedSlate,
+                    )
+                }
+            }
+
+            // Itemized Review Box
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = SlateTint,
+                border = BorderStroke(1.dp, BorderSubtle),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 150.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    itemsToConvert.forEach { item ->
+                        val qLabel = ShoppingUnitCatalog.formatQuantityLabel(item.quantityValue, item.quantityUnit, item.quantityLabel)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (qLabel.isNotBlank()) "${item.name} ($qLabel)" else item.name,
+                                fontSize = 12.sp,
+                                color = SlateInk,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = if (item.estimatedPriceMinor > 0L) {
+                                    MoneyFormatter.formatMinor(item.estimatedPriceMinor, baseCurrency)
+                                } else "—",
+                                style = TabularStyle,
+                                fontSize = 12.sp,
+                                color = MutedSlate,
+                            )
+                        }
+                    }
+                    if (estimatedSum > 0L) {
+                        HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 2.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Estimated Sum", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                            Text(
+                                text = MoneyFormatter.formatMinor(estimatedSum, baseCurrency),
+                                style = TabularStyle,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldDark,
+                            )
+                        }
+                    }
+                }
+            }
 
             OutlinedTextField(
                 value = merchant,
                 onValueChange = { merchant = it },
-                label = { Text("Merchant / Title") },
+                label = { Text("Merchant / Expense Title") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
             )
+
             OutlinedTextField(
                 value = totalText,
-                onValueChange = { totalText = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
-                label = { Text("Total Spent ($baseCurrency)") },
+                onValueChange = {
+                    totalText = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false)
+                    duplicateDetected = false
+                },
+                label = { Text("Actual Paid Amount ($baseCurrency)") },
+                placeholder = { Text(if (baseCurrency == "JPY") "0" else "0.00") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
             )
 
-            Text("Pay From Account", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                accounts.forEach { acc ->
-                    FilterChip(
-                        selected = selectedAccountId == acc.id,
-                        onClick = { selectedAccountId = acc.id },
-                        label = { Text(acc.name, fontSize = 11.sp) },
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Pay From Account", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    accounts.forEach { acc ->
+                        FilterChip(
+                            selected = selectedAccountId == acc.id,
+                            onClick = { selectedAccountId = acc.id },
+                            label = { Text(acc.name, fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = EmeraldSoft,
+                                selectedLabelColor = EmeraldDark,
+                            ),
+                        )
+                    }
                 }
             }
 
-            Text("Expense Category", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                categories.filter { it.parentCategoryId == null }.forEach { cat ->
-                    FilterChip(
-                        selected = selectedCategoryId == cat.id,
-                        onClick = { selectedCategoryId = cat.id },
-                        label = { Text(cat.name, fontSize = 11.sp) },
-                    )
+            HierarchicalCategorySelectorField(
+                label = "Expense Category",
+                selectedCategoryId = selectedCategoryId,
+                allCategories = expenseCats,
+                nullOptionLabel = "Select expense category",
+                onClick = { showCatPicker = true },
+            )
+
+            if (duplicateDetected) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = AmberSoft,
+                    border = BorderStroke(1.dp, AmberWarn.copy(alpha = 0.45f)),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "This exact checklist conversion is already saved in Records.",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AmberWarn,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = onDismiss) { Text("Close", color = SlateInk) }
+                            Button(
+                                onClick = {
+                                    selectedAccountId?.let { accId ->
+                                        onConfirm(accId, selectedCategoryId, parsedTotal, merchant, true) {}
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AmberWarn),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text("Log Again Anyway", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -900,15 +1582,29 @@ private fun ConvertShoppingExpenseBottomSheet(
                     enabled = selectedAccountId != null && parsedTotal > 0L,
                     onClick = {
                         selectedAccountId?.let { accId ->
-                            onConfirm(accId, selectedCategoryId, parsedTotal, merchant)
+                            onConfirm(accId, selectedCategoryId, parsedTotal, merchant, false) {
+                                duplicateDetected = true
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text("Save Expense", fontWeight = FontWeight.SemiBold)
+                    Text("Save Expense", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         }
+    }
+
+    if (showCatPicker) {
+        HierarchicalCategoryPickerSheet(
+            title = "Expense Category",
+            categories = expenseCats,
+            kindFilter = "EXPENSE",
+            selectedIds = listOfNotNull(selectedCategoryId).toSet(),
+            multiSelect = false,
+            onSelectSingle = { selectedCategoryId = it.id },
+            onDismiss = { showCatPicker = false },
+        )
     }
 }

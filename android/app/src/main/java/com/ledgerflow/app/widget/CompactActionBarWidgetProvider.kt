@@ -11,8 +11,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Widget A — Compact Action Bar (4x2).
- * Renders Today's Spend, Liquid Balance, and zero-friction quick actions.
+ * Widget 1 — Finance Widget (4x2 to 4x3).
+ * Renders Today's Spend, Liquid Balance, optional monthly cash flow, and 1-tap Expense, Voice, Income & Smart Paste.
  */
 class CompactActionBarWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(
@@ -23,11 +23,11 @@ class CompactActionBarWidgetProvider : AppWidgetProvider() {
         val pendingResult: PendingResult? = goAsync()
         providerScope.launch {
             try {
-                LedgerWidgetCoordinator.refreshProviderIds(
+                LedgerWidgetCoordinator.refreshSpecificProviderIds(
                     context = context,
                     appWidgetManager = appWidgetManager,
                     appWidgetIds = appWidgetIds,
-                    isShoppingWidget = false,
+                    kind = LedgerWidgetKind.FINANCE_BAR,
                 )
             } finally {
                 pendingResult?.finish()
@@ -44,11 +44,11 @@ class CompactActionBarWidgetProvider : AppWidgetProvider() {
         val pendingResult: PendingResult? = goAsync()
         providerScope.launch {
             try {
-                LedgerWidgetCoordinator.refreshProviderIds(
+                LedgerWidgetCoordinator.refreshSpecificProviderIds(
                     context = context,
                     appWidgetManager = appWidgetManager,
                     appWidgetIds = intArrayOf(appWidgetId),
-                    isShoppingWidget = false,
+                    kind = LedgerWidgetKind.FINANCE_BAR,
                 )
             } finally {
                 pendingResult?.finish()

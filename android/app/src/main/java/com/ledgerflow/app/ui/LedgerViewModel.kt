@@ -25,9 +25,11 @@ import com.ledgerflow.app.data.sync.SyncOutcome
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.CalculatorEngine
+import com.ledgerflow.app.domain.CategoryTree
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.MoneyFormatter
+import com.ledgerflow.app.domain.ShoppingUnitCatalog
 import com.ledgerflow.app.domain.UpdateManifest
 import com.ledgerflow.app.security.VaultSessionState
 import com.ledgerflow.app.service.PayAndTrackCapture
@@ -105,6 +107,9 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val categories: StateFlow<List<CategoryEntity>> = db.categoryDao().observeActive()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val categoriesIncludingDeleted: StateFlow<List<CategoryEntity>> = db.categoryDao().observeAllIncludingDeleted()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val allTransactions: StateFlow<List<TransactionEntity>> = db.transactionDao().observeActive()
@@ -783,40 +788,39 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         name: String,
         kind: String,
         parentCategoryId: String?,
-        iconKey: String,
-        colorHex: String,
+        iconKey: String = "category",
+        colorHex: String = "#059669",
+        description: String = "",
+        onResult: (Boolean, String?) -> Unit = { _, _ -> },
         onCreated: (CategoryEntity) -> Unit = {},
     ) {
-        val cleanName = name.trim()
-        if (cleanName.isBlank()) {
-            _statusMessage.value = "Enter a category name"
-            return
-        }
-        val cleanKind = if (kind.trim().uppercase() == "INCOME") "INCOME" else "EXPENSE"
-        val cleanIcon = iconKey.trim().ifBlank { "category" }
-        val cleanColor = colorHex.trim().ifBlank { "#059669" }
         viewModelScope.launch {
-            val existingParent = parentCategoryId?.let { db.categoryDao().getById(it) }?.takeIf { it.deletedAtEpochMs == null }
-            val resolvedKind = existingParent?.kind ?: cleanKind
-            val now = System.currentTimeMillis()
-            val created = CategoryEntity(
-                id = UUID.randomUUID().toString(),
-                name = cleanName,
-                kind = resolvedKind,
-                iconKey = existingParent?.iconKey ?: cleanIcon,
-                colorHex = existingParent?.colorHex ?: cleanColor,
-                parentCategoryId = existingParent?.id,
-                createdAtEpochMs = now,
-                updatedAtEpochMs = now,
-                pendingSync = true,
-            )
-            db.categoryDao().upsert(created)
-            SyncWorker.enqueueWhenOnline(app)
-            onCreated(created)
-            _statusMessage.value = if (existingParent != null) {
-                "Subcategory \"$cleanName\" added under ${existingParent.name}"
-            } else {
-                "Category \"$cleanName\" added"
+            when (
+                val outcome = db.upsertCategorySafeAtomic(
+                    categoryId = null,
+                    name = name,
+                    kind = kind,
+                    parentCategoryId = parentCategoryId,
+                    iconKey = iconKey,
+                    colorHex = colorHex,
+                    description = description,
+                )
+            ) {
+                is LedgerDatabase.CategoryMutationResult.Success -> {
+                    val created = outcome.category
+                    SyncWorker.enqueueWhenOnline(app)
+                    _statusMessage.value = if (created.parentCategoryId != null) {
+                        "Subcategory \"${created.name}\" created"
+                    } else {
+                        "Category \"${created.name}\" created"
+                    }
+                    onCreated(created)
+                    onResult(true, null)
+                }
+                is LedgerDatabase.CategoryMutationResult.Error -> {
+                    _statusMessage.value = outcome.message
+                    onResult(false, outcome.message)
+                }
             }
         }
     }
@@ -826,48 +830,65 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         name: String,
         kind: String,
         parentCategoryId: String?,
-        iconKey: String,
-        colorHex: String,
+        iconKey: String = "category",
+        colorHex: String = "#059669",
+        description: String = "",
+        onResult: (Boolean, String?) -> Unit = { _, _ -> },
     ) {
-        val cleanName = name.trim()
-        if (cleanName.isBlank()) {
-            _statusMessage.value = "Enter a category name"
-            return
-        }
-        val cleanKind = if (kind.trim().uppercase() == "INCOME") "INCOME" else "EXPENSE"
-        val cleanIcon = iconKey.trim().ifBlank { "category" }
-        val cleanColor = colorHex.trim().ifBlank { "#059669" }
         viewModelScope.launch {
-            val existing = db.categoryDao().getById(categoryId) ?: return@launch
-            if (existing.deletedAtEpochMs != null) return@launch
-            val safeParentId = parentCategoryId?.takeIf { it != categoryId }
-            val resolvedParent = safeParentId?.let { db.categoryDao().getById(it) }
-                ?.takeIf { it.deletedAtEpochMs == null && it.parentCategoryId == null }
-            val resolvedKind = resolvedParent?.kind ?: cleanKind
-            val now = System.currentTimeMillis()
-            val updated = existing.copy(
-                name = cleanName,
-                kind = resolvedKind,
-                iconKey = cleanIcon,
-                colorHex = cleanColor,
-                parentCategoryId = resolvedParent?.id,
-                updatedAtEpochMs = now,
-                pendingSync = true,
-            )
-            val allActive = db.categoryDao().getAllActive()
-            val updates = buildList {
-                add(updated)
-                if (updated.parentCategoryId == null && updated.kind != existing.kind) {
-                    allActive
-                        .filter { it.parentCategoryId == updated.id && it.kind != updated.kind }
-                        .forEach { child ->
-                            add(child.copy(kind = updated.kind, updatedAtEpochMs = now, pendingSync = true))
-                        }
+            when (
+                val outcome = db.upsertCategorySafeAtomic(
+                    categoryId = categoryId,
+                    name = name,
+                    kind = kind,
+                    parentCategoryId = parentCategoryId,
+                    iconKey = iconKey,
+                    colorHex = colorHex,
+                    description = description,
+                )
+            ) {
+                is LedgerDatabase.CategoryMutationResult.Success -> {
+                    SyncWorker.enqueueWhenOnline(app)
+                    _statusMessage.value = "\"${outcome.category.name}\" updated"
+                    onResult(true, null)
+                }
+                is LedgerDatabase.CategoryMutationResult.Error -> {
+                    _statusMessage.value = outcome.message
+                    onResult(false, outcome.message)
                 }
             }
-            db.categoryDao().upsertAll(updates)
-            SyncWorker.enqueueWhenOnline(app)
-            _statusMessage.value = "\"$cleanName\" updated"
+        }
+    }
+
+    suspend fun inspectCategoryDeletionImpact(categoryId: String): LedgerDatabase.CategoryDeletionImpact? =
+        db.inspectCategoryDeletionImpact(categoryId)
+
+    fun deleteCategoryWithSafeguards(
+        categoryId: String,
+        childStrategy: LedgerDatabase.ChildDeleteStrategy,
+        moveChildrenTargetParentId: String?,
+        usageStrategy: LedgerDatabase.UsageDeleteStrategy,
+        reassignCategoryId: String?,
+        onComplete: () -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val res = db.deleteCategoryWithSafeguardsAtomic(
+                categoryId = categoryId,
+                childStrategy = childStrategy,
+                moveChildrenTargetParentId = moveChildrenTargetParentId,
+                usageStrategy = usageStrategy,
+                reassignCategoryId = reassignCategoryId,
+            )
+            if (res.deletedCount > 0) {
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = buildString {
+                    append("Deleted ${res.deletedCount} category")
+                    if (res.deletedCount > 1) append(" entries")
+                    if (res.movedChildrenCount > 0) append(" • moved ${res.movedChildrenCount} subcategories")
+                    if (res.reassignedUsagesCount > 0) append(" • reassigned ${res.reassignedUsagesCount} linked items")
+                }
+            }
+            onComplete()
         }
     }
 
@@ -876,9 +897,10 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             val all = db.categoryDao().getAllActive()
-            val toDeleteIds = HashSet(ids)
-            // Also delete subcategories whose parent is being deleted
-            all.filter { it.parentCategoryId != null && it.parentCategoryId in ids }.forEach { toDeleteIds.add(it.id) }
+            val toDeleteIds = HashSet<String>(ids)
+            ids.forEach { id ->
+                toDeleteIds.addAll(CategoryTree.collectDescendantIds(id, all, includeSelf = true))
+            }
             val updated = all
                 .filter { it.id in toDeleteIds }
                 .map { it.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true) }
@@ -1419,31 +1441,66 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     fun addShoppingItem(
         listId: String,
         name: String,
-        estimatedPriceMinor: Long,
+        estimatedPriceMinor: Long = 0L,
+        quantityValue: Double? = null,
+        quantityUnit: String = "",
         quantityLabel: String = "",
+        onAdded: (Boolean) -> Unit = {},
     ) {
         val cleanName = name.trim()
         if (cleanName.isBlank()) {
             _statusMessage.value = "Enter an item name"
+            onAdded(false)
             return
         }
         viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            db.shoppingItemDao().upsert(
-                ShoppingItemEntity(
-                    id = UUID.randomUUID().toString(),
-                    listId = listId,
-                    name = cleanName,
-                    quantityLabel = quantityLabel.trim(),
-                    estimatedPriceMinor = abs(estimatedPriceMinor),
-                    checked = false,
-                    createdAtEpochMs = now,
-                    updatedAtEpochMs = now,
-                    pendingSync = true,
-                )
+            val created = db.addShoppingItemAtomic(
+                listId = listId,
+                name = cleanName,
+                quantityValue = quantityValue,
+                quantityUnit = quantityUnit,
+                estimatedPriceMinor = estimatedPriceMinor,
+                legacyQuantityLabel = quantityLabel,
             )
-            db.shoppingListDao().getById(listId)?.takeIf { it.deletedAtEpochMs == null }?.let { list ->
-                db.shoppingListDao().upsert(list.copy(updatedAtEpochMs = now, pendingSync = true))
+            if (created != null) {
+                SyncWorker.enqueueWhenOnline(app)
+                onAdded(true)
+            } else {
+                _statusMessage.value = "Could not add item to checklist"
+                onAdded(false)
+            }
+        }
+    }
+
+    fun updateShoppingItem(
+        itemId: String,
+        name: String,
+        quantityValue: Double?,
+        quantityUnit: String,
+        estimatedPriceMinor: Long,
+        onUpdated: (Boolean) -> Unit = {},
+    ) {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            _statusMessage.value = "Enter an item name"
+            onUpdated(false)
+            return
+        }
+        viewModelScope.launch {
+            val updated = db.updateShoppingItemAtomic(
+                itemId = itemId,
+                name = cleanName,
+                quantityValue = quantityValue,
+                quantityUnit = quantityUnit,
+                estimatedPriceMinor = estimatedPriceMinor,
+            )
+            if (updated != null) {
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = "Updated \"${updated.name}\""
+                onUpdated(true)
+            } else {
+                _statusMessage.value = "Could not update item"
+                onUpdated(false)
             }
         }
     }
@@ -1462,6 +1519,26 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun clearCompletedShoppingItems(listId: String) {
+        viewModelScope.launch {
+            val removed = db.clearCompletedShoppingItemsAtomic(listId)
+            if (removed > 0) {
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = "Cleared $removed completed item(s)"
+            }
+        }
+    }
+
+    fun clearAllShoppingItems(listId: String) {
+        viewModelScope.launch {
+            val removed = db.clearAllShoppingItemsAtomic(listId)
+            if (removed > 0) {
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = "Checklist cleared"
+            }
+        }
+    }
+
     fun convertCheckedShoppingToExpense(
         listId: String,
         itemIds: List<String>,
@@ -1470,7 +1547,9 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         totalMinor: Long,
         currency: String,
         merchantTitle: String,
-        removeConvertedItems: Boolean = true,
+        removeConvertedItems: Boolean = false,
+        allowDuplicate: Boolean = false,
+        onDuplicateBlocked: () -> Unit = {},
         onSuccess: () -> Unit = {},
     ) {
         if (totalMinor <= 0L || itemIds.isEmpty()) {
@@ -1478,7 +1557,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         viewModelScope.launch {
-            val ok = db.convertShoppingItemsToExpenseAtomic(
+            val outcome = db.convertShoppingItemsToExpenseAtomic(
                 listId = listId,
                 itemIds = itemIds,
                 accountId = accountId,
@@ -1487,15 +1566,33 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 currency = currency,
                 merchantTitle = merchantTitle,
                 removeConvertedItems = removeConvertedItems,
+                allowDuplicate = allowDuplicate,
             )
-            if (ok) {
-                SyncWorker.enqueueWhenOnline(app)
-                val formatted = MoneyFormatter.formatMinor(totalMinor, currency)
-                _statusMessage.value = "Logged $formatted expense from checklist"
-                onSuccess()
-            } else {
-                _statusMessage.value = "Select an active account first"
+            when (outcome.status) {
+                LedgerDatabase.ConvertShoppingOutcomeStatus.SUCCESS -> {
+                    SyncWorker.enqueueWhenOnline(app)
+                    val formatted = MoneyFormatter.formatMinor(totalMinor, currency)
+                    _statusMessage.value = "Logged $formatted expense from checklist"
+                    onSuccess()
+                }
+                LedgerDatabase.ConvertShoppingOutcomeStatus.DUPLICATE_ALREADY_CONVERTED -> {
+                    _statusMessage.value = "Already logged as an expense (no duplicate created)"
+                    onDuplicateBlocked()
+                }
+                LedgerDatabase.ConvertShoppingOutcomeStatus.MISSING_ACCOUNT -> {
+                    _statusMessage.value = "Select an active account first"
+                }
+                LedgerDatabase.ConvertShoppingOutcomeStatus.INVALID_INPUT,
+                LedgerDatabase.ConvertShoppingOutcomeStatus.NO_MATCHING_ITEMS -> {
+                    _statusMessage.value = "Select at least one valid item to convert"
+                }
             }
+        }
+    }
+
+    fun setWidgetShoppingListSelection(appWidgetId: Int, listId: String) {
+        _vaultState.value = vault.update { state ->
+            state.copy(widgetListSelections = state.widgetListSelections + (appWidgetId.toString() to listId))
         }
     }
 

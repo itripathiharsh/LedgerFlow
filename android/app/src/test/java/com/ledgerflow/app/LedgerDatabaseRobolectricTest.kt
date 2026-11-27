@@ -19,6 +19,7 @@ import com.ledgerflow.app.data.local.ShoppingItemEntity
 import com.ledgerflow.app.data.local.ShoppingListEntity
 import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.domain.AccountTypeCatalog
+import com.ledgerflow.app.domain.CategoryTree
 import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.ParsedShoppingItem
 import kotlinx.coroutines.test.runTest
@@ -389,7 +390,13 @@ class LedgerDatabaseRobolectricTest {
         v1Helper.close()
 
         val migratedDb = Room.databaseBuilder(context, LedgerDatabase::class.java, dbName)
-            .addMigrations(LedgerDatabase.MIGRATION_1_2, LedgerDatabase.MIGRATION_2_3, LedgerDatabase.MIGRATION_3_4, LedgerDatabase.MIGRATION_4_5)
+            .addMigrations(
+                LedgerDatabase.MIGRATION_1_2,
+                LedgerDatabase.MIGRATION_2_3,
+                LedgerDatabase.MIGRATION_3_4,
+                LedgerDatabase.MIGRATION_4_5,
+                LedgerDatabase.MIGRATION_5_6,
+            )
             .allowMainThreadQueries()
             .build()
 
@@ -475,7 +482,13 @@ class LedgerDatabaseRobolectricTest {
         v2Helper.close()
 
         val migratedDb = Room.databaseBuilder(context, LedgerDatabase::class.java, dbName)
-            .addMigrations(LedgerDatabase.MIGRATION_1_2, LedgerDatabase.MIGRATION_2_3, LedgerDatabase.MIGRATION_3_4, LedgerDatabase.MIGRATION_4_5)
+            .addMigrations(
+                LedgerDatabase.MIGRATION_1_2,
+                LedgerDatabase.MIGRATION_2_3,
+                LedgerDatabase.MIGRATION_3_4,
+                LedgerDatabase.MIGRATION_4_5,
+                LedgerDatabase.MIGRATION_5_6,
+            )
             .allowMainThreadQueries()
             .build()
 
@@ -531,7 +544,7 @@ class LedgerDatabaseRobolectricTest {
         assertEquals(500_000L, reachedGoal.savedAmountMinor)
         assertEquals("REACHED", reachedGoal.status)
 
-        // 3. Shopping checklist -> Log checked items as Expense: wallet ₹7,000 -> ₹6,640, checked items removed
+        // 3. Shopping checklist -> Log checked items as Expense: wallet ₹7,000 -> ₹6,640, preserves checklist & prevents duplicate conversion
         db.shoppingListDao().upsert(ShoppingListEntity("list_1", "Weekend Groceries", SeedData.CAT_GROCERIES, 60L, 60L))
         db.shoppingItemDao().upsertAll(
             listOf(
@@ -540,25 +553,41 @@ class LedgerDatabaseRobolectricTest {
                 ShoppingItemEntity("s3", "list_1", "Olive Oil", 45_000L, checked = false, createdAtEpochMs = 62L, updatedAtEpochMs = 62L),
             )
         )
-        assertTrue(
-            db.convertShoppingItemsToExpenseAtomic(
-                listId = "list_1",
-                itemIds = listOf("s1", "s2"),
-                accountId = wallet.id,
-                categoryId = SeedData.CAT_GROCERIES,
-                totalMinor = 36_000L,
-                currency = "INR",
-                merchantTitle = "Weekend Groceries",
-                nowMs = 70L,
-            )
+        val convertRes = db.convertShoppingItemsToExpenseAtomic(
+            listId = "list_1",
+            itemIds = listOf("s1", "s2"),
+            accountId = wallet.id,
+            categoryId = SeedData.CAT_GROCERIES,
+            totalMinor = 36_000L,
+            currency = "INR",
+            merchantTitle = "Weekend Groceries",
+            nowMs = 70L,
         )
+        assertTrue(convertRes.succeeded)
+        assertEquals(2, convertRes.convertedItemCount)
+        assertNotNull(convertRes.transactionId)
         assertEquals(664_000L, db.accountDao().getById(wallet.id)!!.balanceMinor)
-        val remainingShoppingItems = db.shoppingItemDao().getActiveForList("list_1")
-        assertEquals(1, remainingShoppingItems.size)
-        assertEquals("Olive Oil", remainingShoppingItems.single().name)
+
+        // Original shopping list & items are preserved cleanly!
+        val preservedItems = db.shoppingItemDao().getActiveForList("list_1")
+        assertEquals(3, preservedItems.size)
         val expenseTx = db.transactionDao().getAllActive().first { it.merchant == "Weekend Groceries" }
         assertTrue(expenseTx.note.contains("Milk"))
         assertTrue(expenseTx.note.contains("Almonds"))
+
+        // Duplicate conversion of the exact same basket must be blocked cleanly without double debit
+        val duplicateAttempt = db.convertShoppingItemsToExpenseAtomic(
+            listId = "list_1",
+            itemIds = listOf("s1", "s2"),
+            accountId = wallet.id,
+            categoryId = SeedData.CAT_GROCERIES,
+            totalMinor = 36_000L,
+            currency = "INR",
+            merchantTitle = "Weekend Groceries",
+            nowMs = 75L,
+        )
+        assertEquals(LedgerDatabase.ConvertShoppingOutcomeStatus.DUPLICATE_ALREADY_CONVERTED, duplicateAttempt.status)
+        assertEquals(664_000L, db.accountDao().getById(wallet.id)!!.balanceMinor)
 
         // 4. Start Fresh resets Debts, Goals, and Shopping Lists alongside core ledger data
         db.resetAllDataFresh(defaultCurrency = "INR", nowMs = 100L)
@@ -622,7 +651,13 @@ class LedgerDatabaseRobolectricTest {
         v3Helper.close()
 
         val migratedDb = Room.databaseBuilder(context, LedgerDatabase::class.java, dbName)
-            .addMigrations(LedgerDatabase.MIGRATION_1_2, LedgerDatabase.MIGRATION_2_3, LedgerDatabase.MIGRATION_3_4, LedgerDatabase.MIGRATION_4_5)
+            .addMigrations(
+                LedgerDatabase.MIGRATION_1_2,
+                LedgerDatabase.MIGRATION_2_3,
+                LedgerDatabase.MIGRATION_3_4,
+                LedgerDatabase.MIGRATION_4_5,
+                LedgerDatabase.MIGRATION_5_6,
+            )
             .allowMainThreadQueries()
             .build()
 
@@ -869,6 +904,7 @@ class LedgerDatabaseRobolectricTest {
                 LedgerDatabase.MIGRATION_2_3,
                 LedgerDatabase.MIGRATION_3_4,
                 LedgerDatabase.MIGRATION_4_5,
+                LedgerDatabase.MIGRATION_5_6,
             )
             .allowMainThreadQueries()
             .build()
@@ -881,6 +917,159 @@ class LedgerDatabaseRobolectricTest {
             migratedDb.close()
             context.deleteDatabase(dbName)
         }
+    }
+
+    @Test
+    fun migration5To6_upgradesHierarchyDescriptionAndStructuredShoppingColumns() = runTest {
+        val dbName = "migration_v5_v6_test.db"
+        context.deleteDatabase(dbName)
+        val helper = object : SQLiteOpenHelper(context, dbName, null, 5) {
+            override fun onCreate(sqldb: SQLiteDatabase) {
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `accounts` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `institution` TEXT NOT NULL, `accountType` TEXT NOT NULL, `currency` TEXT NOT NULL, `balanceMinor` INTEGER NOT NULL, `lastFour` TEXT NOT NULL, `creditLimitMinor` INTEGER NOT NULL, `sourceType` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `lastSyncedAtEpochMs` INTEGER, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_accounts_updatedAtEpochMs` ON `accounts` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_accounts_deletedAtEpochMs` ON `accounts` (`deletedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `categories` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `kind` TEXT NOT NULL, `iconKey` TEXT NOT NULL, `colorHex` TEXT NOT NULL, `parentCategoryId` TEXT, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_categories_updatedAtEpochMs` ON `categories` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `transactions` (`id` TEXT NOT NULL, `accountId` TEXT NOT NULL, `transferAccountId` TEXT, `categoryId` TEXT, `categoryIdsCsv` TEXT NOT NULL, `txType` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `convertedMinor` INTEGER, `convertedCurrency` TEXT, `merchant` TEXT NOT NULL, `note` TEXT NOT NULL, `labelsCsv` TEXT NOT NULL, `sourceTag` TEXT NOT NULL, `autoRuleApplied` INTEGER NOT NULL, `occurredAtEpochMs` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, `reviewStatus` TEXT NOT NULL, `spendingPurpose` TEXT NOT NULL, `paymentAppName` TEXT NOT NULL, `paymentAppPackage` TEXT NOT NULL, `referenceId` TEXT NOT NULL, `accountHint` TEXT NOT NULL, `notificationKey` TEXT NOT NULL, `notificationFingerprint` TEXT NOT NULL, `originalParsedAmountMinor` INTEGER, `isRefundOrReversal` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_accountId` ON `transactions` (`accountId`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_categoryId` ON `transactions` (`categoryId`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_occurredAtEpochMs` ON `transactions` (`occurredAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_updatedAtEpochMs` ON `transactions` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_deletedAtEpochMs` ON `transactions` (`deletedAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_reviewStatus` ON `transactions` (`reviewStatus`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_referenceId` ON `transactions` (`referenceId`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_notificationKey` ON `transactions` (`notificationKey`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_notificationFingerprint` ON `transactions` (`notificationFingerprint`)")
+                sqldb.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS `transactions_fts` USING FTS4(`merchant` TEXT NOT NULL, `note` TEXT NOT NULL, `labelsCsv` TEXT NOT NULL, content=`transactions`)")
+                sqldb.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_transactions_fts_BEFORE_UPDATE BEFORE UPDATE ON `transactions` BEGIN DELETE FROM `transactions_fts` WHERE `docid`=OLD.`rowid`; END")
+                sqldb.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_transactions_fts_BEFORE_DELETE BEFORE DELETE ON `transactions` BEGIN DELETE FROM `transactions_fts` WHERE `docid`=OLD.`rowid`; END")
+                sqldb.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_transactions_fts_AFTER_UPDATE AFTER UPDATE ON `transactions` BEGIN INSERT INTO `transactions_fts`(`docid`, `merchant`, `note`, `labelsCsv`) VALUES (NEW.`rowid`, NEW.`merchant`, NEW.`note`, NEW.`labelsCsv`); END")
+                sqldb.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_transactions_fts_AFTER_INSERT AFTER INSERT ON `transactions` BEGIN INSERT INTO `transactions_fts`(`docid`, `merchant`, `note`, `labelsCsv`) VALUES (NEW.`rowid`, NEW.`merchant`, NEW.`note`, NEW.`labelsCsv`); END")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `budgets` (`id` TEXT NOT NULL, `categoryId` TEXT, `name` TEXT NOT NULL, `limitMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `period` TEXT NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_budgets_updatedAtEpochMs` ON `budgets` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `planned_payments` (`id` TEXT NOT NULL, `accountId` TEXT, `categoryId` TEXT, `title` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `txType` TEXT NOT NULL, `cadence` TEXT NOT NULL, `nextDueAtEpochMs` INTEGER NOT NULL, `autoPay` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_planned_payments_nextDueAtEpochMs` ON `planned_payments` (`nextDueAtEpochMs`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_planned_payments_updatedAtEpochMs` ON `planned_payments` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `holdings` (`id` TEXT NOT NULL, `symbol` TEXT NOT NULL, `name` TEXT NOT NULL, `assetClass` TEXT NOT NULL, `exchange` TEXT NOT NULL, `quantity` REAL NOT NULL, `avgCostMinor` INTEGER NOT NULL, `currentPriceMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `dayChangeBps` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_holdings_updatedAtEpochMs` ON `holdings` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `magic_rules` (`id` TEXT NOT NULL, `matchPattern` TEXT NOT NULL, `targetCategoryId` TEXT, `targetLabel` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_magic_rules_updatedAtEpochMs` ON `magic_rules` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `debts` (`id` TEXT NOT NULL, `personName` TEXT NOT NULL, `direction` TEXT NOT NULL, `totalAmountMinor` INTEGER NOT NULL, `remainingAmountMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `accountId` TEXT, `dueAtEpochMs` INTEGER, `note` TEXT NOT NULL, `status` TEXT NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_debts_updatedAtEpochMs` ON `debts` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `savings_goals` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `targetAmountMinor` INTEGER NOT NULL, `savedAmountMinor` INTEGER NOT NULL, `currency` TEXT NOT NULL, `targetDateEpochMs` INTEGER, `iconKey` TEXT NOT NULL, `colorHex` TEXT NOT NULL, `linkedAccountId` TEXT, `status` TEXT NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_savings_goals_updatedAtEpochMs` ON `savings_goals` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `shopping_lists` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `defaultCategoryId` TEXT, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_shopping_lists_updatedAtEpochMs` ON `shopping_lists` (`updatedAtEpochMs`)")
+                sqldb.execSQL("CREATE TABLE IF NOT EXISTS `shopping_items` (`id` TEXT NOT NULL, `listId` TEXT NOT NULL, `name` TEXT NOT NULL, `estimatedPriceMinor` INTEGER NOT NULL, `checked` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, `deletedAtEpochMs` INTEGER, `pendingSync` INTEGER NOT NULL, `quantityLabel` TEXT NOT NULL, PRIMARY KEY(`id`))")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_shopping_items_listId` ON `shopping_items` (`listId`)")
+                sqldb.execSQL("CREATE INDEX IF NOT EXISTS `index_shopping_items_updatedAtEpochMs` ON `shopping_items` (`updatedAtEpochMs`)")
+                sqldb.execSQL("INSERT INTO `categories` VALUES ('c1', 'Groceries', 'EXPENSE', 'shopping_cart', '#10B981', NULL, 1000, 1000, NULL, 1)")
+                sqldb.execSQL("INSERT INTO `shopping_lists` VALUES ('l1', 'Weekly Pantry', 'c1', 1000, 1000, NULL, 1)")
+                sqldb.execSQL("INSERT INTO `shopping_items` VALUES ('i1', 'l1', 'Rice', 35000, 0, 1000, 1000, NULL, 1, '5 kg')")
+            }
+
+            override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        helper.writableDatabase.close()
+        helper.close()
+
+        val migratedDb = Room.databaseBuilder(context, LedgerDatabase::class.java, dbName)
+            .addMigrations(
+                LedgerDatabase.MIGRATION_1_2,
+                LedgerDatabase.MIGRATION_2_3,
+                LedgerDatabase.MIGRATION_3_4,
+                LedgerDatabase.MIGRATION_4_5,
+                LedgerDatabase.MIGRATION_5_6,
+            )
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val cat = migratedDb.categoryDao().getById("c1")!!
+            assertEquals("", cat.description)
+            val list = migratedDb.shoppingListDao().getById("l1")!!
+            assertNull(list.lastConvertedTxId)
+            assertEquals("", list.lastConvertedSignature)
+            val item = migratedDb.shoppingItemDao().getById("i1")!!
+            assertEquals("5 kg", item.quantityLabel)
+            assertNull(item.quantityValue)
+            assertEquals("", item.quantityUnit)
+        } finally {
+            migratedDb.close()
+            context.deleteDatabase(dbName)
+        }
+    }
+
+    @Test
+    fun hierarchicalCategories_enforceCyclesDuplicatesAndSafeDeletion() = runTest {
+        SeedData.ensureMinimalSetup(db, defaultCurrency = "INR", nowMs = 1_000L)
+        val wallet = db.accountDao().getAllActive().single()
+
+        // Create Level 1 -> Level 2 -> Level 3 -> Level 4 hierarchy
+        val lvl1 = (db.upsertCategorySafeAtomic(null, "Campus Life", "EXPENSE", null, "school", "#6366F1", "Campus costs", 2_000L) as LedgerDatabase.CategoryMutationResult.Success).category
+        val lvl2 = (db.upsertCategorySafeAtomic(null, "Hostel", "EXPENSE", lvl1.id, "hotel", "#6366F1", "", 2_100L) as LedgerDatabase.CategoryMutationResult.Success).category
+        val lvl3 = (db.upsertCategorySafeAtomic(null, "Mess", "EXPENSE", lvl2.id, "restaurant", "#6366F1", "", 2_200L) as LedgerDatabase.CategoryMutationResult.Success).category
+        val lvl4 = (db.upsertCategorySafeAtomic(null, "Late Snacks", "EXPENSE", lvl3.id, "cafe", "#6366F1", "", 2_300L) as LedgerDatabase.CategoryMutationResult.Success).category
+
+        val activeMap = db.categoryDao().getAllActive().associateBy { it.id }
+        assertEquals("Campus Life › Hostel › Mess › Late Snacks", CategoryTree.breadcrumbPath(lvl4.id, activeMap))
+        assertEquals(3, CategoryTree.depthOf(lvl4.id, activeMap))
+
+        // Reject circular move (moving lvl1 under its 4th-level descendant lvl4)
+        val cycleAttempt = db.upsertCategorySafeAtomic(lvl1.id, lvl1.name, lvl1.kind, lvl4.id, lvl1.iconKey, lvl1.colorHex, "", 2_400L)
+        assertTrue(cycleAttempt is LedgerDatabase.CategoryMutationResult.Error)
+
+        // Reject same-level sibling duplicate case-insensitively, allow same name under different parent
+        val dupSibling = db.upsertCategorySafeAtomic(null, "mess", "EXPENSE", lvl2.id, "restaurant", "#6366F1", "", 2_500L)
+        assertTrue(dupSibling is LedgerDatabase.CategoryMutationResult.Error)
+        val diffParentSameName = db.upsertCategorySafeAtomic(null, "Late Snacks", "EXPENSE", lvl1.id, "cafe", "#6366F1", "", 2_600L)
+        assertTrue(diffParentSameName is LedgerDatabase.CategoryMutationResult.Success)
+
+        // Record tx & budget on lvl3 ("Mess"), then inspect impact and safely move children + reassign usages
+        db.recordTransactionAtomic(
+            TransactionEntity("tx_mess", wallet.id, null, lvl3.id, lvl3.id, "EXPENSE", -20_000L, "INR", null, null, "Night Canteen", "", "", "MANUAL", false, 3_000L, 3_000L, 3_000L)
+        )
+        val impact = db.inspectCategoryDeletionImpact(lvl3.id)!!
+        assertEquals(1, impact.directChildrenCount)
+        assertEquals(1, impact.linkedTransactionsCount)
+
+        val delRes = db.deleteCategoryWithSafeguardsAtomic(
+            categoryId = lvl3.id,
+            childStrategy = LedgerDatabase.ChildDeleteStrategy.MOVE_CHILDREN_TO_PARENT_OR_TARGET,
+            moveChildrenTargetParentId = lvl2.id,
+            usageStrategy = LedgerDatabase.UsageDeleteStrategy.REASSIGN_TO_TARGET,
+            reassignCategoryId = SeedData.CAT_GENERAL,
+            nowMs = 4_000L,
+        )
+        assertEquals(1, delRes.deletedCount)
+        assertEquals(1, delRes.movedChildrenCount)
+        assertEquals(1, delRes.reassignedUsagesCount)
+        assertEquals(lvl2.id, db.categoryDao().getById(lvl4.id)!!.parentCategoryId)
+        assertEquals(SeedData.CAT_GENERAL, db.transactionDao().getById("tx_mess")!!.categoryId)
+    }
+
+    @Test
+    fun shoppingCrud_handlesStructuredQuantitiesUnitsEditAndClearActions() = runTest {
+        SeedData.ensureMinimalSetup(db, defaultCurrency = "INR", nowMs = 1_000L)
+        db.shoppingListDao().upsert(ShoppingListEntity("slist_1", "Monthly Staples", SeedData.CAT_GROCERIES, 1_000L, 1_000L))
+
+        val added1 = db.addShoppingItemAtomic("slist_1", "Olive Oil", 2.0, "ltr", 95_000L, nowMs = 1_100L)!!
+        assertEquals("2 litres", added1.quantityLabel)
+        assertEquals("litre", added1.quantityUnit)
+        assertEquals(95_000L, added1.estimatedPriceMinor) // total estimate stored verbatim, never multiplied by 2!
+
+        val addedCustom = db.addShoppingItemAtomic("slist_1", "Pickles", 3.0, "jars", 45_000L, nowMs = 1_200L)!!
+        assertEquals("3 jars", addedCustom.quantityLabel)
+
+        val edited = db.updateShoppingItemAtomic(added1.id, "Extra Virgin Olive Oil", 1.5, "litre", 82_500L, nowMs = 1_300L)!!
+        assertEquals("Extra Virgin Olive Oil", edited.name)
+        assertEquals("1.5 litres", edited.quantityLabel)
+        assertEquals(82_500L, edited.estimatedPriceMinor)
+
+        db.toggleShoppingItemCheckedAtomic(addedCustom.id, nowMs = 1_400L)
+        assertEquals(1, db.clearCompletedShoppingItemsAtomic("slist_1", nowMs = 1_500L))
+        assertEquals(1, db.shoppingItemDao().getActiveForList("slist_1").size)
+        assertEquals(1, db.clearAllShoppingItemsAtomic("slist_1", nowMs = 1_600L))
+        assertEquals(0, db.shoppingItemDao().getActiveForList("slist_1").size)
     }
 
     @Test

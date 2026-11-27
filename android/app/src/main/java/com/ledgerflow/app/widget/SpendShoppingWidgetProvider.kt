@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.os.Bundle
+import com.ledgerflow.app.security.VaultStore
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -11,8 +12,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Widget B — Spend + Active Shopping List (4x3).
- * Displays financial metrics, quick actions, and up to 3 interactive unpurchased items.
+ * Widget 2 — Dedicated Shopping List Widget (4x2 to 4x4).
+ * Renders selectable checklist, visual completion progress, estimated total,
+ * interactive items with qty/price, + Add Item and Open List actions.
  */
 class SpendShoppingWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(
@@ -23,11 +25,11 @@ class SpendShoppingWidgetProvider : AppWidgetProvider() {
         val pendingResult: PendingResult? = goAsync()
         providerScope.launch {
             try {
-                LedgerWidgetCoordinator.refreshProviderIds(
+                LedgerWidgetCoordinator.refreshSpecificProviderIds(
                     context = context,
                     appWidgetManager = appWidgetManager,
                     appWidgetIds = appWidgetIds,
-                    isShoppingWidget = true,
+                    kind = LedgerWidgetKind.SHOPPING_LIST,
                 )
             } finally {
                 pendingResult?.finish()
@@ -44,14 +46,30 @@ class SpendShoppingWidgetProvider : AppWidgetProvider() {
         val pendingResult: PendingResult? = goAsync()
         providerScope.launch {
             try {
-                LedgerWidgetCoordinator.refreshProviderIds(
+                LedgerWidgetCoordinator.refreshSpecificProviderIds(
                     context = context,
                     appWidgetManager = appWidgetManager,
                     appWidgetIds = intArrayOf(appWidgetId),
-                    isShoppingWidget = true,
+                    kind = LedgerWidgetKind.SHOPPING_LIST,
                 )
             } finally {
                 pendingResult?.finish()
+            }
+        }
+    }
+
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        if (appWidgetIds.isEmpty()) return
+        val appCtx = context.applicationContext
+        val pending: PendingResult? = goAsync()
+        providerScope.launch {
+            try {
+                val keys = appWidgetIds.map { it.toString() }.toSet()
+                VaultStore(appCtx).update { state ->
+                    state.copy(widgetListSelections = state.widgetListSelections - keys)
+                }
+            } finally {
+                pending?.finish()
             }
         }
     }

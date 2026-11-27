@@ -1,8 +1,12 @@
 <resources>
     <string name="app_name">LedgerFlow</string>
     <string name="pay_track_service_label">LedgerFlow Pay &amp; Track</string>
-    <string name="widget_compact_name">LedgerFlow Quick Bar</string>
-    <string name="widget_compact_description">Today\u2019s spend, liquid balance, and 1-tap Expense, Voice List, Smart Paste, and Income actions.</string>
-    <string name="widget_shopping_name">LedgerFlow Spend &amp; List</string>
-    <string name="widget_shopping_description">Today\u2019s spend, liquid balance, quick actions, and interactive active shopping list.</string>
+    <string name="widget_compact_name">LedgerFlow Finance</string>
+    <string name="widget_compact_description">Today\u2019s spend, liquid balance, and 1-tap Expense, Voice, Smart Paste, and Income actions.</string>
+    <string name="widget_shopping_name">LedgerFlow Shopping List</string>
+    <string name="widget_shopping_description">Interactive shopping checklist with progress, estimated total, list switcher, and quick item entry.</string>
+    <string name="widget_mini_finance_name">LedgerFlow Compact Tile</string>
+    <string name="widget_mini_finance_description">Compact 2\u00d72 balance &amp; spend tile with instant Expense and Voice capture.</string>
+    <string name="widget_quick_expense_name">LedgerFlow Quick Expense</string>
+    <string name="widget_quick_expense_description">Sleek instant action capsule for 1-tap Expense, Voice Expense, and Income logging.</string>
 </resources>

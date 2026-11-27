@@ -94,6 +94,8 @@ data class VaultShoppingListDto(
     val id: String,
     val title: String,
     val defaultCategoryId: String? = null,
+    val lastConvertedTxId: String? = null,
+    val lastConvertedSignature: String = "",
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
     val deletedAtEpochMs: Long? = null,
@@ -105,11 +107,20 @@ data class VaultShoppingItemDto(
     val listId: String,
     val name: String,
     val quantityLabel: String = "",
+    val quantityValue: Double? = null,
+    val quantityUnit: String = "",
     val estimatedPriceMinor: Long = 0L,
     val checked: Boolean = false,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
     val deletedAtEpochMs: Long? = null,
+)
+
+@Serializable
+data class VaultCategoryHierarchyDto(
+    val id: String,
+    val parentCategoryId: String? = null,
+    val description: String = "",
 )
 
 @Serializable
@@ -127,6 +138,7 @@ data class LedgerVaultBackup(
     val savingsGoals: List<VaultSavingsGoalDto> = emptyList(),
     val shoppingLists: List<VaultShoppingListDto> = emptyList(),
     val shoppingItems: List<VaultShoppingItemDto> = emptyList(),
+    val categoryHierarchy: List<VaultCategoryHierarchyDto> = emptyList(),
 )
 
 class LedgerSyncRepository(
@@ -533,7 +545,15 @@ class LedgerSyncRepository(
         defaultCurrency: String,
         nowMs: Long,
     ): DataImportOutcome {
-        val cats = backup.categories.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val catMeta = backup.categoryHierarchy.associateBy { it.id }
+        val cats = backup.categories.map { dto ->
+            val meta = catMeta[dto.id]
+            dto.toEntity(nowMs).copy(
+                parentCategoryId = meta?.parentCategoryId,
+                description = meta?.description.orEmpty(),
+                pendingSync = true,
+            )
+        }
         val accs = backup.accounts.map { it.toEntity(nowMs).copy(pendingSync = true) }
         val txs = backup.transactions.map { it.toEntity(nowMs).copy(pendingSync = true) }
         val budgets = backup.budgets.map { it.toEntity(nowMs).copy(pendingSync = true) }
@@ -617,6 +637,9 @@ class LedgerSyncRepository(
             savingsGoals = db.savingsGoalDao().getAllActive().map { it.toBackupDto() },
             shoppingLists = db.shoppingListDao().getAllActive().map { it.toBackupDto() },
             shoppingItems = db.shoppingItemDao().getAllActive().map { it.toBackupDto() },
+            categoryHierarchy = db.categoryDao().getAllActive()
+                .filter { it.parentCategoryId != null || it.description.isNotBlank() }
+                .map { VaultCategoryHierarchyDto(it.id, it.parentCategoryId, it.description) },
         )
         return exportJson.encodeToString(LedgerVaultBackup.serializer(), backup)
     }
@@ -808,6 +831,7 @@ private fun VaultSavingsGoalDto.toEntity(now: Long) = SavingsGoalEntity(
 
 private fun ShoppingListEntity.toBackupDto() = VaultShoppingListDto(
     id = id, title = title, defaultCategoryId = defaultCategoryId,
+    lastConvertedTxId = lastConvertedTxId, lastConvertedSignature = lastConvertedSignature,
     createdAtEpochMs = createdAtEpochMs, updatedAtEpochMs = updatedAtEpochMs, deletedAtEpochMs = deletedAtEpochMs,
 )
 
@@ -817,17 +841,37 @@ private fun VaultShoppingListDto.toEntity(now: Long) = ShoppingListEntity(
     updatedAtEpochMs = updatedAtEpochMs.takeIf { it > 0L } ?: now,
     deletedAtEpochMs = deletedAtEpochMs,
     pendingSync = true,
+    lastConvertedTxId = lastConvertedTxId,
+    lastConvertedSignature = lastConvertedSignature,
 )
 
 private fun ShoppingItemEntity.toBackupDto() = VaultShoppingItemDto(
-    id = id, listId = listId, name = name, quantityLabel = quantityLabel, estimatedPriceMinor = estimatedPriceMinor, checked = checked,
+    id = id, listId = listId, name = name, quantityLabel = quantityLabel,
+    quantityValue = quantityValue, quantityUnit = quantityUnit,
+    estimatedPriceMinor = estimatedPriceMinor, checked = checked,
     createdAtEpochMs = createdAtEpochMs, updatedAtEpochMs = updatedAtEpochMs, deletedAtEpochMs = deletedAtEpochMs,
 )
 
-private fun VaultShoppingItemDto.toEntity(now: Long) = ShoppingItemEntity(
-    id = id, listId = listId, name = name, quantityLabel = quantityLabel, estimatedPriceMinor = estimatedPriceMinor, checked = checked,
-    createdAtEpochMs = createdAtEpochMs.takeIf { it > 0L } ?: now,
-    updatedAtEpochMs = updatedAtEpochMs.takeIf { it > 0L } ?: now,
-    deletedAtEpochMs = deletedAtEpochMs,
-    pendingSync = true,
-)
+private fun VaultShoppingItemDto.toEntity(now: Long): ShoppingItemEntity {
+    val parsed = if (quantityValue == null && quantityUnit.isBlank() && quantityLabel.isNotBlank()) {
+        com.ledgerflow.app.domain.ShoppingUnitCatalog.parseLegacyLabel(quantityLabel)
+    } else {
+        null
+    }
+    val resolvedQty = quantityValue ?: parsed?.quantityValue
+    val resolvedUnit = quantityUnit.ifBlank { parsed?.quantityUnit.orEmpty() }
+    val resolvedLabel = com.ledgerflow.app.domain.ShoppingUnitCatalog.formatQuantityLabel(
+        resolvedQty,
+        resolvedUnit,
+        quantityLabel,
+    )
+    return ShoppingItemEntity(
+        id = id, listId = listId, name = name, quantityLabel = resolvedLabel,
+        quantityValue = resolvedQty, quantityUnit = resolvedUnit,
+        estimatedPriceMinor = estimatedPriceMinor, checked = checked,
+        createdAtEpochMs = createdAtEpochMs.takeIf { it > 0L } ?: now,
+        updatedAtEpochMs = updatedAtEpochMs.takeIf { it > 0L } ?: now,
+        deletedAtEpochMs = deletedAtEpochMs,
+        pendingSync = true,
+    )
+}

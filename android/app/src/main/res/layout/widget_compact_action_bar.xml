@@ -6,11 +6,11 @@
     android:background="@drawable/widget_bg_flow_dark"
     android:orientation="vertical"
     android:paddingLeft="14dp"
-    android:paddingTop="11dp"
+    android:paddingTop="12dp"
     android:paddingRight="14dp"
-    android:paddingBottom="11dp">
+    android:paddingBottom="12dp">
 
-    <!-- Header bar (opens LedgerFlow main app) -->
+    <!-- Top Header Bar -->
     <LinearLayout
         android:id="@+id/widget_header_container"
         android:layout_width="match_parent"
@@ -19,13 +19,21 @@
         android:orientation="horizontal">
 
         <TextView
+            android:id="@+id/widget_brand_dot"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/widget_pill_emerald"
+            android:text="" />
+
+        <TextView
             android:id="@+id/widget_brand_label"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:ellipsize="end"
             android:includeFontPadding="false"
-            android:letterSpacing="0.08"
+            android:letterSpacing="0.09"
             android:maxLines="1"
             android:text="LEDGERFLOW"
             android:textColor="#10B981"
@@ -34,11 +42,28 @@
 
         <ImageView
             android:id="@+id/widget_lock_icon"
-            android:layout_width="12dp"
-            android:layout_height="12dp"
+            android:layout_width="13dp"
+            android:layout_height="13dp"
             android:layout_marginEnd="6dp"
             android:contentDescription="Balances hidden"
             android:src="@drawable/ic_widget_lock"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/widget_pending_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/widget_chip_flow_dark"
+            android:includeFontPadding="false"
+            android:paddingLeft="7dp"
+            android:paddingTop="2dp"
+            android:paddingRight="7dp"
+            android:paddingBottom="2dp"
+            android:text="0 PENDING"
+            android:textColor="#FBBF24"
+            android:textSize="9sp"
+            android:textStyle="bold"
             android:visibility="gone" />
 
         <TextView
@@ -47,33 +72,40 @@
             android:layout_height="wrap_content"
             android:background="@drawable/widget_chip_flow_dark"
             android:includeFontPadding="false"
-            android:paddingLeft="7dp"
-            android:paddingTop="2dp"
-            android:paddingRight="7dp"
-            android:paddingBottom="2dp"
+            android:paddingLeft="8dp"
+            android:paddingTop="3dp"
+            android:paddingRight="8dp"
+            android:paddingBottom="3dp"
             android:text="INR"
             android:textColor="#A7C4B5"
             android:textSize="9sp"
             android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- Primary metrics row -->
+    <!-- ALIBI-inspired Recessed Dual Metric Wells -->
     <LinearLayout
         android:id="@+id/widget_metrics_row"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="8dp"
         android:layout_marginBottom="8dp"
         android:layout_weight="1"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <LinearLayout
+            android:id="@+id/widget_spend_well"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="6dp"
             android:layout_weight="1"
+            android:background="@drawable/widget_well_flow_dark"
+            android:gravity="center_vertical"
             android:orientation="vertical"
-            android:paddingEnd="8dp">
+            android:paddingLeft="11dp"
+            android:paddingTop="8dp"
+            android:paddingRight="11dp"
+            android:paddingBottom="8dp">
 
             <TextView
                 android:id="@+id/widget_today_spend_label"
@@ -85,14 +117,14 @@
                 android:maxLines="1"
                 android:text="TODAY'S SPEND"
                 android:textColor="#7DA894"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/widget_today_spend_value"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:ellipsize="end"
                 android:fontFeatureSettings="tnum"
                 android:includeFontPadding="false"
@@ -103,18 +135,18 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/widget_metrics_divider"
-            android:layout_width="1dp"
-            android:layout_height="30dp"
-            android:background="#1D352B" />
-
         <LinearLayout
+            android:id="@+id/widget_balance_well"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
+            android:background="@drawable/widget_well_flow_dark"
+            android:gravity="center_vertical"
             android:orientation="vertical"
-            android:paddingStart="10dp">
+            android:paddingLeft="11dp"
+            android:paddingTop="8dp"
+            android:paddingRight="11dp"
+            android:paddingBottom="8dp">
 
             <TextView
                 android:id="@+id/widget_liquid_balance_label"
@@ -126,14 +158,14 @@
                 android:maxLines="1"
                 android:text="LIQUID BALANCE"
                 android:textColor="#7DA894"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/widget_liquid_balance_value"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:ellipsize="end"
                 android:fontFeatureSettings="tnum"
                 android:includeFontPadding="false"
@@ -145,11 +177,63 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Quick actions row -->
+    <!-- Adaptive Monthly Summary Strip (shown when resized vertically to 4x3) -->
+    <LinearLayout
+        android:id="@+id/widget_monthly_strip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/widget_well_flow_dark"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingLeft="11dp"
+        android:paddingTop="7dp"
+        android:paddingRight="11dp"
+        android:paddingBottom="7dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/widget_monthly_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="THIS MONTH FLOW"
+            android:textColor="#7DA894"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_monthly_inflow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:fontFeatureSettings="tnum"
+            android:includeFontPadding="false"
+            android:text="+₹0"
+            android:textColor="#10B981"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_monthly_outflow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFeatureSettings="tnum"
+            android:includeFontPadding="false"
+            android:text="-₹0"
+            android:textColor="#FB7185"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Bottom Quick Action Row -->
     <LinearLayout
         android:id="@+id/widget_actions_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="40dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
@@ -157,15 +241,15 @@
             android:id="@+id/btn_add_expense"
             android:layout_width="0dp"
             android:layout_height="40dp"
-            android:layout_marginEnd="8dp"
             android:layout_weight="1"
             android:background="@drawable/widget_pill_emerald"
-            android:ellipsize="end"
+            android:clickable="true"
+            android:focusable="true"
             android:gravity="center"
+            android:includeFontPadding="false"
             android:maxLines="1"
             android:paddingLeft="12dp"
             android:paddingRight="12dp"
-            android:singleLine="true"
             android:text="+ Expense"
             android:textColor="#FFFFFF"
             android:textSize="13sp"
@@ -175,47 +259,57 @@
             android:id="@+id/btn_voice_list"
             android:layout_width="40dp"
             android:layout_height="40dp"
-            android:layout_marginEnd="6dp"
+            android:layout_marginStart="8dp"
             android:background="@drawable/widget_circle_btn_flow_dark"
-            android:contentDescription="Voice Shopping List">
+            android:clickable="true"
+            android:contentDescription="Voice Expense"
+            android:focusable="true">
 
             <ImageView
                 android:id="@+id/icon_voice_list"
                 android:layout_width="18dp"
                 android:layout_height="18dp"
                 android:layout_gravity="center"
+                android:contentDescription="Voice Expense"
                 android:src="@drawable/ic_widget_mic" />
-        </FrameLayout>
-
-        <FrameLayout
-            android:id="@+id/btn_smart_paste"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_marginEnd="6dp"
-            android:background="@drawable/widget_circle_btn_flow_dark"
-            android:contentDescription="Smart Paste from Clipboard">
-
-            <ImageView
-                android:id="@+id/icon_smart_paste"
-                android:layout_width="18dp"
-                android:layout_height="18dp"
-                android:layout_gravity="center"
-                android:src="@drawable/ic_widget_paste" />
         </FrameLayout>
 
         <FrameLayout
             android:id="@+id/btn_add_income"
             android:layout_width="40dp"
             android:layout_height="40dp"
+            android:layout_marginStart="8dp"
             android:background="@drawable/widget_circle_btn_flow_dark"
-            android:contentDescription="Add Income">
+            android:clickable="true"
+            android:contentDescription="Add Income"
+            android:focusable="true">
 
             <ImageView
                 android:id="@+id/icon_add_income"
                 android:layout_width="18dp"
                 android:layout_height="18dp"
                 android:layout_gravity="center"
+                android:contentDescription="Add Income"
                 android:src="@drawable/ic_widget_income" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/btn_smart_paste"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/widget_circle_btn_flow_dark"
+            android:clickable="true"
+            android:contentDescription="Smart Paste"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/icon_smart_paste"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="center"
+                android:contentDescription="Smart Paste"
+                android:src="@drawable/ic_widget_paste" />
         </FrameLayout>
     </LinearLayout>
 </LinearLayout>

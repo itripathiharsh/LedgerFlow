@@ -242,21 +242,21 @@ object CategoryHierarchy {
     fun resolveTopLevelCategory(
         catId: String?,
         catMap: Map<String, CategoryEntity>,
-    ): CategoryEntity? {
-        val cat = catId?.let { catMap[it] } ?: return null
-        val parent = cat.parentCategoryId?.let { catMap[it] }
-        return parent ?: cat
-    }
+    ): CategoryEntity? = CategoryTree.rootOf(catId, catMap)
+
+    fun isDescendantOrSelf(
+        catId: String?,
+        ancestorId: String?,
+        catMap: Map<String, CategoryEntity>,
+    ): Boolean = CategoryTree.isDescendantOrSelf(catId, ancestorId, catMap)
 
     fun isEssentialNeed(
         catId: String?,
         catMap: Map<String, CategoryEntity>,
     ): Boolean {
-        val direct = catId?.let { catMap[it] }
-        val parent = direct?.parentCategoryId?.let { catMap[it] }
-        val topId = parent?.id ?: direct?.id
-        if (topId != null && topId in needParentIds) return true
-        val combinedName = listOfNotNull(parent?.name, direct?.name).joinToString(" ").lowercase(Locale.US)
+        val ancestors = CategoryTree.ancestorsOf(catId, catMap)
+        if (ancestors.any { it.id in needParentIds }) return true
+        val combinedName = ancestors.joinToString(" ") { it.name }.lowercase(Locale.US)
         return needKeywords.any { combinedName.contains(it) }
     }
 
@@ -924,9 +924,8 @@ object AnalyticsEngine {
             for ((cid, share) in shares) {
                 val cat = cid?.let { catMap[it] }
                 val key = cat?.id ?: "__uncat__"
-                val parent = cat?.parentCategoryId?.let { catMap[it] }
-                val displayName = if (!rollUpToParent && parent != null) {
-                    "${parent.name} › ${cat.name}"
+                val displayName = if (!rollUpToParent && cat != null) {
+                    CategoryTree.breadcrumbPath(cat.id, catMap)
                 } else {
                     cat?.name ?: "Uncategorized"
                 }

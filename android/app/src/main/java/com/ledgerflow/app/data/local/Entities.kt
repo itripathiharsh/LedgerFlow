@@ -29,7 +29,7 @@ data class AccountEntity(
 
 @Entity(
     tableName = "categories",
-    indices = [Index("updatedAtEpochMs")]
+    indices = [Index("updatedAtEpochMs"), Index("parentCategoryId")]
 )
 data class CategoryEntity(
     @PrimaryKey val id: String,
@@ -42,6 +42,7 @@ data class CategoryEntity(
     val updatedAtEpochMs: Long,
     val deletedAtEpochMs: Long? = null,
     val pendingSync: Boolean = true,
+    val description: String = "",
 )
 
 @Entity(
@@ -234,6 +235,8 @@ data class ShoppingListEntity(
     val updatedAtEpochMs: Long,
     val deletedAtEpochMs: Long? = null,
     val pendingSync: Boolean = true,
+    val lastConvertedTxId: String? = null,
+    val lastConvertedSignature: String = "",
 )
 
 @Entity(
@@ -251,4 +254,6 @@ data class ShoppingItemEntity(
     val deletedAtEpochMs: Long? = null,
     val pendingSync: Boolean = true,
     val quantityLabel: String = "",
+    val quantityValue: Double? = null,
+    val quantityUnit: String = "",
 )

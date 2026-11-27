@@ -16,23 +16,32 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.CardGiftcard
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Coffee
 import androidx.compose.material.icons.outlined.CreditCard
+import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.DirectionsTransit
+import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Flight
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Hotel
 import androidx.compose.material.icons.outlined.LocalGasStation
 import androidx.compose.material.icons.outlined.MedicalServices
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Payments
+import androidx.compose.material.icons.outlined.Restaurant
+import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material.icons.outlined.Spa
@@ -165,25 +174,34 @@ fun SourceTagBadge(sourceTag: String, paymentAppName: String = "") {
 }
 
 fun categoryIcon(iconKey: String): ImageVector = when (iconKey) {
-    "cafe" -> Icons.Outlined.Coffee
+    "cafe", "coffee" -> Icons.Outlined.Coffee
+    "restaurant", "dining" -> Icons.Outlined.Restaurant
     "shopping_cart" -> Icons.Outlined.ShoppingCart
     "shopping_bag" -> Icons.Outlined.ShoppingBag
     "fuel", "local_gas_station" -> Icons.Outlined.LocalGasStation
+    "directions_car", "car" -> Icons.Outlined.DirectionsCar
     "directions_transit" -> Icons.Outlined.DirectionsTransit
     "auto_awesome" -> Icons.Outlined.AutoAwesome
     "home" -> Icons.Outlined.Home
+    "bolt", "utilities" -> Icons.Outlined.Bolt
+    "build", "maintenance" -> Icons.Outlined.Build
     "payments", "debt" -> Icons.Outlined.Payments
     "medical_services" -> Icons.Outlined.MedicalServices
+    "security", "insurance" -> Icons.Outlined.Security
     "movie" -> Icons.Outlined.Movie
     "flight" -> Icons.Outlined.Flight
+    "hotel", "hostel" -> Icons.Outlined.Hotel
     "school" -> Icons.Outlined.School
+    "menu_book", "book", "books" -> Icons.AutoMirrored.Outlined.MenuBook
+    "fitness_center", "fitness" -> Icons.Outlined.FitnessCenter
     "spa" -> Icons.Outlined.Spa
     "work" -> Icons.Outlined.WorkOutline
     "gift", "card_giftcard" -> Icons.Outlined.CardGiftcard
     "credit_card" -> Icons.Outlined.CreditCard
     "loan" -> Icons.AutoMirrored.Outlined.ReceiptLong
     "bank" -> Icons.Outlined.AccountBalance
-    "savings", "flag" -> Icons.Outlined.Flag
+    "savings" -> Icons.Outlined.Savings
+    "flag" -> Icons.Outlined.Flag
     "checklist", "shopping_list" -> Icons.Outlined.Checklist
     else -> Icons.Outlined.Category
 }

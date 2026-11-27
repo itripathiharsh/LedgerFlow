@@ -135,6 +135,7 @@ class MainActivity : FragmentActivity() {
     private val vm: LedgerViewModel by viewModels()
     private var pendingWidgetRoute by mutableStateOf<String?>(null)
     private var pendingOpenCreateShoppingList by mutableStateOf(false)
+    private var pendingShoppingListId by mutableStateOf<String?>(null)
 
     // Register at Activity lifecycle level rather than inside Compose DisposableEffect so
     // Settings / install-permission jumps cannot fail due to uninitialized Compose holders.
@@ -263,9 +264,11 @@ class MainActivity : FragmentActivity() {
                         vm = vm,
                         pendingWidgetRoute = pendingWidgetRoute,
                         pendingOpenCreateShoppingList = pendingOpenCreateShoppingList,
+                        pendingShoppingListId = pendingShoppingListId,
                         onConsumeWidgetNavigation = {
                             pendingWidgetRoute = null
                             pendingOpenCreateShoppingList = false
+                            pendingShoppingListId = null
                         },
                     )
 
@@ -320,8 +323,10 @@ class MainActivity : FragmentActivity() {
         if (widgetRoute.isNotBlank()) {
             pendingWidgetRoute = widgetRoute
             pendingOpenCreateShoppingList = intent.getBooleanExtra(EXTRA_OPEN_CREATE_SHOPPING_LIST, false)
+            pendingShoppingListId = intent.getStringExtra(EXTRA_SHOPPING_LIST_ID)?.trim()?.takeIf { it.isNotEmpty() }
             intent.removeExtra(EXTRA_WIDGET_ROUTE)
             intent.removeExtra(EXTRA_OPEN_CREATE_SHOPPING_LIST)
+            intent.removeExtra(EXTRA_SHOPPING_LIST_ID)
         }
         if (intent.action != Intent.ACTION_SEND) return
         val shared = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
@@ -336,16 +341,19 @@ class MainActivity : FragmentActivity() {
         const val ROUTE_SHOPPING_LISTS = "shopping_lists"
         const val EXTRA_WIDGET_ROUTE = "extra_widget_route"
         const val EXTRA_OPEN_CREATE_SHOPPING_LIST = "extra_open_create_shopping_list"
+        const val EXTRA_SHOPPING_LIST_ID = "extra_shopping_list_id"
 
         fun widgetLaunchIntent(
             context: android.content.Context,
             route: String = ROUTE_HOME,
             openCreateShoppingList: Boolean = false,
+            shoppingListId: String? = null,
         ): Intent = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_MAIN
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra(EXTRA_WIDGET_ROUTE, route)
             putExtra(EXTRA_OPEN_CREATE_SHOPPING_LIST, openCreateShoppingList)
+            if (!shoppingListId.isNullOrBlank()) putExtra(EXTRA_SHOPPING_LIST_ID, shoppingListId)
         }
     }
 
@@ -423,6 +431,7 @@ private fun LedgerFlowMainShell(
     vm: LedgerViewModel,
     pendingWidgetRoute: String? = null,
     pendingOpenCreateShoppingList: Boolean = false,
+    pendingShoppingListId: String? = null,
     onConsumeWidgetNavigation: () -> Unit = {},
 ) {
     val navController = rememberNavController()
@@ -443,6 +452,7 @@ private fun LedgerFlowMainShell(
     var budgetsInitialTab by remember { mutableIntStateOf(0) }
     var debtsAddTrigger by remember { mutableIntStateOf(0) }
     var shoppingAddTrigger by remember { mutableIntStateOf(0) }
+    var targetShoppingListId by remember { mutableStateOf<String?>(null) }
     var budgetsAddTrigger by remember { mutableIntStateOf(0) }
     var openAddAccountOnStart by remember { mutableStateOf(false) }
     var showSmartPasteImport by remember { mutableStateOf(false) }
@@ -455,7 +465,7 @@ private fun LedgerFlowMainShell(
         }
     }
 
-    LaunchedEffect(pendingWidgetRoute, pendingOpenCreateShoppingList) {
+    LaunchedEffect(pendingWidgetRoute, pendingOpenCreateShoppingList, pendingShoppingListId) {
         val target = pendingWidgetRoute
         if (!target.isNullOrBlank()) {
             navController.navigate(target) {
@@ -463,8 +473,13 @@ private fun LedgerFlowMainShell(
                 launchSingleTop = true
                 restoreState = true
             }
-            if (target == MainActivity.ROUTE_SHOPPING_LISTS && pendingOpenCreateShoppingList) {
-                shoppingAddTrigger++
+            if (target == MainActivity.ROUTE_SHOPPING_LISTS) {
+                if (!pendingShoppingListId.isNullOrBlank()) {
+                    targetShoppingListId = pendingShoppingListId
+                }
+                if (pendingOpenCreateShoppingList) {
+                    shoppingAddTrigger++
+                }
             }
             onConsumeWidgetNavigation()
         }
@@ -764,6 +779,8 @@ private fun LedgerFlowMainShell(
                     ShoppingListsScreen(
                         vm = vm,
                         addTrigger = shoppingAddTrigger,
+                        initialListId = targetShoppingListId,
+                        onConsumeInitialList = { targetShoppingListId = null },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onOpenSettings = { navigateDrawerRoute("settings") },
                     )

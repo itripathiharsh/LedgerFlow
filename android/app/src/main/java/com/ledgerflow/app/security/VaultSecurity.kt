@@ -35,6 +35,7 @@ data class VaultSessionState(
     val telemetryOptIn: Boolean = false,
     val hideBalances: Boolean = false,
     val showWidgetsOnLockScreen: Boolean = false,
+    val widgetListSelections: Map<String, String> = emptyMap(),
     val pinHashBase64: String? = null,
     val pinSaltBase64: String? = null,
     val dismissedUpdateVersionCode: Long = 0L,
@@ -156,7 +157,8 @@ class VaultStore(context: Context) {
             prev.themeMode != next.themeMode ||
             prev.hideBalances != next.hideBalances ||
             prev.showWidgetsOnLockScreen != next.showWidgetsOnLockScreen ||
-            prev.baseCurrency != next.baseCurrency
+            prev.baseCurrency != next.baseCurrency ||
+            prev.widgetListSelections != next.widgetListSelections
         ) {
             runCatching { com.ledgerflow.app.widget.LedgerWidgetCoordinator.requestRefresh(appContext) }
         }

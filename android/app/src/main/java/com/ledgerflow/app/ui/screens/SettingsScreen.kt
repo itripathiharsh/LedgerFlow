@@ -338,9 +338,9 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Outlined.Category, contentDescription = null, tint = EmeraldDark)
                         Column {
-                            Text("Categories & Subcategories", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                            Text("Categories & Hierarchy", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
                             Text(
-                                text = "$parentCatCount main categories • $subCatCount subcategories",
+                                text = "$parentCatCount top-level • $subCatCount nested subcategories",
                                 fontSize = 12.sp,
                                 color = MutedSlate,
                             )

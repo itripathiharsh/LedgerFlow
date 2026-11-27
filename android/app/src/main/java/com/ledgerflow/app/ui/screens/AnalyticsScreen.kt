@@ -117,6 +117,7 @@ fun AnalyticsScreen(
     val context = LocalContext.current
     val accounts by vm.accounts.collectAsState()
     val categories by vm.categories.collectAsState()
+    val allCategoriesLookup by vm.categoriesIncludingDeleted.collectAsState()
     val transactions by vm.allTransactions.collectAsState()
     val planned by vm.plannedPayments.collectAsState()
     val holdings by vm.holdings.collectAsState()
@@ -132,6 +133,7 @@ fun AnalyticsScreen(
     var customPickerStep by remember { mutableIntStateOf(0) } // 0 = closed, 1 = pick start, 2 = pick end
 
     var spendingBreakdownMode by remember { mutableIntStateOf(0) } // 0 = Categories, 1 = Subcategories, 2 = #Labels
+    var drillParentId by remember { mutableStateOf<String?>(null) }
     var editingLimitCard by remember { mutableStateOf<CardUtilizationRow?>(null) }
     var pendingCsvToSave by remember { mutableStateOf<String?>(null) }
 
@@ -155,10 +157,10 @@ fun AnalyticsScreen(
         )
     }
 
-    val bundle = remember(accounts, categories, transactions, planned, holdings, baseCurrency, activeRange) {
+    val bundle = remember(accounts, allCategoriesLookup, transactions, planned, holdings, baseCurrency, activeRange) {
         AnalyticsEngine.computeFullAnalytics(
             accounts = accounts,
-            categories = categories,
+            categories = allCategoriesLookup,
             transactions = transactions,
             planned = planned,
             holdings = holdings,
@@ -628,13 +630,88 @@ fun AnalyticsScreen(
 
             // SECTION 2: SPENDING
             2 -> {
-                // Spending by Categories / Subcategories / #Labels
+                // Spending by Categories / Subcategories / #Labels with Hierarchical Drill-Down
                 item {
-                    val activeItems = when (spendingBreakdownMode) {
-                        1 -> bundle.spendingBySubcategory
-                        2 -> bundle.spendingByLabels
-                        else -> bundle.spendingByParentCategory
+                    val catLookupMap = remember(allCategoriesLookup) { allCategoriesLookup.associateBy { it.id } }
+                    val expensePeriods = remember(transactions, activeRange) {
+                        transactions.filter {
+                            it.deletedAtEpochMs == null &&
+                                it.txType == "EXPENSE" &&
+                                it.occurredAtEpochMs in activeRange.startEpochMs..activeRange.endEpochMs
+                        }
                     }
+
+                    val activeItems = remember(
+                        spendingBreakdownMode,
+                        drillParentId,
+                        bundle,
+                        expensePeriods,
+                        allCategoriesLookup,
+                        catLookupMap,
+                        baseCurrency,
+                    ) {
+                        when (spendingBreakdownMode) {
+                            1 -> bundle.spendingBySubcategory
+                            2 -> bundle.spendingByLabels
+                            else -> {
+                                val targetParentId = drillParentId
+                                if (targetParentId == null) {
+                                    bundle.spendingByParentCategory
+                                } else {
+                                    val directKids = allCategoriesLookup.filter {
+                                        it.deletedAtEpochMs == null && it.parentCategoryId == targetParentId
+                                    }
+                                    val bucketAmounts = HashMap<String, Long>()
+                                    val bucketNames = HashMap<String, String>()
+                                    val bucketColors = HashMap<String, String>()
+                                    val bucketCounts = HashMap<String, Int>()
+                                    var totalInBranch = 0L
+
+                                    for (tx in expensePeriods) {
+                                        val assignedIds = tx.categoryIdsCsv.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                                            .ifEmpty { listOfNotNull(tx.categoryId) }
+                                        val relevantIds = assignedIds.filter { cid ->
+                                            com.ledgerflow.app.domain.CategoryTree.isDescendantOrSelf(cid, targetParentId, catLookupMap)
+                                        }
+                                        if (relevantIds.isEmpty()) continue
+                                        val mag = abs(com.ledgerflow.app.domain.FxConverter.convertMinor(tx.amountMinor, tx.currency, baseCurrency))
+                                        if (mag <= 0L) continue
+                                        totalInBranch += mag
+                                        val perShare = mag / relevantIds.size
+                                        relevantIds.forEach { cid ->
+                                            val matchingChild = directKids.firstOrNull { kid ->
+                                                com.ledgerflow.app.domain.CategoryTree.isDescendantOrSelf(cid, kid.id, catLookupMap)
+                                            }
+                                            val bucketKey = matchingChild?.id ?: targetParentId
+                                            val bucketCat = catLookupMap[bucketKey]
+                                            bucketNames.putIfAbsent(
+                                                bucketKey,
+                                                if (bucketKey == targetParentId) "${bucketCat?.name ?: "Direct"} (Direct)" else bucketCat?.name ?: "Other",
+                                            )
+                                            bucketColors.putIfAbsent(bucketKey, bucketCat?.colorHex ?: "#059669")
+                                            bucketAmounts[bucketKey] = (bucketAmounts[bucketKey] ?: 0L) + perShare
+                                            bucketCounts[bucketKey] = (bucketCounts[bucketKey] ?: 0) + 1
+                                        }
+                                    }
+                                    if (totalInBranch <= 0L) {
+                                        emptyList()
+                                    } else {
+                                        bucketAmounts.entries.sortedByDescending { it.value }.map { (id, amt) ->
+                                            com.ledgerflow.app.domain.BreakdownItem(
+                                                id = id,
+                                                name = bucketNames[id] ?: "Other",
+                                                colorHex = bucketColors[id] ?: "#059669",
+                                                amountMinor = amt,
+                                                txCount = bucketCounts[id] ?: 0,
+                                                ratio = (amt.toFloat() / totalInBranch.toFloat()).coerceIn(0f, 1f),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     val total = activeItems.sumOf { it.amountMinor }
                     val defaultColor = EmeraldPrimary
                     val pieSlices = remember(activeItems, defaultColor) {
@@ -656,7 +733,10 @@ fun AnalyticsScreen(
                             listOf("Categories", "Subcategories", "#Labels").forEachIndexed { idx, label ->
                                 FilterChip(
                                     selected = spendingBreakdownMode == idx,
-                                    onClick = { spendingBreakdownMode = idx },
+                                    onClick = {
+                                        spendingBreakdownMode = idx
+                                        if (idx != 0) drillParentId = null
+                                    },
                                     label = { Text(label, fontSize = 11.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = EmeraldSoft,
@@ -665,6 +745,52 @@ fun AnalyticsScreen(
                                 )
                             }
                         }
+
+                        if (spendingBreakdownMode == 0 && drillParentId != null) {
+                            val trail = remember(drillParentId, catLookupMap) {
+                                com.ledgerflow.app.domain.CategoryTree.ancestorsOf(drillParentId, catLookupMap)
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Surface(
+                                    onClick = { drillParentId = null },
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = SlateTint,
+                                    border = BorderStroke(1.dp, BorderSubtle),
+                                ) {
+                                    Text(
+                                        text = "All",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = EmeraldPrimary,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                    )
+                                }
+                                trail.forEach { crumb ->
+                                    val isCurrent = crumb.id == drillParentId
+                                    Text("›", fontSize = 12.sp, color = MutedSlate)
+                                    Surface(
+                                        onClick = { drillParentId = crumb.id },
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = if (isCurrent) EmeraldSoft else SlateTint,
+                                        border = BorderStroke(1.dp, if (isCurrent) EmeraldPrimary else BorderSubtle),
+                                    ) {
+                                        Text(
+                                            text = crumb.name,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isCurrent) EmeraldDark else SlateInk,
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         Spacer(Modifier.height(10.dp))
                         CategoryDonutChart(
                             slices = pieSlices,
@@ -674,6 +800,43 @@ fun AnalyticsScreen(
                             centerSubtitle = bundle.range.label,
                             emptyMessage = "No spending recorded in this period.",
                         )
+
+                        if (spendingBreakdownMode == 0 && activeItems.isNotEmpty()) {
+                            val drillableIds = remember(activeItems, allCategoriesLookup) {
+                                activeItems.mapNotNull { item ->
+                                    val hasChildren = allCategoriesLookup.any {
+                                        it.deletedAtEpochMs == null && it.parentCategoryId == item.id && item.id != drillParentId
+                                    }
+                                    if (hasChildren) item.id else null
+                                }.toSet()
+                            }
+                            if (drillableIds.isNotEmpty()) {
+                                Spacer(Modifier.height(8.dp))
+                                Text("Drill down into subcategories:", fontSize = 11.sp, color = MutedSlate, fontWeight = FontWeight.Medium)
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    activeItems.filter { it.id in drillableIds }.forEach { item ->
+                                        Surface(
+                                            onClick = { drillParentId = item.id },
+                                            shape = RoundedCornerShape(999.dp),
+                                            color = SlateTint,
+                                            border = BorderStroke(1.dp, BorderSubtle),
+                                        ) {
+                                            Text(
+                                                text = "${item.name} ›",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = EmeraldDark,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
