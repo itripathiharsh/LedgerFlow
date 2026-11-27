@@ -133,6 +133,8 @@ import kotlinx.coroutines.launch
 
 class MainActivity : FragmentActivity() {
     private val vm: LedgerViewModel by viewModels()
+    private var pendingWidgetRoute by mutableStateOf<String?>(null)
+    private var pendingOpenCreateShoppingList by mutableStateOf(false)
 
     // Register at Activity lifecycle level rather than inside Compose DisposableEffect so
     // Settings / install-permission jumps cannot fail due to uninitialized Compose holders.
@@ -257,7 +259,15 @@ class MainActivity : FragmentActivity() {
                         },
                     )
                 } else {
-                    LedgerFlowMainShell(vm = vm)
+                    LedgerFlowMainShell(
+                        vm = vm,
+                        pendingWidgetRoute = pendingWidgetRoute,
+                        pendingOpenCreateShoppingList = pendingOpenCreateShoppingList,
+                        onConsumeWidgetNavigation = {
+                            pendingWidgetRoute = null
+                            pendingOpenCreateShoppingList = false
+                        },
+                    )
 
                     val updateManifest = availableUpdate
                     if (updateManifest != null && (isOnline || updateInstallState != null)) {
@@ -304,13 +314,38 @@ class MainActivity : FragmentActivity() {
 
     private fun handleIncomingShareIntent(intent: Intent?) {
         intent ?: return
-        if (intent.action != Intent.ACTION_SEND) return
         val launchedFromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
         if (launchedFromHistory) return
+        val widgetRoute = intent.getStringExtra(EXTRA_WIDGET_ROUTE)?.trim().orEmpty()
+        if (widgetRoute.isNotBlank()) {
+            pendingWidgetRoute = widgetRoute
+            pendingOpenCreateShoppingList = intent.getBooleanExtra(EXTRA_OPEN_CREATE_SHOPPING_LIST, false)
+            intent.removeExtra(EXTRA_WIDGET_ROUTE)
+            intent.removeExtra(EXTRA_OPEN_CREATE_SHOPPING_LIST)
+        }
+        if (intent.action != Intent.ACTION_SEND) return
         val shared = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
         if (shared.isNotBlank() && !vm.isLocked.value) {
             vm.capturePaymentAlertText(shared, originNote = "")
             intent.removeExtra(Intent.EXTRA_TEXT)
+        }
+    }
+
+    companion object {
+        const val ROUTE_HOME = "home"
+        const val ROUTE_SHOPPING_LISTS = "shopping_lists"
+        const val EXTRA_WIDGET_ROUTE = "extra_widget_route"
+        const val EXTRA_OPEN_CREATE_SHOPPING_LIST = "extra_open_create_shopping_list"
+
+        fun widgetLaunchIntent(
+            context: android.content.Context,
+            route: String = ROUTE_HOME,
+            openCreateShoppingList: Boolean = false,
+        ): Intent = Intent(context, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_WIDGET_ROUTE, route)
+            putExtra(EXTRA_OPEN_CREATE_SHOPPING_LIST, openCreateShoppingList)
         }
     }
 
@@ -384,7 +419,12 @@ class MainActivity : FragmentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LedgerFlowMainShell(vm: LedgerViewModel) {
+private fun LedgerFlowMainShell(
+    vm: LedgerViewModel,
+    pendingWidgetRoute: String? = null,
+    pendingOpenCreateShoppingList: Boolean = false,
+    onConsumeWidgetNavigation: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route ?: "home"
@@ -412,6 +452,21 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
         statusMsg?.let { msg ->
             snackbarHost.showSnackbar(msg)
             vm.clearMessage()
+        }
+    }
+
+    LaunchedEffect(pendingWidgetRoute, pendingOpenCreateShoppingList) {
+        val target = pendingWidgetRoute
+        if (!target.isNullOrBlank()) {
+            navController.navigate(target) {
+                popUpTo("home") { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+            if (target == MainActivity.ROUTE_SHOPPING_LISTS && pendingOpenCreateShoppingList) {
+                shoppingAddTrigger++
+            }
+            onConsumeWidgetNavigation()
         }
     }
 

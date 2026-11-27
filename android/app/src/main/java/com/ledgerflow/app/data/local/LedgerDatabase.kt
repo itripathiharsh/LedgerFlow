@@ -10,6 +10,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
+import com.ledgerflow.app.domain.ParsedShoppingItem
+import com.ledgerflow.app.domain.VoiceShoppingParser
 import java.util.UUID
 import kotlin.math.abs
 
@@ -28,7 +30,7 @@ import kotlin.math.abs
         ShoppingListEntity::class,
         ShoppingItemEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class LedgerDatabase : RoomDatabase() {
@@ -640,10 +642,11 @@ abstract class LedgerDatabase : RoomDatabase() {
             if (listItems.isEmpty()) return@withTransaction false
 
             val itemizedNote = listItems.joinToString(", ") { item ->
+                val display = ParsedShoppingItem.formatDisplay(item.name, item.quantityLabel)
                 if (item.estimatedPriceMinor > 0L) {
-                    "${item.name} (${com.ledgerflow.app.domain.MoneyFormatter.formatMinor(item.estimatedPriceMinor, currency)})"
+                    "$display (${com.ledgerflow.app.domain.MoneyFormatter.formatMinor(item.estimatedPriceMinor, currency)})"
                 } else {
-                    item.name
+                    display
                 }
             }.take(300)
 
@@ -673,6 +676,101 @@ abstract class LedgerDatabase : RoomDatabase() {
                 shoppingItemDao().upsertAll(cleared)
             }
             true
+        }
+    }
+
+    data class AddVoiceShoppingOutcome(
+        val listId: String,
+        val listTitle: String,
+        val addedCount: Int,
+        val skippedDuplicateCount: Int,
+        val createdNewList: Boolean,
+    )
+
+    suspend fun toggleShoppingItemCheckedAtomic(
+        itemId: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): ShoppingItemEntity? = withTransaction {
+        val existing = shoppingItemDao().getById(itemId) ?: return@withTransaction null
+        if (existing.deletedAtEpochMs != null) return@withTransaction null
+        val updated = existing.copy(
+            checked = !existing.checked,
+            updatedAtEpochMs = nowMs,
+            pendingSync = true,
+        )
+        shoppingItemDao().upsert(updated)
+        shoppingListDao().getById(existing.listId)?.takeIf { it.deletedAtEpochMs == null }?.let { parentList ->
+            shoppingListDao().upsert(parentList.copy(updatedAtEpochMs = nowMs, pendingSync = true))
+        }
+        updated
+    }
+
+    suspend fun addParsedShoppingItemsAtomic(
+        listId: String?,
+        items: List<ParsedShoppingItem>,
+        defaultListTitle: String = "Shopping List",
+        nowMs: Long = System.currentTimeMillis(),
+    ): AddVoiceShoppingOutcome {
+        return withTransaction {
+            val activeLists = shoppingListDao().getAllActive()
+                .filter { it.deletedAtEpochMs == null }
+                .sortedByDescending { it.updatedAtEpochMs }
+            val existingTarget = listId?.let { targetId ->
+                activeLists.firstOrNull { it.id == targetId }
+            } ?: activeLists.firstOrNull()
+
+            val createdNew = existingTarget == null
+            val targetList = existingTarget ?: ShoppingListEntity(
+                id = UUID.randomUUID().toString(),
+                title = defaultListTitle.trim().ifBlank { "Shopping List" },
+                defaultCategoryId = categoryDao().getById(SeedData.CAT_GROCERIES)
+                    ?.takeIf { it.deletedAtEpochMs == null }
+                    ?.id,
+                createdAtEpochMs = nowMs,
+                updatedAtEpochMs = nowMs,
+                pendingSync = true,
+            )
+            shoppingListDao().upsert(targetList.copy(updatedAtEpochMs = nowMs, pendingSync = true))
+
+            val existingActive = shoppingItemDao().getActiveForList(targetList.id)
+            val existingKeys = existingActive
+                .filter { !it.checked }
+                .map { VoiceShoppingParser.normalizeKey(it.name) }
+                .toHashSet()
+
+            val toInsert = mutableListOf<ShoppingItemEntity>()
+            var skipped = 0
+            items.forEachIndexed { index, parsed ->
+                val cleanName = parsed.name.trim()
+                val key = VoiceShoppingParser.normalizeKey(cleanName)
+                if (cleanName.isBlank() || key.isBlank()) return@forEachIndexed
+                if (!existingKeys.add(key)) {
+                    skipped++
+                    return@forEachIndexed
+                }
+                val itemTs = nowMs + index.toLong()
+                toInsert += ShoppingItemEntity(
+                    id = UUID.randomUUID().toString(),
+                    listId = targetList.id,
+                    name = cleanName,
+                    quantityLabel = parsed.quantityLabel.trim(),
+                    estimatedPriceMinor = 0L,
+                    checked = false,
+                    createdAtEpochMs = itemTs,
+                    updatedAtEpochMs = itemTs,
+                    pendingSync = true,
+                )
+            }
+            if (toInsert.isNotEmpty()) {
+                shoppingItemDao().upsertAll(toInsert)
+            }
+            AddVoiceShoppingOutcome(
+                listId = targetList.id,
+                listTitle = targetList.title,
+                addedCount = toInsert.size,
+                skippedDuplicateCount = skipped,
+                createdNewList = createdNew,
+            )
         }
     }
 
@@ -774,6 +872,12 @@ abstract class LedgerDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE shopping_items ADD COLUMN quantityLabel TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long =
             AnalyticsCalculator.advanceDueDate(currentDueMs, cadence)
 
@@ -787,7 +891,7 @@ abstract class LedgerDatabase : RoomDatabase() {
                     LedgerDatabase::class.java,
                     "ledgerflow_vault.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
                     .also { INSTANCE = it }

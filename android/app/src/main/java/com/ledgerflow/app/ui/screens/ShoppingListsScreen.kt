@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.MoneyFormatter
+import com.ledgerflow.app.domain.ParsedShoppingItem
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
@@ -434,7 +435,7 @@ fun ShoppingListsScreen(
                                         colors = CheckboxDefaults.colors(checkedColor = EmeraldPrimary),
                                     )
                                     Text(
-                                        text = item.name,
+                                        text = ParsedShoppingItem.formatDisplay(item.name, item.quantityLabel),
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = SlateInk,
@@ -516,7 +517,7 @@ fun ShoppingListsScreen(
                                                 colors = CheckboxDefaults.colors(checkedColor = EmeraldPrimary),
                                             )
                                             Text(
-                                                text = item.name,
+                                                text = ParsedShoppingItem.formatDisplay(item.name, item.quantityLabel),
                                                 fontSize = 14.sp,
                                                 color = MutedSlate,
                                                 textDecoration = TextDecoration.LineThrough,

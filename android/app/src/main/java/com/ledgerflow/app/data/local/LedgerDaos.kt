@@ -310,6 +310,9 @@ interface ShoppingListDao {
     @Query("SELECT * FROM shopping_lists WHERE deletedAtEpochMs IS NULL")
     suspend fun getAllActive(): List<ShoppingListEntity>
 
+    @Query("SELECT * FROM shopping_lists WHERE deletedAtEpochMs IS NULL ORDER BY updatedAtEpochMs DESC LIMIT 1")
+    suspend fun getMostRecentActive(): ShoppingListEntity?
+
     @Query("SELECT * FROM shopping_lists WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): ShoppingListEntity?
 
@@ -333,6 +336,9 @@ interface ShoppingItemDao {
 
     @Query("SELECT * FROM shopping_items WHERE deletedAtEpochMs IS NULL AND listId = :listId")
     suspend fun getActiveForList(listId: String): List<ShoppingItemEntity>
+
+    @Query("SELECT * FROM shopping_items WHERE deletedAtEpochMs IS NULL AND listId = :listId ORDER BY checked ASC, createdAtEpochMs ASC")
+    suspend fun getActiveOrderedForList(listId: String): List<ShoppingItemEntity>
 
     @Query("SELECT * FROM shopping_items WHERE deletedAtEpochMs IS NULL")
     suspend fun getAllActive(): List<ShoppingItemEntity>

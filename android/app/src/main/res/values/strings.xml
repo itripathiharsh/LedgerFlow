@@ -1,4 +1,8 @@
 <resources>
     <string name="app_name">LedgerFlow</string>
     <string name="pay_track_service_label">LedgerFlow Pay &amp; Track</string>
+    <string name="widget_compact_name">LedgerFlow Quick Bar</string>
+    <string name="widget_compact_description">Today\u2019s spend, liquid balance, and 1-tap Expense, Voice List, Smart Paste, and Income actions.</string>
+    <string name="widget_shopping_name">LedgerFlow Spend &amp; List</string>
+    <string name="widget_shopping_description">Today\u2019s spend, liquid balance, quick actions, and interactive active shopping list.</string>
 </resources>

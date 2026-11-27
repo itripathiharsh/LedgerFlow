@@ -502,6 +502,18 @@ fun SettingsScreen(
                         colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
                     )
                 }
+                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show Widget Balances on Lock Screen", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                        Text("When disabled, home screen widgets mask balances whenever the device is locked", fontSize = 12.sp, color = MutedSlate)
+                    }
+                    Switch(
+                        checked = vault.showWidgetsOnLockScreen,
+                        onCheckedChange = { vm.setShowWidgetsOnLockScreen(it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
+                    )
+                }
             }
         }
 

@@ -28,8 +28,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 18
-        versionName = "1.7.0"
+        versionCode = 19
+        versionName = "1.8.0"
 
         val supabaseUrl = propOrDefault("SUPABASE_URL", "https://rzlenoldloktswymuooz.supabase.co")
         val supabaseKey = propOrDefault("SUPABASE_PUBLISHABLE_KEY", "")

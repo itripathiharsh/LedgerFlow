@@ -104,6 +104,7 @@ data class VaultShoppingItemDto(
     val id: String,
     val listId: String,
     val name: String,
+    val quantityLabel: String = "",
     val estimatedPriceMinor: Long = 0L,
     val checked: Boolean = false,
     val createdAtEpochMs: Long,
@@ -819,12 +820,12 @@ private fun VaultShoppingListDto.toEntity(now: Long) = ShoppingListEntity(
 )
 
 private fun ShoppingItemEntity.toBackupDto() = VaultShoppingItemDto(
-    id = id, listId = listId, name = name, estimatedPriceMinor = estimatedPriceMinor, checked = checked,
+    id = id, listId = listId, name = name, quantityLabel = quantityLabel, estimatedPriceMinor = estimatedPriceMinor, checked = checked,
     createdAtEpochMs = createdAtEpochMs, updatedAtEpochMs = updatedAtEpochMs, deletedAtEpochMs = deletedAtEpochMs,
 )
 
 private fun VaultShoppingItemDto.toEntity(now: Long) = ShoppingItemEntity(
-    id = id, listId = listId, name = name, estimatedPriceMinor = estimatedPriceMinor, checked = checked,
+    id = id, listId = listId, name = name, quantityLabel = quantityLabel, estimatedPriceMinor = estimatedPriceMinor, checked = checked,
     createdAtEpochMs = createdAtEpochMs.takeIf { it > 0L } ?: now,
     updatedAtEpochMs = updatedAtEpochMs.takeIf { it > 0L } ?: now,
     deletedAtEpochMs = deletedAtEpochMs,

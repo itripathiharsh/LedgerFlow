@@ -34,6 +34,7 @@ data class VaultSessionState(
     val notificationDisclosureAccepted: Boolean = false,
     val telemetryOptIn: Boolean = false,
     val hideBalances: Boolean = false,
+    val showWidgetsOnLockScreen: Boolean = false,
     val pinHashBase64: String? = null,
     val pinSaltBase64: String? = null,
     val dismissedUpdateVersionCode: Long = 0L,
@@ -140,7 +141,8 @@ class VaultStore(context: Context) {
     }
 
     fun update(transform: (VaultSessionState) -> VaultSessionState): VaultSessionState = synchronized(processLock) {
-        val next = transform(read())
+        val prev = read()
+        val next = transform(prev)
         val bytes = json.encodeToString(VaultSessionState.serializer(), next).encodeToByteArray()
         val encrypted = engine.encryptBytes(bytes)
         val tmp = File(vaultFile.parentFile, "ledgerflow_vault.enc.tmp")
@@ -150,6 +152,14 @@ class VaultStore(context: Context) {
             tmp.delete()
         }
         cachedStates[vaultFile.absolutePath] = next
+        if (
+            prev.themeMode != next.themeMode ||
+            prev.hideBalances != next.hideBalances ||
+            prev.showWidgetsOnLockScreen != next.showWidgetsOnLockScreen ||
+            prev.baseCurrency != next.baseCurrency
+        ) {
+            runCatching { com.ledgerflow.app.widget.LedgerWidgetCoordinator.requestRefresh(appContext) }
+        }
         return next
     }
 

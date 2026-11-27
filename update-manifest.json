@@ -1,16 +1,16 @@
 {
-  "versionCode": 18,
-  "versionName": "1.7.0",
+  "versionCode": 19,
+  "versionName": "1.8.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T18:24:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.7.0/LedgerFlow-v1.7.0.apk",
-  "apkSizeBytes": 4891007,
-  "sha256": "b95bf6f20a7040dc16007d83475e9536195175408275481552843bfdf77d7481",
+  "releasedAt": "2026-11-27T21:33:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.8.0/LedgerFlow-v1.8.0.apk",
+  "apkSizeBytes": 4945543,
+  "sha256": "d0876408e188e6fdb173dd7aa50c103326d2bcbc38bbcc338752b433fab8f118",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Added opt-in privacy-first Automatic Payment Detection across Google Pay India, PhonePe, Paytm, BHIM, Google Wallet, and major banking apps (with in-app privacy disclosure before opening Android Notification Access settings, plus Share-to-Track & Smart Paste fallbacks).",
-    "Detected payments land strictly as PENDING_REVIEW without auto-guessing category or spending purpose, feature a Pending Review card on Home, support Unassigned Account state, prevent duplicates/double-deductions across updated notifications and UPI Ref IDs, and reject failed/declined alerts.",
-    "Added a single-layer Review & Classify sheet (category, spending purpose, merchant, account, amount correction, notes) for confirming pending payments and editing confirmed transactions anytime, while keeping raw notification metadata strictly on-device (Room v4)."
+    "Added two native Android Home Screen Widgets: Compact Action Bar (4x2) and Spend & Active Shopping List (4x3), automatically synced with Flow Dark, Premium Black, and Light themes plus real-time Room database updates.",
+    "Added 1-tap transparent Quick Expense & Income overlays, Voice Shopping List capture (natural spoken/typed item + quantity parsing via VoiceShoppingParser into Room v5 shopping_items), and focus-aware clipboard Smart Paste routing verified alerts to Pending Review.",
+    "Enabled direct home screen shopping checklist toggling without opening the app, Mask Balances lock-screen auto-redaction (with opt-in Settings toggle), and Android 12+ live widget picker previews."
   ],
   "mandatory": false
 }

@@ -25,6 +25,8 @@ import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.NotificationParser
 import com.ledgerflow.app.domain.ReportExporter
 import com.ledgerflow.app.domain.SupportedPaymentApps
+import com.ledgerflow.app.domain.VoiceShoppingParser
+import com.ledgerflow.app.domain.WidgetMetricsCalculator
 import com.ledgerflow.app.security.VaultCryptoEngine
 import com.ledgerflow.app.security.VaultKeyProvider
 import com.ledgerflow.app.security.VaultSessionState
@@ -669,5 +671,96 @@ class FinanceMathTest {
         assertEquals(15_000L, pSum.totalInflowMinor)
         assertEquals(35_000L, pSum.totalVolumeMinor)
         assertEquals(1, pSum.unassignedCount)
+    }
+
+    @Test
+    fun widgetMetricsCalculator_computesTodaySpendLiquidBalanceAndTopCategories() {
+        val tz = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+        val cal = Calendar.getInstance(tz).apply {
+            set(2026, Calendar.NOVEMBER, 27, 14, 30, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val nowMs = cal.timeInMillis
+        val todayMorningMs = nowMs - 2 * 3_600_000L
+        val yesterdayMs = nowMs - 36 * 3_600_000L
+
+        val accounts = listOf(
+            AccountEntity("cash", "Cash Wallet", "", "CASH", "INR", 195_000L, "", 0L, "MANUAL", "OK", null, 1L, 1L),
+            AccountEntity("sbi", "SBI Savings", "SBI", "SAVINGS", "INR", 1_000_000L, "4821", 0L, "MANUAL", "OK", null, 1L, 1L),
+            AccountEntity("cc", "HDFC Millennia", "HDFC", "CREDIT_CARD", "INR", -250_000L, "7788", 5_000_000L, "MANUAL", "OK", null, 1L, 1L),
+            AccountEntity("loan", "Home Loan", "HDFC", "LOAN", "INR", -10_000_000L, "", 0L, "MANUAL", "OK", null, 1L, 1L),
+            AccountEntity("inv", "Brokerage Cash", "Zerodha", "INVESTMENT", "INR", 500_000L, "", 0L, "MANUAL", "OK", null, 1L, 1L),
+            AccountEntity("del", "Deleted Wallet", "", "CASH", "INR", 999_000L, "", 0L, "MANUAL", "OK", null, 1L, 1L, deletedAtEpochMs = 5L),
+        )
+
+        val txs = listOf(
+            // Today's expenses (included)
+            TransactionEntity("t1", "cash", null, SeedData.CAT_DINING, "", "EXPENSE", -25_000L, "INR", null, null, "Cafe", "", "", "MANUAL", false, todayMorningMs, todayMorningMs, todayMorningMs),
+            TransactionEntity("t2", "sbi", null, SeedData.CAT_GROCERIES, "", "EXPENSE", -500L, "USD", null, null, "App", "", "", "MANUAL", false, nowMs, nowMs, nowMs),
+            // Today's income & transfer & deleted & yesterday (excluded from Today's Spend)
+            TransactionEntity("t3", "sbi", null, SeedData.CAT_SALARY, "", "INCOME", 500_000L, "INR", null, null, "Salary", "", "", "MANUAL", false, nowMs, nowMs, nowMs),
+            TransactionEntity("t4", "cash", "sbi", null, "", "TRANSFER", -10_000L, "INR", null, null, "Transfer", "", "", "MANUAL", false, nowMs, nowMs, nowMs),
+            TransactionEntity("t5", "cash", null, SeedData.CAT_DINING, "", "EXPENSE", -99_000L, "INR", null, null, "Deleted", "", "", "MANUAL", false, nowMs, nowMs, nowMs, deletedAtEpochMs = nowMs),
+            TransactionEntity("t6", "cash", null, SeedData.CAT_DINING, "", "EXPENSE", -40_000L, "INR", null, null, "Yesterday", "", "", "MANUAL", false, yesterdayMs, yesterdayMs, yesterdayMs),
+        )
+
+        val metrics = WidgetMetricsCalculator.computeWidgetMetrics(
+            accounts = accounts,
+            transactions = txs,
+            baseCurrency = "INR",
+            nowMs = nowMs,
+            timeZone = tz,
+        )
+        val expectedUsd5InInr = FxConverter.convertMinor(500L, "USD", "INR")
+        assertEquals(25_000L + expectedUsd5InInr, metrics.todaySpendMinor)
+        assertEquals(195_000L + 1_000_000L, metrics.liquidBalanceMinor) // Excludes CC, Loan, Investment, Deleted
+        assertTrue(metrics.hasAnyTransactions)
+        assertTrue(metrics.hasAnyAccounts)
+
+        val emptyMetrics = WidgetMetricsCalculator.computeWidgetMetrics(emptyList(), emptyList(), "INR", nowMs, tz)
+        assertEquals(0L, emptyMetrics.todaySpendMinor)
+        assertEquals(0L, emptyMetrics.liquidBalanceMinor)
+        assertFalse(emptyMetrics.hasAnyTransactions)
+        assertFalse(emptyMetrics.hasAnyAccounts)
+
+        val categories = SeedData.starterCategories(1L)
+        val rankedExpense = WidgetMetricsCalculator.rankTopCategories(categories, txs, "EXPENSE", limit = 6)
+        assertEquals(6, rankedExpense.size)
+        // Dining & Groceries were used today so they must lead
+        val topIds = rankedExpense.take(2).map { it.id }.toSet()
+        assertTrue(SeedData.CAT_DINING in topIds && SeedData.CAT_GROCERIES in topIds)
+        assertTrue(rankedExpense.none { it.kind == "INCOME" })
+    }
+
+    @Test
+    fun voiceShoppingParser_extractsMultipleItemsQuantitiesUnitsAndDeduplicates() {
+        val sample = VoiceShoppingParser.parse("2 kg atta, milk, 500g paneer")
+        assertEquals(3, sample.size)
+        assertEquals("Atta", sample[0].name)
+        assertEquals("2 kg", sample[0].quantityLabel)
+        assertEquals("2 kg Atta", sample[0].displayLabel)
+        assertEquals("Milk", sample[1].name)
+        assertEquals("1", sample[1].quantityLabel)
+        assertEquals("Milk", sample[1].displayLabel)
+        assertEquals("Paneer", sample[2].name)
+        assertEquals("500 g", sample[2].quantityLabel)
+        assertEquals("500 g Paneer", sample[2].displayLabel)
+
+        val conversational = VoiceShoppingParser.parse(
+            "Add two packets of biscuits, milk, half kg onions, three dozen eggs and tomatoes 1.5 kg and MILK to my shopping list"
+        )
+        assertEquals(5, conversational.size) // biscuits, milk, onions, eggs, tomatoes; trailing duplicate MILK skipped!
+        assertEquals("Biscuits", conversational[0].name)
+        assertEquals("2 pack", conversational[0].quantityLabel)
+        assertEquals("Milk", conversational[1].name)
+        assertEquals("1", conversational[1].quantityLabel)
+        assertEquals("Onions", conversational[2].name)
+        assertEquals("500 g", conversational[2].quantityLabel)
+        assertEquals("Eggs", conversational[3].name)
+        assertEquals("3 dozen", conversational[3].quantityLabel)
+        assertEquals("Tomatoes", conversational[4].name)
+        assertEquals("1.5 kg", conversational[4].quantityLabel)
+
+        assertTrue(VoiceShoppingParser.parse("   ").isEmpty())
     }
 }

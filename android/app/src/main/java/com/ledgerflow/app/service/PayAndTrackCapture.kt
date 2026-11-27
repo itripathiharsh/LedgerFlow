@@ -11,6 +11,7 @@ import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.NotificationParser
 import com.ledgerflow.app.domain.SupportedPaymentApps
 import com.ledgerflow.app.security.VaultStore
+import com.ledgerflow.app.widget.LedgerWidgetCoordinator
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
@@ -110,11 +111,14 @@ object PayAndTrackCapture {
         val safeOccurredAt = occurredAtEpochMs.takeIf { it > 0L } ?: now
 
         if (inspection.kind == NotificationParser.NotificationParseKind.FAILURE_OR_DECLINED) {
-            db.handleDetectedFailureNotificationAtomic(
+            val cancelled = db.handleDetectedFailureNotificationAtomic(
                 notificationKey = notificationKey.trim(),
                 referenceId = inspection.referenceId.orEmpty(),
                 nowMs = now,
             )
+            if (cancelled && dbOverride == null) {
+                LedgerWidgetCoordinator.requestRefresh(context)
+            }
             return CaptureOutcome(false, action = DetectedCaptureAction.CANCELLED_BY_FAILURE)
         }
 
@@ -176,6 +180,9 @@ object PayAndTrackCapture {
         val result = db.upsertDetectedPaymentAtomic(tx, nowMs = now)
         val capturedOk = result.action == DetectedCaptureAction.CREATED_PENDING ||
             result.action == DetectedCaptureAction.UPDATED_PENDING
+        if (capturedOk && dbOverride == null) {
+            LedgerWidgetCoordinator.requestRefresh(context)
+        }
 
         return CaptureOutcome(
             captured = capturedOk,

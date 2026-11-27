@@ -284,6 +284,10 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         _vaultState.value = vault.update { it.copy(hideBalances = !it.hideBalances) }
     }
 
+    fun setShowWidgetsOnLockScreen(enabled: Boolean) {
+        _vaultState.value = vault.update { it.copy(showWidgetsOnLockScreen = enabled) }
+    }
+
     fun setThemeMode(mode: String) {
         val clean = ThemeModes.normalize(mode)
         _vaultState.value = vault.update { it.copy(themeMode = clean) }
@@ -1416,6 +1420,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         listId: String,
         name: String,
         estimatedPriceMinor: Long,
+        quantityLabel: String = "",
     ) {
         val cleanName = name.trim()
         if (cleanName.isBlank()) {
@@ -1429,6 +1434,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                     id = UUID.randomUUID().toString(),
                     listId = listId,
                     name = cleanName,
+                    quantityLabel = quantityLabel.trim(),
                     estimatedPriceMinor = abs(estimatedPriceMinor),
                     checked = false,
                     createdAtEpochMs = now,
@@ -1436,21 +1442,15 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                     pendingSync = true,
                 )
             )
+            db.shoppingListDao().getById(listId)?.takeIf { it.deletedAtEpochMs == null }?.let { list ->
+                db.shoppingListDao().upsert(list.copy(updatedAtEpochMs = now, pendingSync = true))
+            }
         }
     }
 
     fun toggleShoppingItem(itemId: String) {
         viewModelScope.launch {
-            val existing = db.shoppingItemDao().getById(itemId) ?: return@launch
-            if (existing.deletedAtEpochMs != null) return@launch
-            val now = System.currentTimeMillis()
-            db.shoppingItemDao().upsert(
-                existing.copy(
-                    checked = !existing.checked,
-                    updatedAtEpochMs = now,
-                    pendingSync = true,
-                )
-            )
+            db.toggleShoppingItemCheckedAtomic(itemId)
         }
     }
 

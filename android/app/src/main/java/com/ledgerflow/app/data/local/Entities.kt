@@ -250,4 +250,5 @@ data class ShoppingItemEntity(
     val updatedAtEpochMs: Long,
     val deletedAtEpochMs: Long? = null,
     val pendingSync: Boolean = true,
+    val quantityLabel: String = "",
 )

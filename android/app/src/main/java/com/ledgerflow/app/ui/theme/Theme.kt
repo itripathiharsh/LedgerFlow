@@ -352,6 +352,10 @@ private val AppTypography = Typography(
 @Composable
 fun resolveLedgerPalette(themeMode: String): LedgerPalette {
     val systemDark = isSystemInDarkTheme()
+    return resolveLedgerPalette(themeMode = themeMode, systemDark = systemDark)
+}
+
+fun resolveLedgerPalette(themeMode: String, systemDark: Boolean): LedgerPalette {
     return when (ThemeModes.normalize(themeMode)) {
         ThemeModes.LIGHT -> LightLedgerPalette
         ThemeModes.FLOW_DARK -> FlowDarkLedgerPalette
