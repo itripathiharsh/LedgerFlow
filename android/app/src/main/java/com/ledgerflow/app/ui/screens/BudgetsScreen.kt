@@ -1,10 +1,15 @@
 package com.ledgerflow.app.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,24 +18,29 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -38,6 +48,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,25 +63,27 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.toColorInt
+import com.ledgerflow.app.data.local.AccountEntity
+import com.ledgerflow.app.data.local.SavingsGoalEntity
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
-import com.ledgerflow.app.ui.components.CategoryDonutChart
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
-import com.ledgerflow.app.ui.components.EmptyPlaceholder
-import com.ledgerflow.app.ui.components.PieChartSlice
 import com.ledgerflow.app.ui.components.SectionHeader
-import com.ledgerflow.app.ui.components.SpendHeatmapCard
 import com.ledgerflow.app.ui.components.StatusPill
+import com.ledgerflow.app.ui.components.categoryIcon
 import com.ledgerflow.app.ui.components.parseSliceColor
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.AmberSoft
 import com.ledgerflow.app.ui.theme.AmberWarn
+import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
 import com.ledgerflow.app.ui.theme.EmeraldSoft
@@ -82,7 +95,6 @@ import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.SurfaceCard
-import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.TabularStyle
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -90,16 +102,38 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
+private val goalColorChoices = listOf(
+    "#059669",
+    "#0284C7",
+    "#D97706",
+    "#14B8A6",
+    "#E11D48",
+    "#8B5CF6",
+)
+
+private val goalIconChoices = listOf(
+    "savings" to "Goal",
+    "home" to "Home",
+    "flight" to "Travel",
+    "school" to "Study",
+    "shopping_bag" to "Gear",
+    "directions_transit" to "Car",
+    "medical_services" to "Health",
+    "gift" to "Gift",
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BudgetsScreen(
     vm: LedgerViewModel,
     initialTab: Int = 0,
+    addTrigger: Int = 0,
     onOpenDrawer: () -> Unit = {},
-    onOpenFullAnalytics: () -> Unit = {},
     onOpenSettings: () -> Unit,
 ) {
     val budgets by vm.budgets.collectAsState()
     val planned by vm.plannedPayments.collectAsState()
+    val savingsGoals by vm.savingsGoals.collectAsState()
     val transactions by vm.allTransactions.collectAsState()
     val categories by vm.categories.collectAsState()
     val accounts by vm.accounts.collectAsState()
@@ -147,12 +181,29 @@ fun BudgetsScreen(
         startMs to startCal.timeInMillis
     }
 
-    var selectedTab by remember { mutableIntStateOf(initialTab.coerceIn(0, 2)) } // 0=Budgets, 1=Analytics, 2=Planned
+    var selectedTab by remember { mutableIntStateOf(initialTab.coerceIn(0, 2)) } // 0=Budgets, 1=Goals, 2=Planned
     LaunchedEffect(initialTab) {
         selectedTab = initialTab.coerceIn(0, 2)
     }
     var showNewBudget by remember { mutableStateOf(false) }
     var showNewPlanned by remember { mutableStateOf(false) }
+    var showGoalEditor by remember { mutableStateOf(false) }
+    var editingGoal by remember { mutableStateOf<SavingsGoalEntity?>(null) }
+    var addFundsTarget by remember { mutableStateOf<SavingsGoalEntity?>(null) }
+    var goalStatusFilter by remember { mutableStateOf("ACTIVE") }
+
+    LaunchedEffect(addTrigger) {
+        if (addTrigger > 0) {
+            when (selectedTab) {
+                1 -> {
+                    editingGoal = null
+                    showGoalEditor = true
+                }
+                2 -> showNewPlanned = true
+                else -> showNewBudget = true
+            }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -174,7 +225,7 @@ fun BudgetsScreen(
                     IconButton(onClick = onOpenDrawer) {
                         Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = SlateInk)
                     }
-                    Text("Budgets & Planned", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                    Text("Budgets & Goals", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                 }
                 IconButton(onClick = onOpenSettings) {
                     Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = SlateInk)
@@ -182,11 +233,11 @@ fun BudgetsScreen(
             }
         }
 
-        // Segmented switcher
+        // Segmented switcher: Budgets | Goals | Planned
         item {
             Surface(shape = RoundedCornerShape(14.dp), color = SlateTint, modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.padding(4.dp)) {
-                    listOf("Budgets", "Analytics", "Planned").forEachIndexed { idx, label ->
+                    listOf("Budgets", "Goals", "Planned").forEachIndexed { idx, label ->
                         val active = selectedTab == idx
                         Surface(
                             onClick = { selectedTab = idx },
@@ -393,78 +444,204 @@ fun BudgetsScreen(
             }
 
             1 -> {
+                val filteredGoals = savingsGoals.filter { it.status == goalStatusFilter }
                 item {
-                    CleanCard(
-                        padding = 14.dp,
-                        containerColor = EmeraldSoft,
-                        borderColor = EmeraldPrimary.copy(alpha = 0.35f),
-                        onClick = onOpenFullAnalytics,
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Full Analytics & CSV Reports", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EmeraldDark)
-                                Text("Balance trends, forecasts, credit utilization, DTI & downloads", fontSize = 11.sp, color = MutedSlate)
-                            }
-                            Text("Open →", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldDark)
-                        }
-                    }
-                }
-                // GitHub-style Daily Spend Heatmap + Category Pie Breakdown
-                item {
-                    val monthlyHeatmap = remember(transactions, baseCurrency, dayKey) {
-                        AnalyticsCalculator.computeMonthlySpendHeatmap(transactions, baseCurrency)
-                    }
-                    val rollingHeatmap = remember(transactions, baseCurrency, dayKey) {
-                        AnalyticsCalculator.computeRollingSpendHeatmap(transactions, baseCurrency, weeks = 12)
-                    }
-                    SpendHeatmapCard(
-                        monthlyData = monthlyHeatmap,
-                        rollingData = rollingHeatmap,
-                        currency = baseCurrency,
-                        masked = masked,
-                        allowModeSwitch = true,
-                    )
-                }
-
-                item {
-                    val slices = remember(transactions, categories, baseCurrency, monthStart) {
-                        AnalyticsCalculator.computeCategoryBreakdown(transactions, categories, baseCurrency, monthStart)
-                    }
-                    val totalCatSpend = slices.sumOf { it.amountMinor }
-                    val defaultSliceColor = EmeraldPrimary
-                    val pieSlices = remember(slices, defaultSliceColor) {
-                        slices.map { s ->
-                            PieChartSlice(
-                                id = s.categoryId ?: s.name,
-                                label = s.name,
-                                valueMinor = s.amountMinor,
-                                color = parseSliceColor(s.colorHex, defaultSliceColor),
-                                ratio = s.ratio,
+                        val activeCount = savingsGoals.count { it.status == "ACTIVE" }
+                        val pausedCount = savingsGoals.count { it.status == "PAUSED" }
+                        val reachedCount = savingsGoals.count { it.status == "REACHED" }
+                        listOf(
+                            Triple("ACTIVE", "Active ($activeCount)", activeCount),
+                            Triple("PAUSED", "Paused ($pausedCount)", pausedCount),
+                            Triple("REACHED", "Reached ($reachedCount)", reachedCount),
+                        ).forEach { (key, label, _) ->
+                            FilterChip(
+                                selected = goalStatusFilter == key,
+                                onClick = { goalStatusFilter = key },
+                                label = { Text(label, fontSize = 12.sp) },
                             )
                         }
                     }
+                }
 
-                    CleanCard(padding = 16.dp) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("Spending Breakdown", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
-                            StatusPill("This Month", SlateTint, MutedSlate)
+                item {
+                    SectionHeader(
+                        title = "Savings Goals (${filteredGoals.size})",
+                        actionText = "+ New Goal",
+                        onActionClick = {
+                            editingGoal = null
+                            showGoalEditor = true
+                        },
+                    )
+                }
+
+                if (filteredGoals.isEmpty()) {
+                    item {
+                        CleanCard(padding = 22.dp) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                CategoryIconBadge("savings", "#059669", size = 54.dp)
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text = when (goalStatusFilter) {
+                                        "PAUSED" -> "No paused goals"
+                                        "REACHED" -> "No reached goals yet"
+                                        else -> "Save for your goals"
+                                    },
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateInk,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = when (goalStatusFilter) {
+                                        "PAUSED" -> "Paused goals keep your progress saved until you are ready to resume."
+                                        "REACHED" -> "Keep contributing to active goals and they move here once target is met."
+                                        else -> "Set a target for your Emergency Fund, New Laptop, or trip and track contributions."
+                                    },
+                                    fontSize = 13.sp,
+                                    color = MutedSlate,
+                                )
+                                if (goalStatusFilter == "ACTIVE") {
+                                    Spacer(Modifier.height(14.dp))
+                                    Button(
+                                        onClick = {
+                                            editingGoal = null
+                                            showGoalEditor = true
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                        shape = RoundedCornerShape(12.dp),
+                                    ) {
+                                        Text("+ New Goal", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
                         }
-                        Spacer(Modifier.height(12.dp))
-                        CategoryDonutChart(
-                            slices = pieSlices,
-                            totalMinor = totalCatSpend,
-                            currency = baseCurrency,
-                            masked = masked,
-                            centerSubtitle = "This Month",
-                        )
+                    }
+                } else {
+                    items(filteredGoals, key = { it.id }) { goal ->
+                        val gp = AnalyticsCalculator.computeGoalProgress(goal, baseCurrency)
+                        val accentColor = parseSliceColor(goal.colorHex, EmeraldPrimary)
+                        val linkedAcc = goal.linkedAccountId?.let { accMap[it] }
+                        val metaLine = listOfNotNull(
+                            linkedAcc?.name,
+                            goal.targetDateEpochMs?.let { "Target ${dateFmt.format(Date(it))}" },
+                        ).joinToString(" • ")
+
+                        CleanCard(
+                            padding = 16.dp,
+                            onClick = {
+                                editingGoal = goal
+                                showGoalEditor = true
+                            },
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    CategoryIconBadge(goal.iconKey, goal.colorHex, size = 40.dp)
+                                    Column {
+                                        Text(
+                                            text = goal.name,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = SlateInk,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (metaLine.isNotEmpty()) {
+                                            Text(metaLine, fontSize = 11.sp, color = MutedSlate)
+                                        }
+                                    }
+                                }
+                                StatusPill(
+                                    text = "${gp.percent}%",
+                                    containerColor = if (goal.status == "REACHED") EmeraldSoft else SlateTint,
+                                    contentColor = if (goal.status == "REACHED") EmeraldDark else SlateInk,
+                                )
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+                            LinearProgressIndicator(
+                                progress = { gp.ratio },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(999.dp)),
+                                color = accentColor,
+                                trackColor = SlateTint,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "${MoneyFormatter.formatMinor(gp.savedBaseMinor, baseCurrency, masked = masked)} / ${MoneyFormatter.formatMinor(gp.targetBaseMinor, baseCurrency, masked = masked)}",
+                                    style = TabularStyle,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateInk,
+                                )
+                                Text(
+                                    text = if (gp.remainingBaseMinor == 0L) "Target reached!" else "${MoneyFormatter.formatMinor(gp.remainingBaseMinor, baseCurrency, masked = masked)} left",
+                                    style = TabularStyle,
+                                    fontSize = 12.sp,
+                                    color = if (gp.remainingBaseMinor == 0L) EmeraldDark else MutedSlate,
+                                )
+                            }
+
+                            Spacer(Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (goal.status != "REACHED") {
+                                        TextButton(
+                                            onClick = { vm.setGoalPaused(goal.id, goal.status != "PAUSED") },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        ) {
+                                            Text(
+                                                text = if (goal.status == "PAUSED") "Resume" else "Pause",
+                                                fontSize = 12.sp,
+                                                color = MutedSlate,
+                                            )
+                                        }
+                                    }
+                                    TextButton(
+                                        onClick = { vm.deleteSavingsGoal(goal.id) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    ) {
+                                        Text("Remove", fontSize = 12.sp, color = RoseOutflow)
+                                    }
+                                }
+                                if (goal.status != "REACHED") {
+                                    OutlinedButton(
+                                        onClick = { addFundsTarget = goal },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.45f)),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(32.dp),
+                                    ) {
+                                        Text("+ Add Funds", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -833,5 +1010,389 @@ fun BudgetsScreen(
             },
             dismissButton = { TextButton(onClick = { showNewPlanned = false }) { Text("Cancel") } },
         )
+    }
+
+    if (showGoalEditor) {
+        GoalEditorBottomSheet(
+            existing = editingGoal,
+            baseCurrency = editingGoal?.currency ?: baseCurrency,
+            accounts = accounts,
+            onDismiss = {
+                showGoalEditor = false
+                editingGoal = null
+            },
+            onSave = { name, targetMinor, savedMinor, targetDateMs, iconKey, colorHex, linkedAccId ->
+                val cur = editingGoal
+                if (cur == null) {
+                    vm.addSavingsGoal(
+                        name = name,
+                        targetAmountMinor = targetMinor,
+                        alreadySavedMinor = savedMinor,
+                        currency = baseCurrency,
+                        targetDateEpochMs = targetDateMs,
+                        iconKey = iconKey,
+                        colorHex = colorHex,
+                        linkedAccountId = linkedAccId,
+                    )
+                } else {
+                    vm.updateSavingsGoal(
+                        goalId = cur.id,
+                        name = name,
+                        targetAmountMinor = targetMinor,
+                        alreadySavedMinor = savedMinor,
+                        targetDateEpochMs = targetDateMs,
+                        iconKey = iconKey,
+                        colorHex = colorHex,
+                        linkedAccountId = linkedAccId,
+                    )
+                }
+                showGoalEditor = false
+                editingGoal = null
+            },
+            onDelete = { id ->
+                vm.deleteSavingsGoal(id)
+                showGoalEditor = false
+                editingGoal = null
+            },
+        )
+    }
+
+    addFundsTarget?.let { target ->
+        AddGoalFundsBottomSheet(
+            goal = target,
+            accounts = accounts,
+            onDismiss = { addFundsTarget = null },
+            onConfirm = { amountMinor, accountId, deduct ->
+                vm.addGoalFunds(target.id, amountMinor, accountId, deduct)
+                addFundsTarget = null
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun GoalEditorBottomSheet(
+    existing: SavingsGoalEntity?,
+    baseCurrency: String,
+    accounts: List<AccountEntity>,
+    onDismiss: () -> Unit,
+    onSave: (
+        name: String,
+        targetMinor: Long,
+        savedMinor: Long,
+        targetDateMs: Long?,
+        iconKey: String,
+        colorHex: String,
+        linkedAccountId: String?,
+    ) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    val isEdit = existing != null
+    fun formatInitial(minor: Long): String {
+        if (minor <= 0L) return ""
+        val div = if (baseCurrency.equals("JPY", ignoreCase = true)) 1.0 else 100.0
+        return if (baseCurrency.equals("JPY", ignoreCase = true)) minor.toString()
+        else String.format(Locale.US, "%.2f", minor / div)
+    }
+
+    var name by remember(existing) { mutableStateOf(existing?.name ?: "") }
+    var targetText by remember(existing) { mutableStateOf(formatInitial(existing?.targetAmountMinor ?: 0L)) }
+    var savedText by remember(existing) { mutableStateOf(formatInitial(existing?.savedAmountMinor ?: 0L)) }
+    var selectedIcon by remember(existing) { mutableStateOf(existing?.iconKey ?: "savings") }
+    var selectedColor by remember(existing) { mutableStateOf(existing?.colorHex ?: "#059669") }
+    var linkedAccountId by remember(existing, accounts) {
+        mutableStateOf(existing?.linkedAccountId?.takeIf { id -> accounts.any { it.id == id } })
+    }
+    var deadlineMode by remember(existing) {
+        mutableStateOf(if (existing?.targetDateEpochMs != null) "KEEP" else "NONE")
+    }
+    val parsedTarget = MoneyFormatter.parseDecimalToMinor(targetText, baseCurrency) ?: 0L
+    val parsedSaved = MoneyFormatter.parseDecimalToMinor(savedText, baseCurrency) ?: 0L
+    val dateFmt = remember { SimpleDateFormat("MMM d, yyyy", Locale.US) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = SurfaceCard,
+        contentColor = SlateInk,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(if (isEdit) "Edit Savings Goal" else "New Savings Goal", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Goal Name") },
+                placeholder = { Text("e.g. Emergency Fund, New Laptop") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+            OutlinedTextField(
+                value = targetText,
+                onValueChange = { targetText = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
+                label = { Text("Target Amount ($baseCurrency)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+            OutlinedTextField(
+                value = savedText,
+                onValueChange = { savedText = MoneyFormatter.sanitizeDecimalInput(it, baseCurrency, allowNegative = false) },
+                label = { Text("Already Saved ($baseCurrency)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+
+            Text("Target Date (Optional)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(selected = deadlineMode == "NONE", onClick = { deadlineMode = "NONE" }, label = { Text("No deadline", fontSize = 11.sp) })
+                if (existing?.targetDateEpochMs != null) {
+                    FilterChip(
+                        selected = deadlineMode == "KEEP",
+                        onClick = { deadlineMode = "KEEP" },
+                        label = { Text(dateFmt.format(Date(existing.targetDateEpochMs)), fontSize = 11.sp) },
+                    )
+                }
+                FilterChip(selected = deadlineMode == "M3", onClick = { deadlineMode = "M3" }, label = { Text("+3 Months", fontSize = 11.sp) })
+                FilterChip(selected = deadlineMode == "M6", onClick = { deadlineMode = "M6" }, label = { Text("+6 Months", fontSize = 11.sp) })
+                FilterChip(selected = deadlineMode == "Y1", onClick = { deadlineMode = "Y1" }, label = { Text("+1 Year", fontSize = 11.sp) })
+            }
+
+            Text("Icon & Accent", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                goalIconChoices.forEach { (key, label) ->
+                    val active = selectedIcon == key
+                    Surface(
+                        onClick = { selectedIcon = key },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (active) EmeraldSoft else SlateTint,
+                        border = if (active) BorderStroke(1.dp, EmeraldPrimary) else null,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = categoryIcon(key),
+                                contentDescription = null,
+                                tint = if (active) EmeraldDark else SlateInk,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(label, fontSize = 11.sp, color = if (active) EmeraldDark else SlateInk)
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                goalColorChoices.forEach { hex ->
+                    val selected = selectedColor.equals(hex, ignoreCase = true)
+                    val col = runCatching { Color(hex.toColorInt()) }.getOrDefault(EmeraldPrimary)
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(col)
+                            .border(if (selected) 2.5.dp else 0.dp, if (selected) SlateInk else Color.Transparent, CircleShape)
+                            .clickable { selectedColor = hex },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (selected) {
+                            Icon(Icons.Outlined.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+
+            Text("Linked Account (Optional)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(selected = linkedAccountId == null, onClick = { linkedAccountId = null }, label = { Text("None", fontSize = 11.sp) })
+                accounts.forEach { acc ->
+                    FilterChip(selected = linkedAccountId == acc.id, onClick = { linkedAccountId = acc.id }, label = { Text(acc.name, fontSize = 11.sp) })
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (existing != null) {
+                    TextButton(onClick = { onDelete(existing.id) }) {
+                        Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = RoseOutflow, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Delete", color = RoseOutflow)
+                    }
+                } else {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                }
+
+                Button(
+                    enabled = name.isNotBlank() && parsedTarget > 0L,
+                    onClick = {
+                        val cal = Calendar.getInstance()
+                        val targetMs = when (deadlineMode) {
+                            "M3" -> cal.apply { add(Calendar.MONTH, 3) }.timeInMillis
+                            "M6" -> cal.apply { add(Calendar.MONTH, 6) }.timeInMillis
+                            "Y1" -> cal.apply { add(Calendar.YEAR, 1) }.timeInMillis
+                            "KEEP" -> existing?.targetDateEpochMs
+                            else -> null
+                        }
+                        onSave(name, parsedTarget, parsedSaved, targetMs, selectedIcon, selectedColor, linkedAccountId)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(if (isEdit) "Save Goal" else "Create Goal", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddGoalFundsBottomSheet(
+    goal: SavingsGoalEntity,
+    accounts: List<AccountEntity>,
+    onDismiss: () -> Unit,
+    onConfirm: (amountMinor: Long, accountId: String?, deductFromAccount: Boolean) -> Unit,
+) {
+    val remaining = (goal.targetAmountMinor - goal.savedAmountMinor).coerceAtLeast(0L)
+    var amountText by remember(goal) { mutableStateOf("") }
+    var selectedAccountId by remember(goal, accounts) {
+        mutableStateOf(goal.linkedAccountId?.takeIf { id -> accounts.any { it.id == id } })
+    }
+    var deductFromAccount by remember(selectedAccountId) { mutableStateOf(selectedAccountId != null) }
+    val parsedAmount = MoneyFormatter.parseDecimalToMinor(amountText, goal.currency) ?: 0L
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = SurfaceCard,
+        contentColor = SlateInk,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Add Funds • ${goal.name}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+            Text(
+                text = if (remaining > 0L) {
+                    "${MoneyFormatter.formatMinor(remaining, goal.currency)} left to reach target"
+                } else {
+                    "Goal target already reached!"
+                },
+                style = TabularStyle,
+                fontSize = 13.sp,
+                color = MutedSlate,
+            )
+
+            OutlinedTextField(
+                value = amountText,
+                onValueChange = { amountText = MoneyFormatter.sanitizeDecimalInput(it, goal.currency, allowNegative = false) },
+                label = { Text("Contribution (${goal.currency})") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+
+            if (remaining > 0L) {
+                val div = if (goal.currency.equals("JPY", ignoreCase = true)) 1.0 else 100.0
+                OutlinedButton(
+                    onClick = {
+                        amountText = if (goal.currency.equals("JPY", ignoreCase = true)) remaining.toString()
+                        else String.format(Locale.US, "%.2f", remaining / div)
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text("Fill Remaining (${MoneyFormatter.formatMinor(remaining, goal.currency)})", fontSize = 12.sp)
+                }
+            }
+
+            Text("Source Account (Optional)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MutedSlate)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = selectedAccountId == null,
+                    onClick = {
+                        selectedAccountId = null
+                        deductFromAccount = false
+                    },
+                    label = { Text("None (Progress only)", fontSize = 11.sp) },
+                )
+                accounts.forEach { acc ->
+                    FilterChip(
+                        selected = selectedAccountId == acc.id,
+                        onClick = {
+                            selectedAccountId = acc.id
+                            deductFromAccount = true
+                        },
+                        label = { Text(acc.name, fontSize = 11.sp) },
+                    )
+                }
+            }
+
+            if (selectedAccountId != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Deduct from selected account", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = SlateInk)
+                        Text("Records an Expense entry in your ledger", fontSize = 11.sp, color = MutedSlate)
+                    }
+                    Switch(
+                        checked = deductFromAccount,
+                        onCheckedChange = { deductFromAccount = it },
+                        colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    enabled = parsedAmount > 0L,
+                    onClick = { onConfirm(parsedAmount, selectedAccountId, deductFromAccount) },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Add Funds", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }

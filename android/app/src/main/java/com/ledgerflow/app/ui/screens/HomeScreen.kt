@@ -71,6 +71,7 @@ import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.SourceTagBadge
 import com.ledgerflow.app.ui.components.StatusPill
+import com.ledgerflow.app.ui.components.parseSliceColor
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
@@ -96,6 +97,7 @@ fun HomeScreen(
     onOpenDrawer: () -> Unit,
     onOpenRecords: () -> Unit,
     onOpenBudgets: () -> Unit,
+    onOpenGoals: () -> Unit = onOpenBudgets,
     onOpenAccounts: () -> Unit,
     onOpenAddAccount: () -> Unit = onOpenAccounts,
     onOpenSettings: () -> Unit,
@@ -105,6 +107,7 @@ fun HomeScreen(
     val categories by vm.categories.collectAsState()
     val transactions by vm.allTransactions.collectAsState()
     val budgets by vm.budgets.collectAsState()
+    val savingsGoals by vm.savingsGoals.collectAsState()
 
     val baseCurrency = vault.baseCurrency
     val masked = vault.hideBalances
@@ -188,7 +191,7 @@ fun HomeScreen(
             }
         }
 
-        // Top Sub-Tabs: Overview | Budgets
+        // Top Sub-Tabs: Overview | Budgets & Goals
         item {
             Surface(
                 shape = RoundedCornerShape(14.dp),
@@ -196,7 +199,7 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(modifier = Modifier.padding(4.dp)) {
-                    listOf("Overview", "Budgets").forEachIndexed { idx, label ->
+                    listOf("Overview", "Budgets & Goals").forEachIndexed { idx, label ->
                         val active = homeTab == idx
                         Surface(
                             onClick = { homeTab = idx },
@@ -467,14 +470,15 @@ fun HomeScreen(
                 OnlineOnlyAdBanner()
             }
         } else {
-            // Sub-Tab 2: Clean Monthly Budgets overview
-            if (budgetProgress.isEmpty()) {
+            // Sub-Tab 2: Clean Monthly Budgets & Savings Goals overview
+            val activeGoals = savingsGoals.filter { it.status == "ACTIVE" }
+            if (budgetProgress.isEmpty() && activeGoals.isEmpty()) {
                 item {
                     CleanCard(padding = 18.dp) {
-                        Text("Create your first monthly budget", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                        Text("Create your first budget or goal", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "Track overall spending or specific categories like Groceries, Dining, or Fuel.",
+                            text = "Track monthly spending caps or save toward milestones like an Emergency Fund or new gear.",
                             fontSize = 13.sp,
                             color = MutedSlate,
                         )
@@ -484,57 +488,114 @@ fun HomeScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                             shape = RoundedCornerShape(12.dp),
                         ) {
-                            Text("Open Budgets & Planned", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Open Budgets & Goals", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
             } else {
-                item {
-                    SectionHeader(
-                        title = "Monthly Budgets (${budgetProgress.size})",
-                        actionText = "Manage →",
-                        onActionClick = onOpenBudgets,
-                    )
-                }
-                items(budgetProgress, key = { it.budget.id }) { bp ->
-                    val limitBase = FxConverter.convertMinor(bp.budget.limitMinor, bp.budget.currency, baseCurrency)
-                    val isOver = bp.remainingMinor < 0L
-                    CleanCard(padding = 14.dp, onClick = onOpenBudgets) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(bp.budget.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = SlateInk)
+                if (budgetProgress.isNotEmpty()) {
+                    item {
+                        SectionHeader(
+                            title = "Monthly Budgets (${budgetProgress.size})",
+                            actionText = "Manage →",
+                            onActionClick = onOpenBudgets,
+                        )
+                    }
+                    items(budgetProgress, key = { it.budget.id }) { bp ->
+                        val limitBase = FxConverter.convertMinor(bp.budget.limitMinor, bp.budget.currency, baseCurrency)
+                        val isOver = bp.remainingMinor < 0L
+                        CleanCard(padding = 14.dp, onClick = onOpenBudgets) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(bp.budget.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = SlateInk)
+                                Text(
+                                    text = if (isOver) {
+                                        "${MoneyFormatter.formatMinor(abs(bp.remainingMinor), baseCurrency, masked = masked)} over"
+                                    } else {
+                                        "${MoneyFormatter.formatMinor(bp.remainingMinor, baseCurrency, masked = masked)} left"
+                                    },
+                                    style = TabularStyle,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldDark else AmberWarn,
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            LinearProgressIndicator(
+                                progress = { bp.ratio.coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(7.dp)
+                                    .clip(RoundedCornerShape(999.dp)),
+                                color = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldPrimary else AmberWarn,
+                                trackColor = SlateTint,
+                            )
+                            Spacer(Modifier.height(4.dp))
                             Text(
-                                text = if (isOver) {
-                                    "${MoneyFormatter.formatMinor(abs(bp.remainingMinor), baseCurrency, masked = masked)} over"
-                                } else {
-                                    "${MoneyFormatter.formatMinor(bp.remainingMinor, baseCurrency, masked = masked)} left"
-                                },
+                                text = "${MoneyFormatter.formatMinor(bp.spentMinor, baseCurrency, masked = masked)} spent of ${MoneyFormatter.formatMinor(limitBase, baseCurrency, masked = masked)}",
                                 style = TabularStyle,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldDark else AmberWarn,
+                                fontSize = 11.sp,
+                                color = MutedSlate,
                             )
                         }
-                        Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(
-                            progress = { bp.ratio.coerceIn(0f, 1f) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(7.dp)
-                                .clip(RoundedCornerShape(999.dp)),
-                            color = if (isOver) RoseOutflow else if (bp.onTrack) EmeraldPrimary else AmberWarn,
-                            trackColor = SlateTint,
+                    }
+                }
+
+                if (activeGoals.isNotEmpty()) {
+                    item {
+                        SectionHeader(
+                            title = "Savings Goals (${activeGoals.size})",
+                            actionText = "Goals →",
+                            onActionClick = onOpenGoals,
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = "${MoneyFormatter.formatMinor(bp.spentMinor, baseCurrency, masked = masked)} spent of ${MoneyFormatter.formatMinor(limitBase, baseCurrency, masked = masked)}",
-                            style = TabularStyle,
-                            fontSize = 11.sp,
-                            color = MutedSlate,
-                        )
+                    }
+                    items(activeGoals, key = { it.id }) { goal ->
+                        val gp = AnalyticsCalculator.computeGoalProgress(goal, baseCurrency)
+                        val accentColor = parseSliceColor(goal.colorHex, EmeraldPrimary)
+                        CleanCard(padding = 14.dp, onClick = onOpenGoals) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    CategoryIconBadge(goal.iconKey, goal.colorHex, size = 34.dp)
+                                    Text(
+                                        text = goal.name,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        color = SlateInk,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                StatusPill("${gp.percent}%", EmeraldSoft, EmeraldDark)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress = { gp.ratio },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(7.dp)
+                                    .clip(RoundedCornerShape(999.dp)),
+                                color = accentColor,
+                                trackColor = SlateTint,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "${MoneyFormatter.formatMinor(gp.savedBaseMinor, baseCurrency, masked = masked)} saved of ${MoneyFormatter.formatMinor(gp.targetBaseMinor, baseCurrency, masked = masked)}",
+                                style = TabularStyle,
+                                fontSize = 11.sp,
+                                color = MutedSlate,
+                            )
+                        }
                     }
                 }
             }

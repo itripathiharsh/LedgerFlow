@@ -27,10 +27,9 @@ android {
         applicationId = "com.ledgerflow.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 16
-        versionName = "1.5.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 17
+        versionName = "1.6.0"
 
         val supabaseUrl = propOrDefault("SUPABASE_URL", "https://rzlenoldloktswymuooz.supabase.co")
         val supabaseKey = propOrDefault("SUPABASE_PUBLISHABLE_KEY", "")

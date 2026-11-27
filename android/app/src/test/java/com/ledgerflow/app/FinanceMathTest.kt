@@ -3,10 +3,14 @@ package com.ledgerflow.app
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.CategoryEntity
+import com.ledgerflow.app.data.local.DebtEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.PlannedPaymentEntity
+import com.ledgerflow.app.data.local.SavingsGoalEntity
 import com.ledgerflow.app.data.local.SeedData
+import com.ledgerflow.app.data.local.ShoppingItemEntity
+import com.ledgerflow.app.data.local.ShoppingListEntity
 import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
@@ -494,5 +498,47 @@ class FinanceMathTest {
         assertEquals(500_000L, bankTrend.endBalanceMinor)
         // Starting net before Nov 5 +1,000,000 salary and Nov 12 -50,000 loan repayment = 500,000 - (1,000,000 - 50,000) = -450,000
         assertEquals(-450_000L, bankTrend.startBalanceMinor)
+    }
+
+    @Test
+    fun debtsGoalsAndShoppingCalculators_aggregateAccurately() {
+        val debts = listOf(
+            DebtEntity("d1", "Rohan", "LENT", 200_000L, 120_000L, "INR", null, null, "Trip", "ACTIVE", 1L, 1L),
+            DebtEntity("d2", "Asha", "BORROWED", 100_000L, 40_000L, "INR", null, null, "Tickets", "ACTIVE", 1L, 1L),
+            DebtEntity("d3", "Old", "LENT", 50_000L, 0L, "INR", null, null, "", "CLOSED", 1L, 1L),
+        )
+        val debtSummary = AnalyticsCalculator.computeDebtSummary(debts, "INR")
+        assertEquals(120_000L, debtSummary.toReceiveMinor)
+        assertEquals(40_000L, debtSummary.toPayMinor)
+        assertEquals(1, debtSummary.activeLentCount)
+        assertEquals(1, debtSummary.activeBorrowedCount)
+        assertEquals(1, debtSummary.closedCount)
+
+        val goal = SavingsGoalEntity(
+            id = "g1",
+            name = "Emergency Fund",
+            targetAmountMinor = 500_000L,
+            savedAmountMinor = 150_000L,
+            currency = "INR",
+            createdAtEpochMs = 1L,
+            updatedAtEpochMs = 1L,
+        )
+        val gp = AnalyticsCalculator.computeGoalProgress(goal, "INR")
+        assertEquals(30, gp.percent)
+        assertEquals(350_000L, gp.remainingBaseMinor)
+        assertEquals(0.30f, gp.ratio, 0.01f)
+
+        val list = ShoppingListEntity("l1", "Weekly Groceries", SeedData.CAT_GROCERIES, 1L, 1L)
+        val items = listOf(
+            ShoppingItemEntity("i1", "l1", "Milk", 6_000L, checked = true, createdAtEpochMs = 1L, updatedAtEpochMs = 1L),
+            ShoppingItemEntity("i2", "l1", "Bread", 4_500L, checked = true, createdAtEpochMs = 2L, updatedAtEpochMs = 2L),
+            ShoppingItemEntity("i3", "l1", "Olive Oil", 50_000L, checked = false, createdAtEpochMs = 3L, updatedAtEpochMs = 3L),
+        )
+        val sum = AnalyticsCalculator.summarizeShoppingList(list, items)
+        assertEquals(3, sum.totalItems)
+        assertEquals(2, sum.checkedItems)
+        assertEquals(1, sum.uncheckedItems)
+        assertEquals(60_500L, sum.estimatedTotalMinor)
+        assertEquals(10_500L, sum.checkedTotalMinor)
     }
 }

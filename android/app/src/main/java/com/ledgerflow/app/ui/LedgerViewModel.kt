@@ -10,10 +10,14 @@ import com.ledgerflow.app.LedgerFlowApplication
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.CategoryEntity
+import com.ledgerflow.app.data.local.DebtEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.LedgerDatabase
 import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.PlannedPaymentEntity
+import com.ledgerflow.app.data.local.SavingsGoalEntity
+import com.ledgerflow.app.data.local.ShoppingItemEntity
+import com.ledgerflow.app.data.local.ShoppingListEntity
 import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.data.remote.SupabaseSyncClient
 import com.ledgerflow.app.data.sync.LedgerSyncRepository
@@ -140,6 +144,18 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val magicRules: StateFlow<List<MagicRuleEntity>> = db.magicRuleDao().observeActive()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val debts: StateFlow<List<DebtEntity>> = db.debtDao().observeActive()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val savingsGoals: StateFlow<List<SavingsGoalEntity>> = db.savingsGoalDao().observeActive()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val shoppingLists: StateFlow<List<ShoppingListEntity>> = db.shoppingListDao().observeActive()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val shoppingItems: StateFlow<List<ShoppingItemEntity>> = db.shoppingItemDao().observeActive()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val pendingSyncCount: StateFlow<Int> = combine(
@@ -1023,6 +1039,411 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             db.magicRuleDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
             SyncWorker.enqueueWhenOnline(app)
             _statusMessage.value = "Auto-rule deleted"
+        }
+    }
+
+    // ---- Debts (Lent & Borrowed) ----
+
+    fun addDebt(
+        personName: String,
+        direction: String,
+        amountMinor: Long,
+        currency: String,
+        accountId: String?,
+        dueAtEpochMs: Long?,
+        note: String,
+        createInitialTransaction: Boolean,
+    ) {
+        val cleanPerson = personName.trim()
+        val cleanCur = currency.trim().uppercase()
+        if (cleanPerson.isBlank() || amountMinor <= 0L || cleanCur.length != 3) {
+            _statusMessage.value = "Enter a valid person name and positive amount"
+            return
+        }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val debt = DebtEntity(
+                id = UUID.randomUUID().toString(),
+                personName = cleanPerson,
+                direction = if (direction.equals("BORROWED", ignoreCase = true)) "BORROWED" else "LENT",
+                totalAmountMinor = abs(amountMinor),
+                remainingAmountMinor = abs(amountMinor),
+                currency = cleanCur,
+                accountId = accountId,
+                dueAtEpochMs = dueAtEpochMs,
+                note = note.trim(),
+                status = "ACTIVE",
+                createdAtEpochMs = now,
+                updatedAtEpochMs = now,
+                pendingSync = true,
+            )
+            if (db.createDebtAtomic(debt, createInitialTransaction = createInitialTransaction)) {
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = if (debt.direction == "LENT") {
+                    "Logged amount lent to $cleanPerson"
+                } else {
+                    "Logged amount borrowed from $cleanPerson"
+                }
+            }
+        }
+    }
+
+    fun updateDebt(
+        debtId: String,
+        personName: String,
+        direction: String,
+        totalAmountMinor: Long,
+        accountId: String?,
+        dueAtEpochMs: Long?,
+        note: String,
+    ) {
+        val cleanPerson = personName.trim()
+        if (cleanPerson.isBlank() || totalAmountMinor <= 0L) {
+            _statusMessage.value = "Enter a valid name and positive amount"
+            return
+        }
+        viewModelScope.launch {
+            val existing = db.debtDao().getById(debtId) ?: return@launch
+            if (existing.deletedAtEpochMs != null) return@launch
+            val now = System.currentTimeMillis()
+            val cleanTotal = abs(totalAmountMinor)
+            val paidSoFar = (existing.totalAmountMinor - existing.remainingAmountMinor).coerceAtLeast(0L)
+            val newRemaining = (cleanTotal - paidSoFar).coerceAtLeast(0L)
+            val newStatus = if (newRemaining == 0L) "CLOSED" else "ACTIVE"
+            db.debtDao().upsert(
+                existing.copy(
+                    personName = cleanPerson,
+                    direction = if (direction.equals("BORROWED", ignoreCase = true)) "BORROWED" else "LENT",
+                    totalAmountMinor = cleanTotal,
+                    remainingAmountMinor = newRemaining,
+                    accountId = accountId,
+                    dueAtEpochMs = dueAtEpochMs,
+                    note = note.trim(),
+                    status = newStatus,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            _statusMessage.value = "Debt record updated"
+        }
+    }
+
+    fun recordDebtRepayment(
+        debtId: String,
+        amountMinor: Long,
+        accountId: String?,
+        recordTransaction: Boolean,
+    ) {
+        if (amountMinor <= 0L) {
+            _statusMessage.value = "Enter a positive repayment amount"
+            return
+        }
+        viewModelScope.launch {
+            val ok = db.recordDebtRepaymentAtomic(
+                debtId = debtId,
+                amountMinor = amountMinor,
+                accountId = accountId,
+                recordTransaction = recordTransaction,
+            )
+            if (ok) {
+                SyncWorker.enqueueWhenOnline(app)
+                val updated = db.debtDao().getById(debtId)
+                _statusMessage.value = if (updated?.status == "CLOSED") {
+                    "Debt settled and moved to Closed"
+                } else {
+                    "Repayment recorded"
+                }
+            } else {
+                _statusMessage.value = "Unable to record repayment"
+            }
+        }
+    }
+
+    fun deleteDebt(debtId: String) {
+        viewModelScope.launch {
+            val existing = db.debtDao().getById(debtId) ?: return@launch
+            val now = System.currentTimeMillis()
+            db.debtDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
+            _statusMessage.value = "Debt deleted"
+        }
+    }
+
+    // ---- Savings Goals ----
+
+    fun addSavingsGoal(
+        name: String,
+        targetAmountMinor: Long,
+        alreadySavedMinor: Long,
+        currency: String,
+        targetDateEpochMs: Long?,
+        iconKey: String,
+        colorHex: String,
+        linkedAccountId: String?,
+    ) {
+        val cleanName = name.trim()
+        val cleanCur = currency.trim().uppercase()
+        if (cleanName.isBlank() || targetAmountMinor <= 0L || cleanCur.length != 3) {
+            _statusMessage.value = "Enter a valid goal name and positive target"
+            return
+        }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val target = abs(targetAmountMinor)
+            val saved = abs(alreadySavedMinor)
+            val status = if (saved >= target) "REACHED" else "ACTIVE"
+            db.savingsGoalDao().upsert(
+                SavingsGoalEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = cleanName,
+                    targetAmountMinor = target,
+                    savedAmountMinor = saved,
+                    currency = cleanCur,
+                    targetDateEpochMs = targetDateEpochMs,
+                    iconKey = iconKey.ifBlank { "savings" },
+                    colorHex = colorHex.ifBlank { "#059669" },
+                    linkedAccountId = linkedAccountId,
+                    status = status,
+                    createdAtEpochMs = now,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            _statusMessage.value = "Goal \"$cleanName\" created"
+        }
+    }
+
+    fun updateSavingsGoal(
+        goalId: String,
+        name: String,
+        targetAmountMinor: Long,
+        alreadySavedMinor: Long,
+        targetDateEpochMs: Long?,
+        iconKey: String,
+        colorHex: String,
+        linkedAccountId: String?,
+    ) {
+        val cleanName = name.trim()
+        if (cleanName.isBlank() || targetAmountMinor <= 0L) {
+            _statusMessage.value = "Enter a valid goal name and target"
+            return
+        }
+        viewModelScope.launch {
+            val existing = db.savingsGoalDao().getById(goalId) ?: return@launch
+            if (existing.deletedAtEpochMs != null) return@launch
+            val now = System.currentTimeMillis()
+            val target = abs(targetAmountMinor)
+            val saved = abs(alreadySavedMinor)
+            val status = when {
+                saved >= target -> "REACHED"
+                existing.status == "PAUSED" -> "PAUSED"
+                else -> "ACTIVE"
+            }
+            db.savingsGoalDao().upsert(
+                existing.copy(
+                    name = cleanName,
+                    targetAmountMinor = target,
+                    savedAmountMinor = saved,
+                    targetDateEpochMs = targetDateEpochMs,
+                    iconKey = iconKey.ifBlank { existing.iconKey },
+                    colorHex = colorHex.ifBlank { existing.colorHex },
+                    linkedAccountId = linkedAccountId,
+                    status = status,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            _statusMessage.value = "Goal updated"
+        }
+    }
+
+    fun addGoalFunds(
+        goalId: String,
+        amountMinor: Long,
+        accountId: String?,
+        deductFromAccount: Boolean,
+    ) {
+        if (amountMinor <= 0L) {
+            _statusMessage.value = "Enter a positive contribution amount"
+            return
+        }
+        viewModelScope.launch {
+            val ok = db.addGoalContributionAtomic(
+                goalId = goalId,
+                amountMinor = amountMinor,
+                accountId = accountId,
+                deductFromAccount = deductFromAccount,
+            )
+            if (ok) {
+                if (deductFromAccount && accountId != null) SyncWorker.enqueueWhenOnline(app)
+                val updated = db.savingsGoalDao().getById(goalId)
+                _statusMessage.value = if (updated?.status == "REACHED") {
+                    "Goal reached!"
+                } else {
+                    "Contribution added to goal"
+                }
+            }
+        }
+    }
+
+    fun setGoalPaused(goalId: String, paused: Boolean) {
+        viewModelScope.launch {
+            val existing = db.savingsGoalDao().getById(goalId) ?: return@launch
+            if (existing.deletedAtEpochMs != null) return@launch
+            val now = System.currentTimeMillis()
+            val nextStatus = when {
+                existing.savedAmountMinor >= existing.targetAmountMinor -> "REACHED"
+                paused -> "PAUSED"
+                else -> "ACTIVE"
+            }
+            db.savingsGoalDao().upsert(
+                existing.copy(
+                    status = nextStatus,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            _statusMessage.value = if (nextStatus == "PAUSED") "Goal paused" else "Goal resumed"
+        }
+    }
+
+    fun deleteSavingsGoal(goalId: String) {
+        viewModelScope.launch {
+            val existing = db.savingsGoalDao().getById(goalId) ?: return@launch
+            val now = System.currentTimeMillis()
+            db.savingsGoalDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
+            _statusMessage.value = "Goal deleted"
+        }
+    }
+
+    // ---- Shopping Lists ----
+
+    fun createShoppingList(
+        title: String,
+        defaultCategoryId: String?,
+        onCreated: (String) -> Unit = {},
+    ) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) {
+            _statusMessage.value = "Enter a checklist name"
+            return
+        }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val id = UUID.randomUUID().toString()
+            db.shoppingListDao().upsert(
+                ShoppingListEntity(
+                    id = id,
+                    title = cleanTitle,
+                    defaultCategoryId = defaultCategoryId,
+                    createdAtEpochMs = now,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+            _statusMessage.value = "Checklist \"$cleanTitle\" created"
+            onCreated(id)
+        }
+    }
+
+    fun deleteShoppingList(listId: String) {
+        viewModelScope.launch {
+            val existing = db.shoppingListDao().getById(listId) ?: return@launch
+            val now = System.currentTimeMillis()
+            db.shoppingListDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
+            val items = db.shoppingItemDao().getActiveForList(listId)
+            if (items.isNotEmpty()) {
+                db.shoppingItemDao().upsertAll(
+                    items.map { it.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true) }
+                )
+            }
+            _statusMessage.value = "Checklist deleted"
+        }
+    }
+
+    fun addShoppingItem(
+        listId: String,
+        name: String,
+        estimatedPriceMinor: Long,
+    ) {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            _statusMessage.value = "Enter an item name"
+            return
+        }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            db.shoppingItemDao().upsert(
+                ShoppingItemEntity(
+                    id = UUID.randomUUID().toString(),
+                    listId = listId,
+                    name = cleanName,
+                    estimatedPriceMinor = abs(estimatedPriceMinor),
+                    checked = false,
+                    createdAtEpochMs = now,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+        }
+    }
+
+    fun toggleShoppingItem(itemId: String) {
+        viewModelScope.launch {
+            val existing = db.shoppingItemDao().getById(itemId) ?: return@launch
+            if (existing.deletedAtEpochMs != null) return@launch
+            val now = System.currentTimeMillis()
+            db.shoppingItemDao().upsert(
+                existing.copy(
+                    checked = !existing.checked,
+                    updatedAtEpochMs = now,
+                    pendingSync = true,
+                )
+            )
+        }
+    }
+
+    fun deleteShoppingItem(itemId: String) {
+        viewModelScope.launch {
+            val existing = db.shoppingItemDao().getById(itemId) ?: return@launch
+            val now = System.currentTimeMillis()
+            db.shoppingItemDao().upsert(existing.copy(deletedAtEpochMs = now, updatedAtEpochMs = now, pendingSync = true))
+        }
+    }
+
+    fun convertCheckedShoppingToExpense(
+        listId: String,
+        itemIds: List<String>,
+        accountId: String,
+        categoryId: String?,
+        totalMinor: Long,
+        currency: String,
+        merchantTitle: String,
+        removeConvertedItems: Boolean = true,
+        onSuccess: () -> Unit = {},
+    ) {
+        if (totalMinor <= 0L || itemIds.isEmpty()) {
+            _statusMessage.value = "Enter a valid positive total to log as expense"
+            return
+        }
+        viewModelScope.launch {
+            val ok = db.convertShoppingItemsToExpenseAtomic(
+                listId = listId,
+                itemIds = itemIds,
+                accountId = accountId,
+                categoryId = categoryId,
+                totalMinor = totalMinor,
+                currency = currency,
+                merchantTitle = merchantTitle,
+                removeConvertedItems = removeConvertedItems,
+            )
+            if (ok) {
+                SyncWorker.enqueueWhenOnline(app)
+                val formatted = MoneyFormatter.formatMinor(totalMinor, currency)
+                _statusMessage.value = "Logged $formatted expense from checklist"
+                onSuccess()
+            } else {
+                _statusMessage.value = "Select an active account first"
+            }
         }
     }
 

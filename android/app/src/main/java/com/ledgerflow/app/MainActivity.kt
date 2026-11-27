@@ -38,10 +38,12 @@ import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Contactless
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Payments
 import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
@@ -105,11 +107,13 @@ import com.ledgerflow.app.ui.screens.AddTransactionScreen
 import com.ledgerflow.app.ui.screens.AnalyticsScreen
 import com.ledgerflow.app.ui.screens.BudgetsScreen
 import com.ledgerflow.app.ui.screens.CategoriesScreen
+import com.ledgerflow.app.ui.screens.DebtsScreen
 import com.ledgerflow.app.ui.screens.HomeScreen
 import com.ledgerflow.app.ui.screens.InvestScreen
 import com.ledgerflow.app.ui.screens.OnboardingScreen
 import com.ledgerflow.app.ui.screens.RecordsScreen
 import com.ledgerflow.app.ui.screens.SettingsScreen
+import com.ledgerflow.app.ui.screens.ShoppingListsScreen
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
@@ -397,6 +401,9 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
     var showAddModal by remember { mutableStateOf(false) }
     var addInitialType by remember { mutableStateOf("EXPENSE") }
     var budgetsInitialTab by remember { mutableIntStateOf(0) }
+    var debtsAddTrigger by remember { mutableIntStateOf(0) }
+    var shoppingAddTrigger by remember { mutableIntStateOf(0) }
+    var budgetsAddTrigger by remember { mutableIntStateOf(0) }
     var openAddAccountOnStart by remember { mutableStateOf(false) }
     var showSmartPasteImport by remember { mutableStateOf(false) }
     var categoriesOpenedFromSettings by remember { mutableStateOf(false) }
@@ -430,7 +437,17 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
         scope.launch { drawerState.close() }
     }
 
-    val mainRoutes = setOf("home", "records", "accounts", "budgets", "categories", "invest", "analytics")
+    val mainRoutes = setOf(
+        "home",
+        "records",
+        "accounts",
+        "debts",
+        "budgets",
+        "shopping_lists",
+        "categories",
+        "invest",
+        "analytics",
+    )
     val showFab = currentRoute in mainRoutes
 
     val navigateDrawerRoute: (String) -> Unit = { route ->
@@ -552,9 +569,15 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                     DrawerNavEntry("Accounts", Icons.Outlined.AccountBalanceWallet, currentRoute == "accounts", itemColors) {
                         navigateDrawerRoute("accounts")
                     }
-                    DrawerNavEntry("Budgets & Planned", Icons.Outlined.PieChart, currentRoute == "budgets", itemColors) {
+                    DrawerNavEntry("Debts", Icons.Outlined.Payments, currentRoute == "debts", itemColors) {
+                        navigateDrawerRoute("debts")
+                    }
+                    DrawerNavEntry("Budgets & Goals", Icons.Outlined.PieChart, currentRoute == "budgets", itemColors) {
                         budgetsInitialTab = 0
                         navigateDrawerRoute("budgets")
+                    }
+                    DrawerNavEntry("Shopping Lists", Icons.Outlined.Checklist, currentRoute == "shopping_lists", itemColors) {
+                        navigateDrawerRoute("shopping_lists")
                     }
                     DrawerNavEntry("Categories", Icons.Outlined.Category, currentRoute == "categories", itemColors) {
                         navigateDrawerRoute("categories")
@@ -596,14 +619,29 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                 if (showFab) {
                     FloatingActionButton(
                         onClick = {
-                            addInitialType = "EXPENSE"
-                            showAddModal = true
+                            when (currentRoute) {
+                                "debts" -> debtsAddTrigger++
+                                "shopping_lists" -> shoppingAddTrigger++
+                                "budgets" -> budgetsAddTrigger++
+                                else -> {
+                                    addInitialType = "EXPENSE"
+                                    showAddModal = true
+                                }
+                            }
                         },
                         shape = RoundedCornerShape(16.dp),
                         containerColor = EmeraldPrimary,
                         contentColor = Color.White,
                     ) {
-                        Icon(Icons.Outlined.Add, contentDescription = "Add Transaction")
+                        Icon(
+                            imageVector = Icons.Outlined.Add,
+                            contentDescription = when (currentRoute) {
+                                "debts" -> "Add Debt"
+                                "shopping_lists" -> "New Checklist"
+                                "budgets" -> "Add"
+                                else -> "Add Transaction"
+                            },
+                        )
                     }
                 }
             },
@@ -624,6 +662,10 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                             budgetsInitialTab = 0
                             navigateDrawerRoute("budgets")
                         },
+                        onOpenGoals = {
+                            budgetsInitialTab = 1
+                            navigateDrawerRoute("budgets")
+                        },
                         onOpenAccounts = { navigateDrawerRoute("accounts") },
                         onOpenAddAccount = {
                             openAddAccountOnStart = true
@@ -639,12 +681,28 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                         onOpenSettings = { navigateDrawerRoute("settings") },
                     )
                 }
+                composable("debts") {
+                    DebtsScreen(
+                        vm = vm,
+                        addTrigger = debtsAddTrigger,
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onOpenSettings = { navigateDrawerRoute("settings") },
+                    )
+                }
                 composable("budgets") {
                     BudgetsScreen(
                         vm = vm,
                         initialTab = budgetsInitialTab,
+                        addTrigger = budgetsAddTrigger,
                         onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onOpenFullAnalytics = { navigateDrawerRoute("analytics") },
+                        onOpenSettings = { navigateDrawerRoute("settings") },
+                    )
+                }
+                composable("shopping_lists") {
+                    ShoppingListsScreen(
+                        vm = vm,
+                        addTrigger = shoppingAddTrigger,
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
                         onOpenSettings = { navigateDrawerRoute("settings") },
                     )
                 }

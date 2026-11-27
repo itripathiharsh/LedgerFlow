@@ -5,11 +5,15 @@ import androidx.room.withTransaction
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.CategoryEntity
+import com.ledgerflow.app.data.local.DebtEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.LedgerDatabase
 import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.PlannedPaymentEntity
+import com.ledgerflow.app.data.local.SavingsGoalEntity
 import com.ledgerflow.app.data.local.SeedData
+import com.ledgerflow.app.data.local.ShoppingItemEntity
+import com.ledgerflow.app.data.local.ShoppingListEntity
 import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.data.remote.IsoTime
 import com.ledgerflow.app.data.remote.SupabaseAccountDto
@@ -52,6 +56,62 @@ data class DataImportOutcome(
 )
 
 @Serializable
+data class VaultDebtDto(
+    val id: String,
+    val personName: String,
+    val direction: String,
+    val totalAmountMinor: Long,
+    val remainingAmountMinor: Long,
+    val currency: String,
+    val accountId: String? = null,
+    val dueAtEpochMs: Long? = null,
+    val note: String = "",
+    val status: String = "ACTIVE",
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val deletedAtEpochMs: Long? = null,
+)
+
+@Serializable
+data class VaultSavingsGoalDto(
+    val id: String,
+    val name: String,
+    val targetAmountMinor: Long,
+    val savedAmountMinor: Long = 0L,
+    val currency: String,
+    val targetDateEpochMs: Long? = null,
+    val iconKey: String = "savings",
+    val colorHex: String = "#059669",
+    val linkedAccountId: String? = null,
+    val status: String = "ACTIVE",
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val deletedAtEpochMs: Long? = null,
+)
+
+@Serializable
+data class VaultShoppingListDto(
+    val id: String,
+    val title: String,
+    val defaultCategoryId: String? = null,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val deletedAtEpochMs: Long? = null,
+)
+
+@Serializable
+data class VaultShoppingItemDto(
+    val id: String,
+    val listId: String,
+    val name: String,
+    val estimatedPriceMinor: Long = 0L,
+    val checked: Boolean = false,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val deletedAtEpochMs: Long? = null,
+)
+
+@Serializable
 data class LedgerVaultBackup(
     val exportedAt: String,
     val baseCurrency: String,
@@ -62,6 +122,10 @@ data class LedgerVaultBackup(
     val plannedPayments: List<SupabasePlannedDto>,
     val holdings: List<SupabaseHoldingDto>,
     val magicRules: List<SupabaseMagicRuleDto>,
+    val debts: List<VaultDebtDto> = emptyList(),
+    val savingsGoals: List<VaultSavingsGoalDto> = emptyList(),
+    val shoppingLists: List<VaultShoppingListDto> = emptyList(),
+    val shoppingItems: List<VaultShoppingItemDto> = emptyList(),
 )
 
 class LedgerSyncRepository(
@@ -461,6 +525,10 @@ class LedgerSyncRepository(
         val planned = backup.plannedPayments.map { it.toEntity(nowMs).copy(pendingSync = true) }
         val holdings = backup.holdings.map { it.toEntity(nowMs).copy(pendingSync = true) }
         val rules = backup.magicRules.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val debts = backup.debts.map { it.toEntity(nowMs) }
+        val goals = backup.savingsGoals.map { it.toEntity(nowMs) }
+        val lists = backup.shoppingLists.map { it.toEntity(nowMs) }
+        val items = backup.shoppingItems.map { it.toEntity(nowMs) }
 
         db.withTransaction {
             if (cats.isNotEmpty()) db.categoryDao().upsertAll(cats)
@@ -469,6 +537,10 @@ class LedgerSyncRepository(
             if (planned.isNotEmpty()) db.plannedPaymentDao().upsertAll(planned)
             if (holdings.isNotEmpty()) db.holdingDao().upsertAll(holdings)
             if (rules.isNotEmpty()) db.magicRuleDao().upsertAll(rules)
+            if (debts.isNotEmpty()) db.debtDao().upsertAll(debts)
+            if (goals.isNotEmpty()) db.savingsGoalDao().upsertAll(goals)
+            if (lists.isNotEmpty()) db.shoppingListDao().upsertAll(lists)
+            if (items.isNotEmpty()) db.shoppingItemDao().upsertAll(items)
             if (txs.isNotEmpty()) db.transactionDao().upsertAll(txs)
             if (db.accountDao().getAllActive().isEmpty() || db.categoryDao().getAllActive().isEmpty()) {
                 SeedData.ensureMinimalSetup(db, defaultCurrency = backup.baseCurrency.ifBlank { defaultCurrency }, nowMs = nowMs)
@@ -480,7 +552,11 @@ class LedgerSyncRepository(
         val otherCount = budgets.count { it.deletedAtEpochMs == null } +
             planned.count { it.deletedAtEpochMs == null } +
             holdings.count { it.deletedAtEpochMs == null } +
-            rules.count { it.deletedAtEpochMs == null }
+            rules.count { it.deletedAtEpochMs == null } +
+            debts.count { it.deletedAtEpochMs == null } +
+            goals.count { it.deletedAtEpochMs == null } +
+            lists.count { it.deletedAtEpochMs == null } +
+            items.count { it.deletedAtEpochMs == null }
 
         return DataImportOutcome(
             importedTransactions = activeTxCount,
@@ -522,6 +598,10 @@ class LedgerSyncRepository(
             plannedPayments = db.plannedPaymentDao().getAllActive().map { it.toDto(uid) },
             holdings = db.holdingDao().getAllActive().map { it.toDto(uid) },
             magicRules = db.magicRuleDao().getAllActive().map { it.toDto(uid) },
+            debts = db.debtDao().getAllActive().map { it.toBackupDto() },
+            savingsGoals = db.savingsGoalDao().getAllActive().map { it.toBackupDto() },
+            shoppingLists = db.shoppingListDao().getAllActive().map { it.toBackupDto() },
+            shoppingItems = db.shoppingItemDao().getAllActive().map { it.toBackupDto() },
         )
         return exportJson.encodeToString(LedgerVaultBackup.serializer(), backup)
     }
@@ -659,4 +739,64 @@ private fun SupabaseMagicRuleDto.toEntity(now: Long) = MagicRuleEntity(
     targetLabel = targetLabel, enabled = enabled,
     createdAtEpochMs = IsoTime.parseOr(createdAt, now), updatedAtEpochMs = IsoTime.parseOr(updatedAt, now),
     deletedAtEpochMs = deletedAt?.let { IsoTime.parseOr(it, now) }, pendingSync = false,
+)
+
+private fun DebtEntity.toBackupDto() = VaultDebtDto(
+    id = id, personName = personName, direction = direction, totalAmountMinor = totalAmountMinor,
+    remainingAmountMinor = remainingAmountMinor, currency = currency, accountId = accountId,
+    dueAtEpochMs = dueAtEpochMs, note = note, status = status,
+    createdAtEpochMs = createdAtEpochMs, updatedAtEpochMs = updatedAtEpochMs, deletedAtEpochMs = deletedAtEpochMs,
+)
+
+private fun VaultDebtDto.toEntity(now: Long) = DebtEntity(
+    id = id, personName = personName, direction = direction, totalAmountMinor = totalAmountMinor,
+    remainingAmountMinor = remainingAmountMinor, currency = currency, accountId = accountId,
+    dueAtEpochMs = dueAtEpochMs, note = note, status = status,
+    createdAtEpochMs = createdAtEpochMs.takeIf { it > 0L } ?: now,
+    updatedAtEpochMs = updatedAtEpochMs.takeIf { it > 0L } ?: now,
+    deletedAtEpochMs = deletedAtEpochMs,
+    pendingSync = true,
+)
+
+private fun SavingsGoalEntity.toBackupDto() = VaultSavingsGoalDto(
+    id = id, name = name, targetAmountMinor = targetAmountMinor, savedAmountMinor = savedAmountMinor,
+    currency = currency, targetDateEpochMs = targetDateEpochMs, iconKey = iconKey, colorHex = colorHex,
+    linkedAccountId = linkedAccountId, status = status,
+    createdAtEpochMs = createdAtEpochMs, updatedAtEpochMs = updatedAtEpochMs, deletedAtEpochMs = deletedAtEpochMs,
+)
+
+private fun VaultSavingsGoalDto.toEntity(now: Long) = SavingsGoalEntity(
+    id = id, name = name, targetAmountMinor = targetAmountMinor, savedAmountMinor = savedAmountMinor,
+    currency = currency, targetDateEpochMs = targetDateEpochMs, iconKey = iconKey, colorHex = colorHex,
+    linkedAccountId = linkedAccountId, status = status,
+    createdAtEpochMs = createdAtEpochMs.takeIf { it > 0L } ?: now,
+    updatedAtEpochMs = updatedAtEpochMs.takeIf { it > 0L } ?: now,
+    deletedAtEpochMs = deletedAtEpochMs,
+    pendingSync = true,
+)
+
+private fun ShoppingListEntity.toBackupDto() = VaultShoppingListDto(
+    id = id, title = title, defaultCategoryId = defaultCategoryId,
+    createdAtEpochMs = createdAtEpochMs, updatedAtEpochMs = updatedAtEpochMs, deletedAtEpochMs = deletedAtEpochMs,
+)
+
+private fun VaultShoppingListDto.toEntity(now: Long) = ShoppingListEntity(
+    id = id, title = title, defaultCategoryId = defaultCategoryId,
+    createdAtEpochMs = createdAtEpochMs.takeIf { it > 0L } ?: now,
+    updatedAtEpochMs = updatedAtEpochMs.takeIf { it > 0L } ?: now,
+    deletedAtEpochMs = deletedAtEpochMs,
+    pendingSync = true,
+)
+
+private fun ShoppingItemEntity.toBackupDto() = VaultShoppingItemDto(
+    id = id, listId = listId, name = name, estimatedPriceMinor = estimatedPriceMinor, checked = checked,
+    createdAtEpochMs = createdAtEpochMs, updatedAtEpochMs = updatedAtEpochMs, deletedAtEpochMs = deletedAtEpochMs,
+)
+
+private fun VaultShoppingItemDto.toEntity(now: Long) = ShoppingItemEntity(
+    id = id, listId = listId, name = name, estimatedPriceMinor = estimatedPriceMinor, checked = checked,
+    createdAtEpochMs = createdAtEpochMs.takeIf { it > 0L } ?: now,
+    updatedAtEpochMs = updatedAtEpochMs.takeIf { it > 0L } ?: now,
+    deletedAtEpochMs = deletedAtEpochMs,
+    pendingSync = true,
 )

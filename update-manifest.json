@@ -1,16 +1,16 @@
 {
-  "versionCode": 16,
-  "versionName": "1.5.0",
+  "versionCode": 17,
+  "versionName": "1.6.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T16:56:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.5.0/LedgerFlow-v1.5.0.apk",
-  "apkSizeBytes": 4731064,
-  "sha256": "353a2f50ded4b0ee0e966ff8152f1ce89d701994f6408dce8458a067fa05b1cb",
+  "releasedAt": "2026-11-27T17:26:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.6.0/LedgerFlow-v1.6.0.apk",
+  "apkSizeBytes": 4858239,
+  "sha256": "5343df64b2f38614c648f85f2f716753fb67ca81707f0af9dcc76759f388800a",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Promoted Categories & Subcategories to a dedicated full screen in the Left Navigation Drawer (plus shortcut from Settings) with full-width expandable cards, multi-row FlowRow subcategory chips (never clipped), Search, Select bulk-delete, and + Category / + Sub actions.",
-    "Replaced stacked category popup dialogs with a single-layer CategoryEditorBottomSheet supporting Create, Rename, Icon/Accent Color customization, Parent Category filter, and Delete.",
-    "Fixed Material 3 dark theme container slots in Theme.kt (Flow Dark emerald-slate and Premium Black pure OLED) so dialogs, bottom sheets, and chips never render off-brand purplish-grey."
+    "Added Debts (Lent & Borrowed) screen in the Left Navigation Drawer with Active / Closed sub-tabs, To Receive & To Pay summary strip, optional initial ledger linking, partial/full Record Repayment settlement flow, and single-layer management sheet.",
+    "Added Savings Goals inside Budgets & Goals (Budgets | Goals | Planned) and on Home's Budgets & Goals tab, with Active / Paused / Reached filters, progress bars, custom icons/accents, Pause/Resume controls, and quick + Add Funds contributions.",
+    "Added Shopping Lists screen in the Left Navigation Drawer with checklist progress cards, quick-add item + estimated price bar, strike-through checked grouping, and one-tap Log as Expense conversion with itemized notes into your ledger (Room v3)."
   ],
   "mandatory": false
 }

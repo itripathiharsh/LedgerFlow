@@ -223,3 +223,102 @@ interface MagicRuleDao {
     @Query("DELETE FROM magic_rules")
     suspend fun deleteAll()
 }
+
+@Dao
+interface DebtDao {
+    @Query("SELECT * FROM debts WHERE deletedAtEpochMs IS NULL ORDER BY updatedAtEpochMs DESC")
+    fun observeActive(): Flow<List<DebtEntity>>
+
+    @Query("SELECT * FROM debts WHERE deletedAtEpochMs IS NULL")
+    suspend fun getAllActive(): List<DebtEntity>
+
+    @Query("SELECT * FROM debts WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): DebtEntity?
+
+    @Query("SELECT * FROM debts WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<String>): List<DebtEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(debt: DebtEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(debts: List<DebtEntity>)
+
+    @Query("DELETE FROM debts")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface SavingsGoalDao {
+    @Query("SELECT * FROM savings_goals WHERE deletedAtEpochMs IS NULL ORDER BY updatedAtEpochMs DESC")
+    fun observeActive(): Flow<List<SavingsGoalEntity>>
+
+    @Query("SELECT * FROM savings_goals WHERE deletedAtEpochMs IS NULL")
+    suspend fun getAllActive(): List<SavingsGoalEntity>
+
+    @Query("SELECT * FROM savings_goals WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): SavingsGoalEntity?
+
+    @Query("SELECT * FROM savings_goals WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<String>): List<SavingsGoalEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(goal: SavingsGoalEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(goals: List<SavingsGoalEntity>)
+
+    @Query("DELETE FROM savings_goals")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface ShoppingListDao {
+    @Query("SELECT * FROM shopping_lists WHERE deletedAtEpochMs IS NULL ORDER BY updatedAtEpochMs DESC")
+    fun observeActive(): Flow<List<ShoppingListEntity>>
+
+    @Query("SELECT * FROM shopping_lists WHERE deletedAtEpochMs IS NULL")
+    suspend fun getAllActive(): List<ShoppingListEntity>
+
+    @Query("SELECT * FROM shopping_lists WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): ShoppingListEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(list: ShoppingListEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(lists: List<ShoppingListEntity>)
+
+    @Query("DELETE FROM shopping_lists")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface ShoppingItemDao {
+    @Query("SELECT * FROM shopping_items WHERE deletedAtEpochMs IS NULL ORDER BY checked ASC, createdAtEpochMs ASC")
+    fun observeActive(): Flow<List<ShoppingItemEntity>>
+
+    @Query("SELECT * FROM shopping_items WHERE deletedAtEpochMs IS NULL AND listId = :listId ORDER BY checked ASC, createdAtEpochMs ASC")
+    fun observeForList(listId: String): Flow<List<ShoppingItemEntity>>
+
+    @Query("SELECT * FROM shopping_items WHERE deletedAtEpochMs IS NULL AND listId = :listId")
+    suspend fun getActiveForList(listId: String): List<ShoppingItemEntity>
+
+    @Query("SELECT * FROM shopping_items WHERE deletedAtEpochMs IS NULL")
+    suspend fun getAllActive(): List<ShoppingItemEntity>
+
+    @Query("SELECT * FROM shopping_items WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): ShoppingItemEntity?
+
+    @Query("SELECT * FROM shopping_items WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<String>): List<ShoppingItemEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: ShoppingItemEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<ShoppingItemEntity>)
+
+    @Query("DELETE FROM shopping_items")
+    suspend fun deleteAll()
+}

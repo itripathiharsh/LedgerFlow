@@ -3,9 +3,13 @@ package com.ledgerflow.app.domain
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.CategoryEntity
+import com.ledgerflow.app.data.local.DebtEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.PlannedPaymentEntity
+import com.ledgerflow.app.data.local.SavingsGoalEntity
+import com.ledgerflow.app.data.local.ShoppingItemEntity
+import com.ledgerflow.app.data.local.ShoppingListEntity
 import com.ledgerflow.app.data.local.TransactionEntity
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -866,6 +870,103 @@ object AnalyticsCalculator {
             }
         }
         return total
+    }
+
+    data class DebtSummary(
+        val toReceiveMinor: Long,
+        val toPayMinor: Long,
+        val activeLentCount: Int,
+        val activeBorrowedCount: Int,
+        val closedCount: Int,
+    )
+
+    data class GoalProgress(
+        val goal: SavingsGoalEntity,
+        val savedBaseMinor: Long,
+        val targetBaseMinor: Long,
+        val remainingBaseMinor: Long,
+        val ratio: Float,
+        val percent: Int,
+    )
+
+    data class ShoppingListSummary(
+        val list: ShoppingListEntity,
+        val totalItems: Int,
+        val checkedItems: Int,
+        val uncheckedItems: Int,
+        val estimatedTotalMinor: Long,
+        val checkedTotalMinor: Long,
+    )
+
+    fun computeDebtSummary(
+        debts: List<DebtEntity>,
+        baseCurrency: String,
+    ): DebtSummary {
+        var toReceive = 0L
+        var toPay = 0L
+        var lentCount = 0
+        var borrowedCount = 0
+        var closedCount = 0
+        for (debt in debts) {
+            if (debt.deletedAtEpochMs != null) continue
+            val isClosed = debt.status == "CLOSED" || debt.remainingAmountMinor <= 0L
+            if (isClosed) {
+                closedCount++
+                continue
+            }
+            val remBase = abs(FxConverter.convertMinor(debt.remainingAmountMinor, debt.currency, baseCurrency))
+            if (debt.direction.equals("BORROWED", ignoreCase = true)) {
+                toPay += remBase
+                borrowedCount++
+            } else {
+                toReceive += remBase
+                lentCount++
+            }
+        }
+        return DebtSummary(
+            toReceiveMinor = toReceive,
+            toPayMinor = toPay,
+            activeLentCount = lentCount,
+            activeBorrowedCount = borrowedCount,
+            closedCount = closedCount,
+        )
+    }
+
+    fun computeGoalProgress(
+        goal: SavingsGoalEntity,
+        baseCurrency: String,
+    ): GoalProgress {
+        val targetBase = abs(FxConverter.convertMinor(goal.targetAmountMinor, goal.currency, baseCurrency)).coerceAtLeast(1L)
+        val savedBase = abs(FxConverter.convertMinor(goal.savedAmountMinor, goal.currency, baseCurrency))
+        val remaining = (targetBase - savedBase).coerceAtLeast(0L)
+        val ratio = (savedBase.toFloat() / targetBase.toFloat()).coerceIn(0f, 1f)
+        val pct = ((savedBase.toDouble() / targetBase.toDouble()) * 100.0).roundToLong().toInt().coerceIn(0, 999)
+        return GoalProgress(
+            goal = goal,
+            savedBaseMinor = savedBase,
+            targetBaseMinor = targetBase,
+            remainingBaseMinor = remaining,
+            ratio = ratio,
+            percent = pct,
+        )
+    }
+
+    fun summarizeShoppingList(
+        list: ShoppingListEntity,
+        items: List<ShoppingItemEntity>,
+    ): ShoppingListSummary {
+        val active = items.filter { it.deletedAtEpochMs == null && it.listId == list.id }
+        val checkedList = active.filter { it.checked }
+        val estTotal = active.sumOf { abs(it.estimatedPriceMinor) }
+        val checkedTotal = checkedList.sumOf { abs(it.estimatedPriceMinor) }
+        return ShoppingListSummary(
+            list = list,
+            totalItems = active.size,
+            checkedItems = checkedList.size,
+            uncheckedItems = active.size - checkedList.size,
+            estimatedTotalMinor = estTotal,
+            checkedTotalMinor = checkedTotal,
+        )
     }
 }
 

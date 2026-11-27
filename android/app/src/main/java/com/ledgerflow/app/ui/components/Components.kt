@@ -21,9 +21,11 @@ import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CardGiftcard
 import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Coffee
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.DirectionsTransit
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Flight
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LocalGasStation
@@ -168,7 +170,7 @@ fun categoryIcon(iconKey: String): ImageVector = when (iconKey) {
     "directions_transit" -> Icons.Outlined.DirectionsTransit
     "auto_awesome" -> Icons.Outlined.AutoAwesome
     "home" -> Icons.Outlined.Home
-    "payments" -> Icons.Outlined.Payments
+    "payments", "debt" -> Icons.Outlined.Payments
     "medical_services" -> Icons.Outlined.MedicalServices
     "movie" -> Icons.Outlined.Movie
     "flight" -> Icons.Outlined.Flight
@@ -179,6 +181,8 @@ fun categoryIcon(iconKey: String): ImageVector = when (iconKey) {
     "credit_card" -> Icons.Outlined.CreditCard
     "loan" -> Icons.AutoMirrored.Outlined.ReceiptLong
     "bank" -> Icons.Outlined.AccountBalance
+    "savings", "flag" -> Icons.Outlined.Flag
+    "checklist", "shopping_list" -> Icons.Outlined.Checklist
     else -> Icons.Outlined.Category
 }
 

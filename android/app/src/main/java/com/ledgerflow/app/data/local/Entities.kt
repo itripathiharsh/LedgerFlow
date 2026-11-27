@@ -159,3 +159,75 @@ data class MagicRuleEntity(
     val deletedAtEpochMs: Long? = null,
     val pendingSync: Boolean = true,
 )
+
+@Entity(
+    tableName = "debts",
+    indices = [Index("updatedAtEpochMs")]
+)
+data class DebtEntity(
+    @PrimaryKey val id: String,
+    val personName: String,
+    val direction: String, // "LENT" or "BORROWED"
+    val totalAmountMinor: Long,
+    val remainingAmountMinor: Long,
+    val currency: String,
+    val accountId: String? = null,
+    val dueAtEpochMs: Long? = null,
+    val note: String = "",
+    val status: String = "ACTIVE", // "ACTIVE" or "CLOSED"
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val deletedAtEpochMs: Long? = null,
+    val pendingSync: Boolean = true,
+)
+
+@Entity(
+    tableName = "savings_goals",
+    indices = [Index("updatedAtEpochMs")]
+)
+data class SavingsGoalEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val targetAmountMinor: Long,
+    val savedAmountMinor: Long = 0L,
+    val currency: String,
+    val targetDateEpochMs: Long? = null,
+    val iconKey: String = "savings",
+    val colorHex: String = "#059669",
+    val linkedAccountId: String? = null,
+    val status: String = "ACTIVE", // "ACTIVE", "PAUSED", "REACHED"
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val deletedAtEpochMs: Long? = null,
+    val pendingSync: Boolean = true,
+)
+
+@Entity(
+    tableName = "shopping_lists",
+    indices = [Index("updatedAtEpochMs")]
+)
+data class ShoppingListEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val defaultCategoryId: String? = null,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val deletedAtEpochMs: Long? = null,
+    val pendingSync: Boolean = true,
+)
+
+@Entity(
+    tableName = "shopping_items",
+    indices = [Index("listId"), Index("updatedAtEpochMs")]
+)
+data class ShoppingItemEntity(
+    @PrimaryKey val id: String,
+    val listId: String,
+    val name: String,
+    val estimatedPriceMinor: Long = 0L,
+    val checked: Boolean = false,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val deletedAtEpochMs: Long? = null,
+    val pendingSync: Boolean = true,
+)

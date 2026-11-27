@@ -346,6 +346,24 @@
   - Signed `LedgerFlow-v1.5.0.apk` (`4,731,064` bytes, SHA-256 `353a2f50ded4b0ee0e966ff8152f1ce89d701994f6408dce8458a067fa05b1cb`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.5.0`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.5.0/LedgerFlow-v1.5.0.apk`.
 
+---
+
+## Debts, Savings Goals & Shopping Lists (`v1.6.0`, `versionCode 17`)
+- **Room Database v3 (`Entities.kt`, `LedgerDaos.kt`, `LedgerDatabase.kt`, `0005_debts_goals_shopping.sql`)**:
+  - Added `debts`, `savings_goals`, `shopping_lists`, and `shopping_items` tables with `MIGRATION_2_3` + indices and `deleteAllRowsLocked()` coverage (`Start Fresh` wipe).
+  - Implemented atomic SQLite helpers: `createDebtAtomic`, `recordDebtRepaymentAtomic` (auto-closing settled debts and optionally updating account balances), `addGoalContributionAtomic` (auto-marking `REACHED` + optional account deduction), and `convertShoppingItemsToExpenseAtomic` (converting checked checklist items into a real `EXPENSE` with itemized notes and clearing converted items).
+  - Extended `LedgerVaultBackup` in [LedgerSyncRepository.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/data/sync/LedgerSyncRepository.kt) with backward-compatible defaults (`= emptyList()`) for offline JSON vault export/restore while keeping remote Supabase sync scoped to the 7 core live tables.
+- **Navigation, Debts, Savings Goals & Shopping Lists UI (`MainActivity.kt`, `HomeScreen.kt`, `DebtsScreen.kt`, `BudgetsScreen.kt`, `ShoppingListsScreen.kt`)**:
+  - Updated Left Navigation Drawer order (`Home`, `Records`, `Accounts`, `Debts`, `Budgets & Goals`, `Shopping Lists`, `Categories`, `Investments`, `Analytics & Insights`, `Smart Paste & Import`, `Settings`) with a single emerald bottom-right `+` FAB per screen.
+  - Added [DebtsScreen.kt](file:///D:/all%20farzi project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/DebtsScreen.kt) (`Active` | `Closed`, Search, `To Receive` / `To Pay` summary strip, empty state, single-layer Add/Edit and Record Repayment bottom sheets).
+  - Updated [BudgetsScreen.kt](file:///D:/all farzi project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/BudgetsScreen.kt) (`Budgets & Goals` with `Budgets` | `Goals` | `Planned`, `Active` | `Paused` | `Reached` goal filters, progress cards, icon/accent customization, and `+ Add Funds` sheet) and synced Home's second sub-tab (`Budgets & Goals`).
+  - Added [ShoppingListsScreen.kt](file:///D:/all%20farzi project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/ShoppingListsScreen.kt) (checklist overview cards, detail quick-add bar, strike-through grouped checked items, and sticky `"Log as Expense"` bar with Account + Category checkout sheet).
+- **Verification (`v1.6.0`)**:
+  - Added `debtsGoalsShoppingCalculators_aggregateAccurately` in [FinanceMathTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/FinanceMathTest.kt) plus `migration2To3_preservesExistingV2DataAndCreatesDebtsGoalsShoppingTables` and `debtsGoalsShopping_atomicLedgerFlowsAndResetWorkEndToEnd` in [LedgerDatabaseRobolectricTest.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/test/java/com/ledgerflow/app/LedgerDatabaseRobolectricTest.kt).
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --max-workers=1 --no-daemon`: **44 / 44 passed** (`0` failures, `0` errors, `0` skipped), `0` Lint errors (`29` warnings).
+  - Signed `LedgerFlow-v1.6.0.apk` (`4,858,239` bytes, SHA-256 `5343df64b2f38614c648f85f2f716753fb67ca81707f0af9dcc76759f388800a`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.6.0`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.6.0/LedgerFlow-v1.6.0.apk`.
+
 
 
 
