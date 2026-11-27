@@ -7,6 +7,10 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -64,6 +68,10 @@ data class SupabaseAccountDto(
     @SerialName("account_type") val accountType: String,
     val currency: String,
     @SerialName("balance_minor") val balanceMinor: Long,
+    @SerialName("credit_limit_minor") val creditLimitMinor: Long = 0L,
+    // Exact local type; account_type only holds the coarser set the core schema accepts.
+    @SerialName("account_subtype") val accountSubtype: String = "",
+    @SerialName("detail_version") val detailVersion: Int = 0,
     @SerialName("last_four") val lastFour: String = "",
     @SerialName("source_type") val sourceType: String = "MANUAL",
     @SerialName("sync_status") val syncStatus: String = "OK",
@@ -81,6 +89,9 @@ data class SupabaseCategoryDto(
     val kind: String,
     @SerialName("icon_key") val iconKey: String,
     @SerialName("color_hex") val colorHex: String,
+    @SerialName("parent_category_id") val parentCategoryId: String? = null,
+    val description: String = "",
+    @SerialName("detail_version") val detailVersion: Int = 0,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
     @SerialName("deleted_at") val deletedAt: String? = null,
@@ -93,6 +104,9 @@ data class SupabaseTransactionDto(
     @SerialName("account_id") val accountId: String,
     @SerialName("transfer_account_id") val transferAccountId: String? = null,
     @SerialName("category_id") val categoryId: String? = null,
+    @SerialName("category_ids_csv") val categoryIdsCsv: String = "",
+    @SerialName("spending_purpose") val spendingPurpose: String = "",
+    @SerialName("detail_version") val detailVersion: Int = 0,
     @SerialName("tx_type") val txType: String,
     @SerialName("amount_minor") val amountMinor: Long,
     val currency: String,
@@ -274,14 +288,22 @@ class SupabaseSyncClient(
         }
     }
 
+    data class UpsertResult(
+        val code: Int,
+        /** PostgREST rejected the payload because the table lacks one of the columns sent. */
+        val missingColumn: Boolean = false,
+    )
+
     suspend fun <T> upsertTable(
         table: String,
         items: List<T>,
         serializer: kotlinx.serialization.KSerializer<T>,
         accessToken: String,
-    ): Int = withContext(Dispatchers.IO) {
-        if (items.isEmpty() || publishableKey.isBlank()) return@withContext 200
-        val body = json.encodeToString(ListSerializer(serializer), items)
+        omitKeys: Set<String> = emptySet(),
+    ): UpsertResult = withContext(Dispatchers.IO) {
+        if (items.isEmpty() || publishableKey.isBlank()) return@withContext UpsertResult(200)
+        val rows = json.encodeToJsonElement(ListSerializer(serializer), items).jsonArray
+        val body = JsonArray(rows.map { row -> JsonObject(row.jsonObject.filterKeys { it !in omitKeys }) }).toString()
         val req = Request.Builder()
             .url("$baseUrl/rest/v1/$table?on_conflict=id")
             .header("apikey", publishableKey)
@@ -290,7 +312,12 @@ class SupabaseSyncClient(
             .header("Content-Type", "application/json")
             .post(body.toRequestBody(mediaJson))
             .build()
-        client.newCall(req).execute().use { it.code }
+        client.newCall(req).execute().use { res ->
+            val error = if (res.code == 400) res.body?.string().orEmpty() else ""
+            // PostgREST reports PGRST204 from its schema cache; Postgres itself reports 42703.
+            val missingColumn = "PGRST204" in error || "42703" in error
+            UpsertResult(res.code, missingColumn)
+        }
     }
 
     suspend fun <T> pullTableSince(

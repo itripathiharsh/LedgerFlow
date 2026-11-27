@@ -26,6 +26,8 @@ data class VaultSessionState(
     val refreshToken: String? = null,
     val lastSyncEpochMs: Long = 0L,
     val lastSyncWatermarkIso: String? = null,
+    // Set when an upload had to drop detail columns because the cloud schema predates them.
+    val cloudDetailColumnsMissing: Boolean = false,
     val baseCurrency: String = "USD",
     val appLockEnabled: Boolean = false,
     val autoLockSeconds: Int = 10,
@@ -196,6 +198,7 @@ class VaultStore(context: Context) {
             refreshToken = null,
             lastSyncEpochMs = 0L,
             lastSyncWatermarkIso = null,
+            cloudDetailColumnsMissing = false,
             hideBalances = false,
         )
     }

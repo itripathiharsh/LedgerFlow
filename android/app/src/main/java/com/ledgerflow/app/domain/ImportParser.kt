@@ -182,12 +182,13 @@ object ImportParser {
 
         for (i in (headerRowIndex + 1) until rows.size) {
             val cols = rows[i]
-            val parsedAmountAndType = resolveCsvRowAmountAndType(cols, mapping) ?: continue
+            val rawCurrency = mapping.currencyIdx?.let { cols.getOrNull(it) }.orEmpty()
+            val rowCurrency = normalizeCurrencyCode(rawCurrency)
+            val parsedAmountAndType = resolveCsvRowAmountAndType(cols, mapping, rowCurrency, cleanCur) ?: continue
             val (signedMinor, txType, amtCurrencyHint) = parsedAmountAndType
             if (signedMinor == 0L) continue
 
-            val rawCurrency = mapping.currencyIdx?.let { cols.getOrNull(it) }.orEmpty()
-            val currency = normalizeCurrencyCode(rawCurrency) ?: amtCurrencyHint ?: cleanCur
+            val currency = rowCurrency ?: amtCurrencyHint ?: cleanCur
 
             val merchant = listOfNotNull(
                 mapping.merchantIdx?.let { cols.getOrNull(it)?.trim()?.takeIf { s -> s.isNotEmpty() } },
@@ -255,7 +256,8 @@ object ImportParser {
         val drafts = mutableListOf<ImportedTxDraft>()
         array.forEachIndexed { idx, el ->
             val obj = el as? JsonObject ?: return@forEachIndexed
-            val amountMinorPair = extractJsonAmountMinor(obj) ?: return@forEachIndexed
+            val rowCurrency = normalizeCurrencyCode(firstString(obj, "currency", "ccy", "currencyCode"))
+            val amountMinorPair = extractJsonAmountMinor(obj, rowCurrency, defaultCurrency) ?: return@forEachIndexed
             val (parsedMinor, amtCurrencyHint) = amountMinorPair
             if (parsedMinor == 0L) return@forEachIndexed
 
@@ -278,7 +280,7 @@ object ImportParser {
             val categoryHint = firstString(obj, "category", "categoryName", "category_name", "group")
             val accountHint = firstString(obj, "account", "accountName", "account_name", "wallet", "paymentMode")
             val labelsCsv = extractLabels(obj)
-            val currency = normalizeCurrencyCode(firstString(obj, "currency", "ccy", "currencyCode"))
+            val currency = rowCurrency
                 ?: amtCurrencyHint
                 ?: defaultCurrency
             val rawDate = firstString(obj, "occurredAt", "occurred_at", "occurredAtEpochMs", "date", "timestamp", "createdAt", "created_at", "time").orEmpty()
@@ -306,7 +308,11 @@ object ImportParser {
         }
     }
 
-    private fun extractJsonAmountMinor(obj: JsonObject): ParsedAmount? {
+    private fun extractJsonAmountMinor(
+        obj: JsonObject,
+        rowCurrency: String?,
+        defaultCurrency: String,
+    ): ParsedAmount? {
         val minorRaw = firstPrimitiveContent(obj, "amountMinor", "amount_minor", "valueMinor")
         if (minorRaw != null) {
             val minor = minorRaw.toLongOrNull()
@@ -315,7 +321,7 @@ object ImportParser {
             }
         }
         val majorRaw = firstPrimitiveContent(obj, "amount", "value", "total", "price", "cost", "sum") ?: return null
-        return parseAmountCell(majorRaw)
+        return parseAmountCell(majorRaw, rowCurrency, defaultCurrency)
     }
 
     private fun extractLabels(obj: JsonObject): String {
@@ -340,7 +346,15 @@ object ImportParser {
 
     private fun JsonElement.jsonPrimitiveOrNull(): JsonPrimitive? = this as? JsonPrimitive
 
-    fun parseAmountCell(cell: String): ParsedAmount? {
+    /**
+     * Parses a major-unit amount into minor units. The scale follows [rowCurrency] (a currency column),
+     * else a symbol or code inside the cell, else [defaultCurrency].
+     */
+    fun parseAmountCell(
+        cell: String,
+        rowCurrency: String? = null,
+        defaultCurrency: String = "USD",
+    ): ParsedAmount? {
         val trimmed = cell.trim()
         if (trimmed.isEmpty() || trimmed == "-" || trimmed == "--" || trimmed.equals("N/A", ignoreCase = true)) {
             return null
@@ -383,7 +397,8 @@ object ImportParser {
             if (leadingSignNegative && bd > BigDecimal.ZERO) {
                 bd = bd.negate()
             }
-            val minorBd = bd.multiply(BigDecimal(100)).setScale(0, RoundingMode.HALF_UP)
+            val decimals = MoneyFormatter.decimalPlaces(rowCurrency ?: currencyHint ?: defaultCurrency)
+            val minorBd = bd.movePointRight(decimals).setScale(0, RoundingMode.HALF_UP)
             val longVal = minorBd.longValueExact()
             if (abs(longVal) > maxSafeAmountMinor) return@runCatching null
             longVal
@@ -599,12 +614,15 @@ object ImportParser {
     private fun resolveCsvRowAmountAndType(
         cols: List<String>,
         mapping: CsvHeaderMapping,
+        rowCurrency: String?,
+        defaultCurrency: String,
     ): Triple<Long, String, String?>? {
+        fun parse(cell: String) = parseAmountCell(cell, rowCurrency, defaultCurrency)
         val typeToken = mapping.typeIdx?.let { cols.getOrNull(it) }.orEmpty()
         val explicitType = classifyTypeToken(typeToken)
 
-        val debitParsed = mapping.debitIdx?.let { idx -> cols.getOrNull(idx)?.let(::parseAmountCell) }
-        val creditParsed = mapping.creditIdx?.let { idx -> cols.getOrNull(idx)?.let(::parseAmountCell) }
+        val debitParsed = mapping.debitIdx?.let { idx -> cols.getOrNull(idx)?.let(::parse) }
+        val creditParsed = mapping.creditIdx?.let { idx -> cols.getOrNull(idx)?.let(::parse) }
 
         if (debitParsed != null && debitParsed.minor != 0L && (creditParsed == null || creditParsed.minor == 0L)) {
             return Triple(-abs(debitParsed.minor), explicitType ?: "EXPENSE", debitParsed.currencyHint)
@@ -615,7 +633,7 @@ object ImportParser {
 
         val amountIdx = mapping.amountIdx ?: return null
         val cell = cols.getOrNull(amountIdx) ?: return null
-        val parsed = parseAmountCell(cell) ?: return null
+        val parsed = parse(cell) ?: return null
         if (parsed.minor == 0L) return null
 
         val txType = explicitType ?: if (parsed.minor < 0L) "EXPENSE" else "INCOME"

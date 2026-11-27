@@ -20,18 +20,18 @@
 
 ### A. Offline-First Android App (`D:\all farzi project\LedgerFlow\android`)
 - **UI**: Kotlin `2.2.21` + Jetpack Compose + Material 3 (`Clean Emerald` theme in `ui/theme/Theme.kt`).
-  - **Main Shell (`MainActivity.kt`)**: `FragmentActivity` host with `FLAG_SECURE` window protection, biometric/PIN lock overlay (`VaultSecurity.kt`), 5-tab bottom bar (`Home`, `Records`, `Budgets`, `Invest`, `Hub`), center `+` FAB (`AddTransactionSheet`), and `PrivacyVaultScreen` access.
-  - **7 Core Screens (`ui/screens/`)**: `HomeScreen.kt`, `RecordsScreen.kt`, `AddTransactionSheet.kt` (live math calculator keypad + Auto-Rule hints), `BudgetsScreen.kt`, `AccountsHubScreen.kt`, `InvestScreen.kt`, `PrivacyVaultScreen.kt`.
+  - **Main Shell (`MainActivity.kt`)**: `FragmentActivity` host with `FLAG_SECURE` (when app lock and switcher blur are on), biometric/PIN lock overlay (`VaultSecurity.kt`), left navigation drawer (`Home`, `Records`, `Accounts`, `Debts`, `Budgets & Goals`, `Shopping Lists`, `Categories`, `Investments`, `Analytics & Insights`, `Smart Paste & Import`, `Settings`), and a bottom-right `+` FAB.
+  - **Screens (`ui/screens/`)**: `OnboardingScreen.kt`, `HomeScreen.kt`, `RecordsScreen.kt`, `AddTransactionSheet.kt` (live math calculator keypad), `AccountsScreen.kt`, `DebtsScreen.kt`, `BudgetsScreen.kt`, `ShoppingListsScreen.kt`, `CategoriesScreen.kt`, `InvestScreen.kt`, `AnalyticsScreen.kt`, `SettingsScreen.kt`.
 - **Local Persistence (`data/local/`)**:
-  - Entities (`Entities.kt`): `AccountEntity`, `CategoryEntity`, `TransactionEntity`, `TransactionFtsEntity` (`@Fts4`), `BudgetEntity`, `PlannedPaymentEntity`, `HoldingEntity`, `MagicRuleEntity`.
+  - Entities (`Entities.kt`, Room `version = 6`): `AccountEntity`, `CategoryEntity`, `TransactionEntity`, `TransactionFtsEntity` (`@Fts4`), `BudgetEntity`, `PlannedPaymentEntity`, `HoldingEntity`, `MagicRuleEntity`, `DebtEntity`, `SavingsGoalEntity`, `ShoppingListEntity`, `ShoppingItemEntity`.
   - Atomic ledger (`LedgerDatabase.kt`): `recordTransactionAtomic`, `softDeleteTransactionAtomic`, and `executePlannedPaymentAtomic` keep balances and FTS4 search synchronized offline.
-  - Starter Demo Seed (`SeedData.kt`): Idempotent offline starter accounts, categories, transactions, budgets, planned payments, holdings, and magic auto-rules.
+  - Starter setup (`SeedData.kt`): Idempotent starter category tree and one zero-balance `Cash Wallet`; no demo transactions, budgets, planned payments, holdings, or rules.
 - **Pay & Track Notification Capture (`service/PayAndTrackNotificationListenerService.kt`)**:
-  - Opt-in local `NotificationListenerService` parsing payment notifications via `NotificationParser.parseGooglePayNotification` and applying `MagicRuleEngine` directly into SQLite offline.
+  - Opt-in local `NotificationListenerService` for supported payment apps; `PayAndTrackCapture` parses alerts with `NotificationParser.inspectNotification` and stores them as `PENDING_REVIEW` without auto-assigning a category (`MagicRuleEngine` runs only on imports).
 - **Background Sync & Auto-Updates (`work/SyncWorker.kt`, `work/UpdateCheckWorker.kt`, `update/`, `domain/AppUpdatePolicy.kt`)**:
   - `LedgerFlowApplication` implements `Configuration.Provider` (with `WorkManagerInitializer` disabled via manifest merge marker for reliable on-demand init across devices and Robolectric).
   - `SyncWorker`: periodic (6-hour) and on-change `WorkManager` jobs constrained to `NetworkType.CONNECTED`.
-  - Bidirectional incremental sync against Supabase REST endpoints (`updated_at` watermark + conflict handling) plus local JSON vault export/backup.
+  - Bidirectional incremental sync against Supabase REST endpoints (`updated_at` watermark, latest edit wins) for accounts, categories, transactions, budgets, planned payments, holdings, and magic rules; debts, savings goals, and shopping lists stay on the device. Fixed starter ids are swapped for per-user ids in the cloud (`CloudIdMapper`). Local JSON vault export/backup covers every table.
   - **Automatic App Update System (`AppUpdateManager.kt`, `AppUpdatePolicy.kt`, `UpdateInstallReceivers.kt`, `UpdateDialog.kt`, `UpdateCheckWorker.kt`)**:
     - Periodic 12-hour `WorkManager` update check (`NetworkType.CONNECTED`) + throttled foreground online check (silent and non-interrupting when offline).
     - Enforces HTTPS update URLs in release, `versionCode > installedVersionCode` downgrade protection, streamed SHA-256 checksum comparison (`MessageDigest.isEqual`), and APK signing certificate verification (`GET_SIGNING_CERTIFICATES` / `GET_SIGNATURES`) against the installed app's own signing key (and optional pinned cert digest).
@@ -43,7 +43,7 @@
 ### B. Cloud Database & Auth (`Supabase` Free Tier)
 - **Project**: `ledgerflow` (Ref: `rzlenoldloktswymuooz`, Region: `ap-south-1`, URL: `https://rzlenoldloktswymuooz.supabase.co`).
 - **Live Schema Migration**: `20261125084828` (`ledgerflow_schema_v1`) applied across 8 tables: `profiles`, `accounts`, `categories`, `transactions`, `budgets`, `planned_payments`, `holdings`, `magic_rules`, with `public.set_updated_at()` triggers (`SECURITY INVOKER`, empty `search_path`), composite sync indexes, and strict `TO authenticated` RLS (`(select auth.uid())`).
-- **Local Reference SQL**: [0001_ledgerflow_core.sql](file:///D:/all%20farzi%20project/LedgerFlow/supabase/migrations/0001_ledgerflow_core.sql), [0002_rls_policies.sql](file:///D:/all%20farzi%20project/LedgerFlow/supabase/migrations/0002_rls_policies.sql).
+- **Local Reference SQL**: `supabase/migrations/0001`–`0010`. Only `0001`/`0002` are recorded as applied to the live project. `0010_sync_detail_columns.sql` is needed for the cloud to carry credit limits, exact account types, the category tree, and spending purpose; `0005` + `0009` cover the (not yet synced) debt, goal, and shopping tables with RLS.
 
 ### C. Custom API Service (`D:\all farzi project\LedgerFlow\backend`, Render Free Tier)
 - **Express + TypeScript API (`src/server.ts`, `src/fx.ts`, `src/enricher.ts`, `src/updates.ts`)** configured via [render.yaml](file:///D:/all%20farzi%20project/LedgerFlow/render.yaml):
@@ -52,7 +52,7 @@
   - `GET /v1/app/update` & `GET /v1/app/download/latest.apk` (free self-hosted update manifest + optional APK stream)
   - `POST /v1/enrich` (merchant cleanup & category suggestion)
   - `POST /v1/import/csv` (CSV statement normalization)
-  - `POST /v1/open-banking/sandbox/connect` (free-tier Open Banking sandbox bank sync)
+  - The Android app only calls `/v1/fx/rates` (as a fallback FX source).
 - Designed as strictly optional enhancement for the Android app.
 
 ---
@@ -422,9 +422,21 @@
   - Signed `LedgerFlow-v2.0.0.apk` (`5,040,368` bytes, SHA-256 `3de423a4550a425f844a6b32189ee3a1b48791ff57b527b21277390b48fb74f3`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`).
   - Direct APK Download (`v2.0.0`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v2.0.0/LedgerFlow-v2.0.0.apk`.
 
+---
 
-
-
-
-
-
+## Sync, Backup, Capture, Currency & Selective Clear Data (`v2.0.1`, `versionCode 21`)
+- **Cloud sync for more than one user**: starter rows had identical ids on every install and cloud `id` is globally unique, so a second user's upload was rejected. `CloudIdMapper` now derives a per-user cloud id for every fixed starter id; local ids are unchanged.
+- **Fresh install no longer overwrites the cloud**: untouched starter rows are held back until the first pull, and the cloud copy replaces them.
+- **Pull no longer erases local detail**: fields a cloud row does not carry (exact account type, credit limit, category parent/description, spending purpose, payment capture metadata) are kept from the local row. With `0010_sync_detail_columns.sql` applied they also round-trip to other devices; without it the app falls back to the core payload and backfills once the columns appear.
+- **Cloud account switch**: clearing the local database now runs off the main thread (it failed from the UI) and re-seeds starter rows.
+- **JSON backup**: now includes credit limits, category detail, spending purpose, review status, and payment metadata; older backups still restore, with unassigned transactions returned to `PENDING_REVIEW`.
+- **Supabase RLS**: added for `debts`, `savings_goals`, `shopping_lists`, `shopping_items` (`0005`, plus `0009` for databases that ran the earlier `0005`).
+- **Reused notification keys**: a key now identifies the same payment only with a matching reference id, or the same amount and merchant within 10 minutes. Without a reference id, an app that changes the amount or updates later than that creates a second pending row.
+- **JPY**: FX conversion, CSV/JSON import (app and backend), and CSV export treat yen as having no minor unit. Rows and balances written by the earlier code are not rewritten.
+- **Selective Clear App Data (`LedgerDatabase.clearSelectedDataAtomic`, `ClearDataSection`, [SettingsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/SettingsScreen.kt))**: Danger Zone opens a bottom sheet with live section counts, a master **Select All** toggle, and 11 individual Room checkboxes (`Confirmed Transactions` with optional balance zeroing, `Pending Review Payments`, `Accounts & Wallets`, `Custom Categories & Edits` restoring defaults cleanly, `Budgets`, `Planned & Recurring Bills`, `Investments & Holdings`, `Auto-Category Rules`, `Debts`, `Savings Goals`, and `Shopping Lists & Items`), preserving referential integrity across untouched tables and refreshing home widgets.
+- **Open limitations**: account balances sync as totals (latest edit wins) rather than being recomputed from transactions; remote Supabase SQL migrations (`0009` / `0010`) must be run in the Supabase SQL editor.
+- **Verification (`v2.0.1`)**:
+  - `.\gradlew.bat testDirectDebugUnitTest compilePlayStoreDebugKotlin lintDirectDebug assembleDirectDebug assembleDirectRelease "-Pkotlin.incremental=false" "--max-workers=1"`: **75 / 75 passed** (`0` failures, `0` errors, `0` skipped — `AppUpdatePolicyTest`: `3/3`, `AppUpdateRobolectricTest`: `10/10`, `FinanceMathTest`: `20/20`, `LedgerDatabaseRobolectricTest`: `18/18`, `LedgerWidgetRobolectricTest`: `5/5`, `SyncFidelityRegressionTest`: `12/12`, `SyncRepositoryIntegrationTest`: `7/7`), `0` Lint errors.
+  - Node Backend (`npm run build && npm test`): **6 / 6 passed**.
+  - Signed `LedgerFlow-v2.0.1.apk` (`5,027,881` bytes, SHA-256 `fb789545157ef8ab15c80a529c753bfbd42b885f86b8ac2264211aca3d3a296c`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`).
+  - Direct APK Download (`v2.0.1`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v2.0.1/LedgerFlow-v2.0.1.apk`.

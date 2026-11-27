@@ -107,7 +107,9 @@ export function parseCsvStatement(csvContent: string, defaultCurrency = "USD"): 
     if (!Number.isFinite(numeric) || numeric === 0) continue;
     if (isParensNegative && numeric > 0) numeric = -numeric;
 
-    const amountMinor = Math.round(numeric * 100);
+    const currency = (currencyIdx >= 0 && cols[currencyIdx] ? cols[currencyIdx] : defaultCurrency).toUpperCase().slice(0, 3);
+    // Yen has no minor unit; every other supported currency uses hundredths.
+    const amountMinor = Math.round(numeric * (currency === "JPY" ? 1 : 100));
     const txType: "EXPENSE" | "INCOME" = amountMinor < 0 ? "EXPENSE" : "INCOME";
     const merchant = cols[merchantIdx] || "Imported Entry";
     const note = noteIdx >= 0 ? (cols[noteIdx] ?? "") : "";
@@ -120,7 +122,7 @@ export function parseCsvStatement(csvContent: string, defaultCurrency = "USD"): 
       merchant: enriched.cleanMerchant,
       amountMinor,
       txType,
-      currency: (currencyIdx >= 0 && cols[currencyIdx] ? cols[currencyIdx] : defaultCurrency).toUpperCase().slice(0, 3),
+      currency,
       note,
       suggestedCategory: enriched.suggestedCategory,
     });

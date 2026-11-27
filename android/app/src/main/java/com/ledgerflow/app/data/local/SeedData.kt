@@ -172,6 +172,39 @@ object SeedData {
         CategoryEntity(SUB_INCOME_RENTAL, "Rental Income", "INCOME", "home", "#0284C7", CAT_INCOME, nowMs, nowMs),
     )
 
+    /** Demo rows that releases before v1.0.5 created with fixed ids; upgraded installs may still hold them. */
+    private val legacyDemoIds: List<String> =
+        (101..104).map { "11111111-1111-4111-8111-111111111$it" } +
+            (1..8).map { "33333333-3333-4333-8333-33333333330$it" } +
+            (1..3).map { "44444444-4444-4444-8444-44444444440$it" } +
+            (1..3).map { "55555555-5555-4555-8555-55555555550$it" } +
+            (1..3).map { "66666666-6666-4666-8666-66666666660$it" } +
+            (1..4).map { "77777777-7777-4777-8777-77777777770$it" }
+
+    /** Every id that is identical across installs, so it cannot be used as-is as a cloud primary key. */
+    val fixedStarterIds: Set<String> by lazy {
+        (starterCategories(0L).map { it.id } + ACC_CASH_CLEAN + legacyDemoIds).toSet()
+    }
+
+    /**
+     * True while a starter row is still exactly as first-launch setup created it. Such a row holds
+     * nothing the user entered, so an existing cloud copy must win over it.
+     */
+    fun isUntouchedStarterCategory(category: CategoryEntity): Boolean =
+        category.id in fixedStarterIds &&
+            category.deletedAtEpochMs == null &&
+            category.updatedAtEpochMs == category.createdAtEpochMs
+
+    /** The empty first-launch wallet. Choosing a currency during onboarding does not count as use. */
+    fun isUntouchedStarterWallet(account: AccountEntity, hasTransactions: Boolean): Boolean =
+        account.id == ACC_CASH_CLEAN &&
+            !hasTransactions &&
+            account.deletedAtEpochMs == null &&
+            account.balanceMinor == 0L &&
+            account.creditLimitMinor == 0L &&
+            account.name == "Cash Wallet" &&
+            account.accountType == "CASH"
+
     suspend fun ensureMinimalSetup(
         db: LedgerDatabase,
         defaultCurrency: String = "USD",

@@ -19,6 +19,61 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
 
+enum class ClearDataSection(
+    val title: String,
+    val subtitle: String,
+) {
+    CONFIRMED_TRANSACTIONS(
+        title = "Confirmed Transactions",
+        subtitle = "Recorded expenses, income, transfers & search history",
+    ),
+    PENDING_REVIEW_PAYMENTS(
+        title = "Pending Review Payments",
+        subtitle = "Auto-detected & Smart-Pasted payments awaiting review",
+    ),
+    ACCOUNTS(
+        title = "Accounts & Wallets",
+        subtitle = "Deletes custom accounts and resets Cash Wallet to zero",
+    ),
+    CATEGORIES(
+        title = "Custom Categories & Edits",
+        subtitle = "Deletes user-created categories and restores default tree",
+    ),
+    BUDGETS(
+        title = "Budgets",
+        subtitle = "Monthly and periodic category limits",
+    ),
+    PLANNED_PAYMENTS(
+        title = "Planned & Recurring Bills",
+        subtitle = "Scheduled bill templates & auto-pay reminders",
+    ),
+    HOLDINGS(
+        title = "Investments & Holdings",
+        subtitle = "Stocks, crypto & forex portfolio entries",
+    ),
+    MAGIC_RULES(
+        title = "Auto-Category Rules",
+        subtitle = "Merchant & keyword auto-tagging patterns",
+    ),
+    DEBTS(
+        title = "Debts (Lent & Borrowed)",
+        subtitle = "Active and closed IOUs",
+    ),
+    SAVINGS_GOALS(
+        title = "Savings Goals",
+        subtitle = "Savings targets & tracked progress",
+    ),
+    SHOPPING_LISTS(
+        title = "Shopping Lists & Items",
+        subtitle = "Checklists, item quantities & estimated prices",
+    ),
+}
+
+data class ClearSelectedDataResult(
+    val clearedSections: Set<ClearDataSection>,
+    val fullReset: Boolean,
+)
+
 @Database(
     entities = [
         AccountEntity::class,
@@ -97,17 +152,43 @@ abstract class LedgerDatabase : RoomDatabase() {
         nowMs: Long = System.currentTimeMillis(),
     ): Boolean {
         return withTransaction {
-            val target = when {
-                notificationKey.isNotBlank() -> transactionDao().findByNotificationKey(notificationKey)
-                referenceId.isNotBlank() -> transactionDao().findByReferenceId(referenceId)
-                else -> null
-            } ?: return@withTransaction false
+            // A reference id names the payment exactly. A notification key alone only does so while
+            // the notification is recent, and never when the two reference ids disagree.
+            val byReference = if (referenceId.isNotBlank()) transactionDao().findByReferenceId(referenceId) else null
+            val target = byReference
+                ?: transactionDao().findAllByNotificationKey(notificationKey).firstOrNull {
+                    (referenceId.isBlank() || it.referenceId.isBlank()) &&
+                        isWithinNotificationUpdateWindow(it.occurredAtEpochMs, nowMs)
+                }
+                ?: return@withTransaction false
             if (target.deletedAtEpochMs != null) return@withTransaction false
             if (target.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW) return@withTransaction false
             softDeleteTransactionAtomic(target.id, nowMs = nowMs)
             true
         }
     }
+
+    /**
+     * Whether [draft] is a repost or update of [existing] rather than a new payment that happens to
+     * reuse its notification key. When unsure this says no: a spare pending row can be deleted during
+     * review, while a payment merged into another one is lost.
+     */
+    private fun isSameNotifiedPayment(existing: TransactionEntity, draft: TransactionEntity): Boolean {
+        if (existing.referenceId.isNotBlank() && draft.referenceId.isNotBlank()) {
+            return existing.referenceId == draft.referenceId
+        }
+        val sameMerchant = existing.merchant.isBlank() || draft.merchant.isBlank() ||
+            existing.merchant.equals(draft.merchant, ignoreCase = true)
+        // Compare what was parsed, since the user may have corrected the stored amount.
+        val parsedAmount = existing.originalParsedAmountMinor ?: existing.amountMinor
+        return sameMerchant &&
+            parsedAmount == draft.amountMinor &&
+            existing.currency == draft.currency &&
+            isWithinNotificationUpdateWindow(existing.occurredAtEpochMs, draft.occurredAtEpochMs)
+    }
+
+    private fun isWithinNotificationUpdateWindow(firstSeenMs: Long, seenAgainMs: Long): Boolean =
+        abs(seenAgainMs - firstSeenMs) <= NOTIFICATION_UPDATE_WINDOW_MS
 
     /**
      * Atomically captures or updates a detected notification payment while preventing duplicate rows,
@@ -120,7 +201,8 @@ abstract class LedgerDatabase : RoomDatabase() {
         return withTransaction {
             // 1. Updated Android notification with the same StatusBarNotification key
             if (draft.notificationKey.isNotBlank()) {
-                val existingByKey = transactionDao().findByNotificationKey(draft.notificationKey)
+                val existingByKey = transactionDao().findAllByNotificationKey(draft.notificationKey)
+                    .firstOrNull { isSameNotifiedPayment(it, draft) }
                 if (existingByKey != null) {
                     if (existingByKey.deletedAtEpochMs != null) {
                         return@withTransaction DetectedCaptureResult(DetectedCaptureAction.IGNORED_DUPLICATE, existingByKey)
@@ -202,6 +284,7 @@ abstract class LedgerDatabase : RoomDatabase() {
                 amountMinor = draft.amountMinor,
                 currency = draft.currency,
                 merchant = draft.merchant,
+                referenceId = draft.referenceId,
                 minEpochMs = draft.occurredAtEpochMs - windowMs,
                 maxEpochMs = draft.occurredAtEpochMs + windowMs,
             )
@@ -1260,6 +1343,220 @@ abstract class LedgerDatabase : RoomDatabase() {
         }
     }
 
+    /**
+     * Atomically clears only the chosen Room database sections while preserving referential integrity
+     * and account balances across untouched modules.
+     */
+    suspend fun clearSelectedDataAtomic(
+        sections: Set<ClearDataSection>,
+        zeroKeptAccountBalances: Boolean = false,
+        defaultCurrency: String = "USD",
+        nowMs: Long = System.currentTimeMillis(),
+    ): ClearSelectedDataResult {
+        if (sections.isEmpty()) {
+            return ClearSelectedDataResult(emptySet(), fullReset = false)
+        }
+        if (sections.containsAll(ClearDataSection.entries)) {
+            resetAllDataFresh(defaultCurrency = defaultCurrency, nowMs = nowMs)
+            return ClearSelectedDataResult(ClearDataSection.entries.toSet(), fullReset = true)
+        }
+
+        withTransaction {
+            val clearConfirmed = ClearDataSection.CONFIRMED_TRANSACTIONS in sections
+            val clearPending = ClearDataSection.PENDING_REVIEW_PAYMENTS in sections
+            val clearAccounts = ClearDataSection.ACCOUNTS in sections
+            val clearShopping = ClearDataSection.SHOPPING_LISTS in sections
+
+            if (clearShopping) {
+                shoppingItemDao().deleteAll()
+                shoppingListDao().deleteAll()
+            }
+            if (ClearDataSection.BUDGETS in sections) {
+                budgetDao().deleteAll()
+            }
+            if (ClearDataSection.PLANNED_PAYMENTS in sections) {
+                plannedPaymentDao().deleteAll()
+            }
+            if (ClearDataSection.HOLDINGS in sections) {
+                holdingDao().deleteAll()
+            }
+            if (ClearDataSection.MAGIC_RULES in sections) {
+                magicRuleDao().deleteAll()
+            }
+            if (ClearDataSection.DEBTS in sections) {
+                debtDao().deleteAll()
+            }
+            if (ClearDataSection.SAVINGS_GOALS in sections) {
+                savingsGoalDao().deleteAll()
+            }
+
+            if (clearConfirmed || clearPending) {
+                val existingTxs = transactionDao().getAllIncludingDeleted()
+                val deletedTxs = when {
+                    clearConfirmed && clearPending -> existingTxs
+                    clearConfirmed -> existingTxs.filter { it.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW }
+                    else -> existingTxs.filter { it.reviewStatus == TransactionEntity.STATUS_PENDING_REVIEW }
+                }
+                val deletedIds = deletedTxs.map { it.id }.toHashSet()
+
+                if (!clearAccounts) {
+                    if (clearConfirmed && zeroKeptAccountBalances) {
+                        val activeAccounts = accountDao().getAllActive()
+                        if (activeAccounts.isNotEmpty()) {
+                            accountDao().upsertAll(
+                                activeAccounts.map {
+                                    it.copy(balanceMinor = 0L, updatedAtEpochMs = nowMs, pendingSync = true)
+                                }
+                            )
+                        }
+                    } else {
+                        deletedTxs
+                            .filter { it.deletedAtEpochMs == null }
+                            .forEach { applyTransactionBalanceDelta(it, signMultiplier = -1, nowMs = nowMs) }
+                    }
+                }
+
+                when {
+                    clearConfirmed && clearPending -> transactionDao().deleteAll()
+                    clearConfirmed -> transactionDao().deleteConfirmed()
+                    else -> transactionDao().deletePendingReview()
+                }
+
+                if (!clearShopping && deletedIds.isNotEmpty()) {
+                    val lists = shoppingListDao().getAllActive()
+                        .filter { it.lastConvertedTxId != null && it.lastConvertedTxId in deletedIds }
+                    if (lists.isNotEmpty()) {
+                        shoppingListDao().upsertAll(
+                            lists.map {
+                                it.copy(
+                                    lastConvertedTxId = null,
+                                    lastConvertedSignature = "",
+                                    updatedAtEpochMs = nowMs,
+                                    pendingSync = true,
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (clearAccounts) {
+                accountDao().deleteAll()
+                SeedData.ensureMinimalSetup(this, defaultCurrency = defaultCurrency, nowMs = nowMs)
+
+                if (!(clearConfirmed && clearPending)) {
+                    val keptTxs = transactionDao().getAllIncludingDeleted()
+                    if (keptTxs.isNotEmpty()) {
+                        transactionDao().upsertAll(
+                            keptTxs.map { tx ->
+                                tx.copy(
+                                    accountId = TransactionEntity.UNASSIGNED_ACCOUNT_ID,
+                                    transferAccountId = null,
+                                    updatedAtEpochMs = nowMs,
+                                    pendingSync = true,
+                                )
+                            }
+                        )
+                    }
+                }
+                if (ClearDataSection.PLANNED_PAYMENTS !in sections) {
+                    val keptPlanned = plannedPaymentDao().getAllActive().filter { it.accountId != null }
+                    if (keptPlanned.isNotEmpty()) {
+                        plannedPaymentDao().upsertAll(
+                            keptPlanned.map { it.copy(accountId = null, updatedAtEpochMs = nowMs, pendingSync = true) }
+                        )
+                    }
+                }
+                if (ClearDataSection.DEBTS !in sections) {
+                    val keptDebts = debtDao().getAllActive().filter { it.accountId != null }
+                    if (keptDebts.isNotEmpty()) {
+                        debtDao().upsertAll(
+                            keptDebts.map { it.copy(accountId = null, updatedAtEpochMs = nowMs, pendingSync = true) }
+                        )
+                    }
+                }
+                if (ClearDataSection.SAVINGS_GOALS !in sections) {
+                    val keptGoals = savingsGoalDao().getAllActive().filter { it.linkedAccountId != null }
+                    if (keptGoals.isNotEmpty()) {
+                        savingsGoalDao().upsertAll(
+                            keptGoals.map { it.copy(linkedAccountId = null, updatedAtEpochMs = nowMs, pendingSync = true) }
+                        )
+                    }
+                }
+            }
+
+            if (ClearDataSection.CATEGORIES in sections) {
+                val starterCategories = SeedData.starterCategories(nowMs)
+                val validCategoryIds = starterCategories.map { it.id }.toHashSet()
+                categoryDao().deleteCustomCategories(starterCategories.map { it.id })
+                categoryDao().upsertAll(starterCategories)
+
+                if (!(clearConfirmed && clearPending)) {
+                    val keptTxs = transactionDao().getAllIncludingDeleted().filter { tx ->
+                        (tx.categoryId != null && tx.categoryId !in validCategoryIds) ||
+                            tx.categoryIdsCsv.split(',').any { raw ->
+                                val clean = raw.trim()
+                                clean.isNotEmpty() && clean !in validCategoryIds
+                            }
+                    }
+                    if (keptTxs.isNotEmpty()) {
+                        transactionDao().upsertAll(
+                            keptTxs.map { tx ->
+                                val keptIds = tx.categoryIdsCsv.split(',')
+                                    .map { it.trim() }
+                                    .filter { it.isNotEmpty() && it in validCategoryIds }
+                                val primary = tx.categoryId?.takeIf { it in validCategoryIds } ?: keptIds.firstOrNull()
+                                tx.copy(
+                                    categoryId = primary,
+                                    categoryIdsCsv = keptIds.joinToString(","),
+                                    updatedAtEpochMs = nowMs,
+                                    pendingSync = true,
+                                )
+                            }
+                        )
+                    }
+                }
+                if (ClearDataSection.BUDGETS !in sections) {
+                    val keptBudgets = budgetDao().getAllActive()
+                        .filter { it.categoryId != null && it.categoryId !in validCategoryIds }
+                    if (keptBudgets.isNotEmpty()) {
+                        budgetDao().upsertAll(
+                            keptBudgets.map { it.copy(categoryId = null, updatedAtEpochMs = nowMs, pendingSync = true) }
+                        )
+                    }
+                }
+                if (ClearDataSection.PLANNED_PAYMENTS !in sections) {
+                    val keptPlanned = plannedPaymentDao().getAllActive()
+                        .filter { it.categoryId != null && it.categoryId !in validCategoryIds }
+                    if (keptPlanned.isNotEmpty()) {
+                        plannedPaymentDao().upsertAll(
+                            keptPlanned.map { it.copy(categoryId = null, updatedAtEpochMs = nowMs, pendingSync = true) }
+                        )
+                    }
+                }
+                if (ClearDataSection.MAGIC_RULES !in sections) {
+                    val keptRules = magicRuleDao().getAllActive()
+                        .filter { it.targetCategoryId != null && it.targetCategoryId !in validCategoryIds }
+                    if (keptRules.isNotEmpty()) {
+                        magicRuleDao().upsertAll(
+                            keptRules.map { it.copy(targetCategoryId = null, updatedAtEpochMs = nowMs, pendingSync = true) }
+                        )
+                    }
+                }
+                if (!clearShopping) {
+                    val keptLists = shoppingListDao().getAllActive()
+                        .filter { it.defaultCategoryId != null && it.defaultCategoryId !in validCategoryIds }
+                    if (keptLists.isNotEmpty()) {
+                        shoppingListDao().upsertAll(
+                            keptLists.map { it.copy(defaultCategoryId = null, updatedAtEpochMs = nowMs, pendingSync = true) }
+                        )
+                    }
+                }
+            }
+        }
+        return ClearSelectedDataResult(sections.toSet(), fullReset = false)
+    }
+
     suspend fun alignStarterWalletCurrencyIfEmpty(
         currency: String,
         nowMs: Long = System.currentTimeMillis(),
@@ -1280,6 +1577,7 @@ abstract class LedgerDatabase : RoomDatabase() {
 
     companion object {
         private const val MAX_AUTOPAY_CATCHUP_STEPS = 24
+        private const val NOTIFICATION_UPDATE_WINDOW_MS = 10 * 60_000L
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {

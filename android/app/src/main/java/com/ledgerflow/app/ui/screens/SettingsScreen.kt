@@ -5,6 +5,7 @@ import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,12 +17,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Category
@@ -34,11 +39,15 @@ import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -46,6 +55,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -66,6 +76,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ledgerflow.app.data.local.ClearDataSection
+import com.ledgerflow.app.data.local.SeedData
+import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.service.PayAndTrackCapture
 import com.ledgerflow.app.ui.LedgerViewModel
@@ -107,7 +120,7 @@ private val themeOptions = listOf(
     ThemeOptionMeta(ThemeModes.PREMIUM_DARK, "Premium Black", "Pure OLED", Color(0xFF000000), Color(0xFF10B981)),
 )
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     vm: LedgerViewModel,
@@ -117,6 +130,16 @@ fun SettingsScreen(
     val context = LocalContext.current
     val vault by vm.vaultState.collectAsState()
     val categories by vm.categories.collectAsState()
+    val accounts by vm.accounts.collectAsState()
+    val allTransactions by vm.allTransactions.collectAsState()
+    val budgets by vm.budgets.collectAsState()
+    val plannedPayments by vm.plannedPayments.collectAsState()
+    val holdings by vm.holdings.collectAsState()
+    val magicRules by vm.magicRules.collectAsState()
+    val debts by vm.debts.collectAsState()
+    val savingsGoals by vm.savingsGoals.collectAsState()
+    val shoppingLists by vm.shoppingLists.collectAsState()
+    val shoppingItems by vm.shoppingItems.collectAsState()
     val pending by vm.pendingSyncCount.collectAsState()
     val syncBusy by vm.syncInProgress.collectAsState()
     val isOnline by vm.isOnline.collectAsState()
@@ -132,6 +155,9 @@ fun SettingsScreen(
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showPinDialog by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
+    var showClearDataSheet by remember { mutableStateOf(false) }
+    var selectedClearSections by remember { mutableStateOf<Set<ClearDataSection>>(emptySet()) }
+    var zeroKeptAccountBalances by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var showNotificationDisclosure by remember { mutableStateOf(false) }
 
@@ -660,19 +686,23 @@ fun SettingsScreen(
                 borderColor = RoseOutflow.copy(alpha = 0.35f),
             ) {
                 Text(
-                    text = "Resetting removes all local accounts, transactions, budgets, holdings, and disconnects cloud sync.",
+                    text = "Choose specific sections to clear (transactions, custom categories, rules, lists, goals) or wipe all app data cleanly.",
                     fontSize = 12.sp,
                     color = MutedSlate,
                 )
                 Spacer(Modifier.height(10.dp))
                 OutlinedButton(
-                    onClick = { showResetConfirm = true },
+                    onClick = {
+                        selectedClearSections = emptySet()
+                        zeroKeptAccountBalances = false
+                        showClearDataSheet = true
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, RoseOutflow.copy(alpha = 0.5f)),
                 ) {
                     Text(
-                        text = "Start Fresh (Delete All Data)",
+                        text = "Clear Data (Choose What to Delete)",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = RoseOutflow,
@@ -815,27 +845,318 @@ fun SettingsScreen(
         )
     }
 
+    if (showClearDataSheet) {
+        val allSections = ClearDataSection.entries
+        val allSelected = selectedClearSections.size == allSections.size
+        val confirmedCount = remember(allTransactions) {
+            allTransactions.count { it.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW }
+        }
+        val pendingCount = remember(allTransactions) {
+            allTransactions.count { it.reviewStatus == TransactionEntity.STATUS_PENDING_REVIEW }
+        }
+        val customCatCount = remember(categories) {
+            categories.count { it.id !in SeedData.fixedStarterIds }
+        }
+        val sectionCountLabel: (ClearDataSection) -> String = { section ->
+            when (section) {
+                ClearDataSection.CONFIRMED_TRANSACTIONS -> "$confirmedCount"
+                ClearDataSection.PENDING_REVIEW_PAYMENTS -> "$pendingCount"
+                ClearDataSection.ACCOUNTS -> "${accounts.size}"
+                ClearDataSection.CATEGORIES -> "$customCatCount custom"
+                ClearDataSection.BUDGETS -> "${budgets.size}"
+                ClearDataSection.PLANNED_PAYMENTS -> "${plannedPayments.size}"
+                ClearDataSection.HOLDINGS -> "${holdings.size}"
+                ClearDataSection.MAGIC_RULES -> "${magicRules.size}"
+                ClearDataSection.DEBTS -> "${debts.size}"
+                ClearDataSection.SAVINGS_GOALS -> "${savingsGoals.size}"
+                ClearDataSection.SHOPPING_LISTS -> "${shoppingLists.size} (${shoppingItems.size} items)"
+            }
+        }
+
+        ModalBottomSheet(
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            onDismissRequest = { showClearDataSheet = false },
+            containerColor = SurfaceCard,
+            contentColor = SlateInk,
+            tonalElevation = 0.dp,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Clear App Data",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateInk,
+                        )
+                        Text(
+                            text = "Choose specific sections to delete, or select all",
+                            fontSize = 12.sp,
+                            color = MutedSlate,
+                        )
+                    }
+                    StatusPill(
+                        text = "${selectedClearSections.size}/${allSections.size}",
+                        containerColor = if (selectedClearSections.isNotEmpty()) RoseOutflow.copy(alpha = 0.14f) else SlateTint,
+                        contentColor = if (selectedClearSections.isNotEmpty()) RoseOutflow else MutedSlate,
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (allSelected) RoseOutflow.copy(alpha = 0.12f) else SlateTint,
+                    border = BorderStroke(
+                        1.dp,
+                        if (allSelected) RoseOutflow.copy(alpha = 0.5f) else BorderSubtle,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            selectedClearSections = if (allSelected) emptySet() else allSections.toSet()
+                        },
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = allSelected,
+                            onCheckedChange = { checked ->
+                                selectedClearSections = if (checked) allSections.toSet() else emptySet()
+                            },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = RoseOutflow,
+                                uncheckedColor = MutedSlate,
+                                checkmarkColor = Color.White,
+                            ),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Select All (All App Data)",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateInk,
+                            )
+                            Text(
+                                text = "Wipes all 11 data sections cleanly & disconnects cloud sync",
+                                fontSize = 11.sp,
+                                color = MutedSlate,
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = BorderSubtle)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    allSections.forEach { section ->
+                        val checked = section in selectedClearSections
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (checked) RoseOutflow.copy(alpha = 0.08f) else AlabasterBg,
+                            border = BorderStroke(
+                                1.dp,
+                                if (checked) RoseOutflow.copy(alpha = 0.4f) else BorderSubtle,
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    selectedClearSections = if (checked) {
+                                        selectedClearSections - section
+                                    } else {
+                                        selectedClearSections + section
+                                    }
+                                },
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = { isChecked ->
+                                        selectedClearSections = if (isChecked) {
+                                            selectedClearSections + section
+                                        } else {
+                                            selectedClearSections - section
+                                        }
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = RoseOutflow,
+                                        uncheckedColor = MutedSlate,
+                                        checkmarkColor = Color.White,
+                                    ),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = section.title,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = SlateInk,
+                                    )
+                                    Text(
+                                        text = section.subtitle,
+                                        fontSize = 11.sp,
+                                        color = MutedSlate,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                StatusPill(
+                                    text = sectionCountLabel(section),
+                                    containerColor = SlateTint,
+                                    contentColor = MutedSlate,
+                                )
+                            }
+                        }
+
+                        if (
+                            section == ClearDataSection.CONFIRMED_TRANSACTIONS &&
+                            ClearDataSection.CONFIRMED_TRANSACTIONS in selectedClearSections &&
+                            ClearDataSection.ACCOUNTS !in selectedClearSections
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = SlateTint,
+                                border = BorderStroke(1.dp, BorderSubtle),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 18.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { zeroKeptAccountBalances = !zeroKeptAccountBalances },
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Checkbox(
+                                        checked = zeroKeptAccountBalances,
+                                        onCheckedChange = { zeroKeptAccountBalances = it },
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = EmeraldPrimary,
+                                            uncheckedColor = MutedSlate,
+                                            checkmarkColor = Color.White,
+                                        ),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Reset kept account balances to zero",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = SlateInk,
+                                        )
+                                        Text(
+                                            text = "Unchecked reverses cleared transaction amounts while preserving manual opening balances",
+                                            fontSize = 10.sp,
+                                            color = MutedSlate,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { showClearDataSheet = false },
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("Cancel", color = SlateInk, fontWeight = FontWeight.SemiBold)
+                    }
+                    Button(
+                        enabled = selectedClearSections.isNotEmpty(),
+                        onClick = { showResetConfirm = true },
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RoseOutflow,
+                            disabledContainerColor = SlateTint,
+                        ),
+                    ) {
+                        Text(
+                            text = if (allSelected) "Delete Everything" else "Clear Selected (${selectedClearSections.size})",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     if (showResetConfirm) {
+        val allSelected = selectedClearSections.size == ClearDataSection.entries.size
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
-            title = { Text("Delete All Data & Start Fresh?") },
-            text = {
+            containerColor = SurfaceCard,
+            title = {
                 Text(
-                    "Clears all recorded accounts, transactions, budgets, recurring bills, holdings, and rules, and disconnects cloud sync so your ledger starts cleanly at zero balance (${MoneyFormatter.formatMinor(0L, vault.baseCurrency)}).",
-                    fontSize = 13.sp,
-                    color = MutedSlate,
+                    if (allSelected) "Delete All Data & Start Fresh?" else "Clear Selected Data?",
+                    color = SlateInk,
                 )
+            },
+            text = {
+                val summary = if (allSelected) {
+                    "This clears all 11 data sections and disconnects cloud sync so your ledger starts cleanly at zero balance (${MoneyFormatter.formatMinor(0L, vault.baseCurrency)})."
+                } else {
+                    "The following sections will be permanently removed from this device:\n\n" +
+                        selectedClearSections.joinToString("\n") { "• ${it.title}" }
+                }
+                Text(summary, fontSize = 13.sp, color = MutedSlate)
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        vm.resetAllData()
+                        vm.clearSelectedData(
+                            sections = selectedClearSections,
+                            zeroKeptAccountBalances = zeroKeptAccountBalances,
+                        )
                         showResetConfirm = false
+                        showClearDataSheet = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoseOutflow),
-                ) { Text("Delete Everything") }
+                ) {
+                    Text(if (allSelected) "Delete Everything" else "Confirm Clear", color = Color.White)
+                }
             },
-            dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") } },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") }
+            },
         )
     }
 

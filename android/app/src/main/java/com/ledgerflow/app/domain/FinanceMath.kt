@@ -38,6 +38,9 @@ object MoneyFormatter {
         else -> "${code.uppercase(Locale.US)} "
     }
 
+    /** Decimal places a currency's minor unit represents; amounts in minor units are scaled by this. */
+    fun decimalPlaces(currency: String): Int = if (currency.equals("JPY", ignoreCase = true)) 0 else 2
+
     fun formatMinor(
         amountMinor: Long,
         currency: String,
@@ -177,8 +180,10 @@ object FxConverter {
         val fromRate = usdRates[from] ?: 1.0
         val toRate = usdRates[to] ?: 1.0
         val ratio = toRate / fromRate
+        // The rate applies to major units, and currencies differ in how many minor units make one.
         return BigDecimal.valueOf(amountMinor)
             .multiply(BigDecimal.valueOf(ratio))
+            .movePointRight(MoneyFormatter.decimalPlaces(to) - MoneyFormatter.decimalPlaces(from))
             .setScale(0, RoundingMode.HALF_UP)
             .toLong()
     }

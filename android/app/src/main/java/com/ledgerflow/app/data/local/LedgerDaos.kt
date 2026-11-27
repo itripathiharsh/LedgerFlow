@@ -14,6 +14,9 @@ interface AccountDao {
     @Query("SELECT * FROM accounts WHERE deletedAtEpochMs IS NULL")
     suspend fun getAllActive(): List<AccountEntity>
 
+    @Query("SELECT * FROM accounts")
+    suspend fun getAllIncludingDeleted(): List<AccountEntity>
+
     @Query("SELECT * FROM accounts WHERE id IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<AccountEntity>
 
@@ -79,6 +82,9 @@ interface CategoryDao {
 
     @Query("DELETE FROM categories")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM categories WHERE id NOT IN (:starterIds)")
+    suspend fun deleteCustomCategories(starterIds: List<String>)
 }
 
 @Dao
@@ -103,14 +109,18 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE deletedAtEpochMs IS NULL ORDER BY occurredAtEpochMs DESC")
     suspend fun getAllActive(): List<TransactionEntity>
 
+    @Query("SELECT * FROM transactions")
+    suspend fun getAllIncludingDeleted(): List<TransactionEntity>
+
     @Query("SELECT * FROM transactions WHERE deletedAtEpochMs IS NULL AND reviewStatus = 'PENDING_REVIEW' ORDER BY occurredAtEpochMs DESC")
     fun observePendingReview(): Flow<List<TransactionEntity>>
 
     @Query("SELECT * FROM transactions WHERE deletedAtEpochMs IS NULL AND reviewStatus = 'PENDING_REVIEW' ORDER BY occurredAtEpochMs DESC")
     suspend fun getPendingReview(): List<TransactionEntity>
 
-    @Query("SELECT * FROM transactions WHERE notificationKey = :notificationKey AND :notificationKey != '' ORDER BY updatedAtEpochMs DESC LIMIT 1")
-    suspend fun findByNotificationKey(notificationKey: String): TransactionEntity?
+    /** Apps reuse notification keys, so one key can belong to several payments; newest first. */
+    @Query("SELECT * FROM transactions WHERE notificationKey = :notificationKey AND :notificationKey != '' ORDER BY occurredAtEpochMs DESC, createdAtEpochMs DESC")
+    suspend fun findAllByNotificationKey(notificationKey: String): List<TransactionEntity>
 
     @Query("SELECT * FROM transactions WHERE referenceId = :referenceId AND :referenceId != '' AND deletedAtEpochMs IS NULL ORDER BY updatedAtEpochMs DESC LIMIT 1")
     suspend fun findByReferenceId(referenceId: String): TransactionEntity?
@@ -122,6 +132,7 @@ interface TransactionDao {
         "SELECT * FROM transactions WHERE deletedAtEpochMs IS NULL " +
             "AND amountMinor = :amountMinor AND currency = :currency " +
             "AND LOWER(merchant) = LOWER(:merchant) " +
+            "AND (:referenceId = '' OR referenceId = '' OR referenceId = :referenceId) " +
             "AND occurredAtEpochMs BETWEEN :minEpochMs AND :maxEpochMs " +
             "LIMIT 1"
     )
@@ -129,6 +140,7 @@ interface TransactionDao {
         amountMinor: Long,
         currency: String,
         merchant: String,
+        referenceId: String,
         minEpochMs: Long,
         maxEpochMs: Long,
     ): TransactionEntity?
@@ -145,8 +157,17 @@ interface TransactionDao {
     @Query("UPDATE transactions SET pendingSync = 0 WHERE id IN (:ids)")
     suspend fun markSynced(ids: List<String>)
 
+    @Query("UPDATE transactions SET pendingSync = 1 WHERE id IN (:ids)")
+    suspend fun markDirty(ids: List<String>)
+
     @Query("DELETE FROM transactions")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM transactions WHERE reviewStatus != 'PENDING_REVIEW'")
+    suspend fun deleteConfirmed()
+
+    @Query("DELETE FROM transactions WHERE reviewStatus = 'PENDING_REVIEW'")
+    suspend fun deletePendingReview()
 }
 
 @Dao

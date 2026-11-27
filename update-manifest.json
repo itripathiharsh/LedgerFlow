@@ -1,16 +1,19 @@
 {
-  "versionCode": 20,
-  "versionName": "2.0.0",
+  "versionCode": 21,
+  "versionName": "2.0.1",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-28T00:57:53+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v2.0.0/LedgerFlow-v2.0.0.apk",
-  "apkSizeBytes": 5040368,
-  "sha256": "3de423a4550a425f844a6b32189ee3a1b48791ff57b527b21277390b48fb74f3",
+  "releasedAt": "2026-11-28T03:07:52+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v2.0.1/LedgerFlow-v2.0.1.apk",
+  "apkSizeBytes": 5027881,
+  "sha256": "fb789545157ef8ab15c80a529c753bfbd42b885f86b8ac2264211aca3d3a296c",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Redesigned Shopping Lists (Room v6) with structured Name, Quantity + 6-group Unit selector (Weight, Volume, Count, Packaging, Length, Other, plus Custom units), optional standalone Estimated Price, full CRUD, and list-preserving duplicate-safe Convert Basket to Expense.",
-    "Added true multi-level Hierarchical Category Trees (arbitrary nesting, Expense & Income separation, streamlined New/Edit Category sheet, recursive CategoriesScreen, Delete Safeguard modal for subtree/usage preservation, and unified HierarchicalCategoryPickerSheet across all flows + analytics drill-down).",
-    "Redesigned Android Home Screen Widgets into 4 crisp responsive widgets (4x2 Finance, 4x3 Interactive Shopping List with per-widget list switcher & progress bar, 2x2 Compact Tile, and 4x1 Quick Expense capsule) with Flow Dark / Premium Black / Light theme sync and lock-screen privacy masking."
+    "Fixed cloud sync failing for every account after the first one to sync.",
+    "Syncing no longer erases card and loan types, credit limits, subcategories or spending purpose on your device, and a new device no longer overwrites your cloud wallet balance with an empty one. Switching cloud accounts now works from the app.",
+    "JSON backups now keep credit limits, category details, spending purpose, payment details and pending-review status.",
+    "Fixed repeat payment alerts from the same app being ignored or merged into an earlier payment.",
+    "Fixed Japanese yen conversion, import and export being off by 100 times.",
+    "Added selective Clear App Data in Settings: choose individual data sections (Confirmed Transactions, Pending Review Payments, Accounts, Custom Categories, Budgets, Planned Bills, Investments, Auto-Category Rules, Debts, Savings Goals, Shopping Lists) or Select All."
   ],
   "mandatory": false
 }

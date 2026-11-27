@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
-private class LocalLoopbackHttpServer(
+internal class LocalLoopbackHttpServer(
     private val handlerWithBody: ((method: String, pathAndQuery: String, requestBody: String) -> Pair<Int, String>)? = null,
     private val handler: (method: String, pathAndQuery: String) -> Pair<Int, String> = { _, _ -> 200 to "[]" },
 ) {

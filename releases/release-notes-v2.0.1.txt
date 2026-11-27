@@ -1,0 +1,6 @@
+Fixed cloud sync failing for every account after the first one to sync.
+Syncing no longer erases card and loan types, credit limits, subcategories or spending purpose on your device, and a new device no longer overwrites your cloud wallet balance with an empty one. Switching cloud accounts now works from the app.
+JSON backups now keep credit limits, category details, spending purpose, payment details and pending-review status.
+Fixed repeat payment alerts from the same app being ignored or merged into an earlier payment.
+Fixed Japanese yen conversion, import and export being off by 100 times.
+Added selective Clear App Data in Settings: choose individual data sections (Confirmed Transactions, Pending Review Payments, Accounts, Custom Categories, Budgets, Planned Bills, Investments, Auto-Category Rules, Debts, Savings Goals, Shopping Lists) or Select All.

@@ -10,6 +10,7 @@ import com.ledgerflow.app.LedgerFlowApplication
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.CategoryEntity
+import com.ledgerflow.app.data.local.ClearDataSection
 import com.ledgerflow.app.data.local.DebtEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.LedgerDatabase
@@ -1723,13 +1724,47 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun resetAllData() {
+        clearSelectedData(
+            sections = ClearDataSection.entries.toSet(),
+            zeroKeptAccountBalances = true,
+        )
+    }
+
+    fun clearSelectedData(
+        sections: Set<ClearDataSection>,
+        zeroKeptAccountBalances: Boolean = false,
+    ) {
+        if (sections.isEmpty()) return
         viewModelScope.launch {
             val baseCur = _vaultState.value.baseCurrency
-            db.resetAllDataFresh(defaultCurrency = baseCur)
-            _vaultState.value = vault.resetSyncAndCloudState()
-            _searchQuery.value = ""
-            _recordsFilter.value = "ALL"
-            _statusMessage.value = "Deleted all data — started fresh (${MoneyFormatter.formatMinor(0L, baseCur)})"
+            val result = db.clearSelectedDataAtomic(
+                sections = sections,
+                zeroKeptAccountBalances = zeroKeptAccountBalances,
+                defaultCurrency = baseCur,
+            )
+            if (result.fullReset) {
+                _vaultState.value = vault.resetSyncAndCloudState()
+                _vaultState.value = vault.update { it.copy(widgetListSelections = emptyMap()) }
+                _searchQuery.value = ""
+                _recordsFilter.value = "ALL"
+                _statusMessage.value = "Deleted all data — started fresh (${MoneyFormatter.formatMinor(0L, baseCur)})"
+            } else {
+                if (ClearDataSection.SHOPPING_LISTS in sections) {
+                    _vaultState.value = vault.update { it.copy(widgetListSelections = emptyMap()) }
+                }
+                if (ClearDataSection.CONFIRMED_TRANSACTIONS in sections || ClearDataSection.PENDING_REVIEW_PAYMENTS in sections) {
+                    _searchQuery.value = ""
+                    if (ClearDataSection.CONFIRMED_TRANSACTIONS in sections && ClearDataSection.PENDING_REVIEW_PAYMENTS in sections) {
+                        _recordsFilter.value = "ALL"
+                    }
+                }
+                _statusMessage.value = if (sections.size == 1) {
+                    "Cleared ${sections.first().title}"
+                } else {
+                    "Cleared ${sections.size} data sections"
+                }
+            }
+            com.ledgerflow.app.widget.LedgerWidgetCoordinator.requestRefresh(app)
         }
     }
 

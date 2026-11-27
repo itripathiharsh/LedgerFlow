@@ -36,6 +36,19 @@ test("parseCsvStatement parses signed CSV and skips zero or invalid rows", () =>
   assert.equal(parsed[2].txType, "INCOME");
 });
 
+test("parseCsvStatement keeps yen whole instead of scaling it to hundredths", () => {
+  const csv = [
+    "Date,Description,Amount,Currency",
+    "2026-11-24,Ramen,-1500,JPY",
+    "2026-11-24,Book,-12.50,USD",
+  ].join("\n");
+
+  const parsed = parseCsvStatement(csv);
+  assert.equal(parsed[0].amountMinor, -1500);
+  assert.equal(parsed[1].amountMinor, -1250);
+  assert.equal(parseCsvStatement("Description,Amount\nTrain,-220", "JPY")[0].amountMinor, -220);
+});
+
 test("buildFallbackRates returns normalized cross rates without internet", () => {
   const eurBase = buildFallbackRates("EUR");
   assert.equal(eurBase.base, "EUR");

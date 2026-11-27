@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.BudgetEntity
 import com.ledgerflow.app.data.local.CategoryEntity
+import com.ledgerflow.app.data.local.ClearDataSection
 import com.ledgerflow.app.data.local.DebtEntity
 import com.ledgerflow.app.data.local.HoldingEntity
 import com.ledgerflow.app.data.local.LedgerDatabase
@@ -1108,5 +1109,112 @@ class LedgerDatabaseRobolectricTest {
         assertNotNull(toggled)
         assertTrue(toggled!!.checked)
         assertTrue(db.shoppingItemDao().getById(milk.id)!!.checked)
+    }
+
+    @Test
+    fun clearSelectedDataAtomic_clearsOnlyChosenPartsAndPreservesIntegrity() = runTest {
+        SeedData.ensureMinimalSetup(db, defaultCurrency = "INR", nowMs = 1_000L)
+        val wallet = db.accountDao().getAllActive().single()
+        db.accountDao().upsert(wallet.copy(balanceMinor = 500_000L)) // ₹5,000 opening balance
+
+        val customCat = CategoryEntity(
+            id = "custom_cat_tea",
+            name = "Chai",
+            kind = "EXPENSE",
+            parentCategoryId = SeedData.CAT_DINING,
+            createdAtEpochMs = 1_000L,
+            updatedAtEpochMs = 1_000L,
+        )
+        db.categoryDao().upsert(customCat)
+
+        // Confirmed expense ₹200 + Pending review ₹150 + Shopping list converted to tx_conf
+        val confTx = TransactionEntity(
+            id = "tx_conf",
+            accountId = wallet.id,
+            categoryId = customCat.id,
+            categoryIdsCsv = customCat.id,
+            txType = "EXPENSE",
+            amountMinor = -20_000L,
+            currency = "INR",
+            merchant = "Tea Stall",
+            occurredAtEpochMs = 1_100L,
+            createdAtEpochMs = 1_100L,
+            updatedAtEpochMs = 1_100L,
+            reviewStatus = TransactionEntity.STATUS_CONFIRMED,
+        )
+        db.recordTransactionAtomic(confTx) // wallet -> ₹4,800
+        db.transactionDao().upsert(
+            TransactionEntity(
+                id = "tx_pend",
+                accountId = TransactionEntity.UNASSIGNED_ACCOUNT_ID,
+                txType = "EXPENSE",
+                amountMinor = -15_000L,
+                currency = "INR",
+                merchant = "UPI Pending",
+                occurredAtEpochMs = 1_200L,
+                createdAtEpochMs = 1_200L,
+                updatedAtEpochMs = 1_200L,
+                reviewStatus = TransactionEntity.STATUS_PENDING_REVIEW,
+            )
+        )
+        db.budgetDao().upsert(BudgetEntity("b_1", customCat.id, "Tea Budget", 100_000L, "INR", "MONTHLY", 1_000L, 1_000L))
+        db.magicRuleDao().upsert(MagicRuleEntity("r_1", "tea", customCat.id, "chai", true, 1_000L, 1_000L))
+        db.shoppingListDao().upsert(
+            ShoppingListEntity(
+                id = "sl_1",
+                title = "Pantry",
+                defaultCategoryId = customCat.id,
+                createdAtEpochMs = 1_000L,
+                updatedAtEpochMs = 1_000L,
+                lastConvertedTxId = confTx.id,
+                lastConvertedSignature = "sig_1",
+            )
+        )
+        db.shoppingItemDao().upsert(ShoppingItemEntity("si_1", "sl_1", "Ginger", 5_000L, false, 1_000L, 1_000L))
+        db.debtDao().upsert(DebtEntity("d_1", "Amit", "LENT", 30_000L, 30_000L, "INR", wallet.id, null, "", "ACTIVE", 1_000L, 1_000L))
+
+        // 1. Clear only custom categories -> removes Chai, restores starter defaults, clears custom refs on kept rows
+        val catClear = db.clearSelectedDataAtomic(setOf(ClearDataSection.CATEGORIES), defaultCurrency = "INR", nowMs = 2_000L)
+        assertFalse(catClear.fullReset)
+        assertNull(db.categoryDao().getById(customCat.id))
+        assertNotNull(db.categoryDao().getById(SeedData.CAT_DINING))
+        assertNull(db.transactionDao().getById("tx_conf")!!.categoryId)
+        assertNull(db.budgetDao().getAllActive().single().categoryId)
+        assertNull(db.magicRuleDao().getAllActive().single().targetCategoryId)
+        assertNull(db.shoppingListDao().getById("sl_1")!!.defaultCategoryId)
+
+        // 2. Clear only Confirmed Transactions (preserving opening balance & Pending Review) -> wallet reverts ₹4,800 -> ₹5,000 & clears shopping conversion lock
+        db.clearSelectedDataAtomic(setOf(ClearDataSection.CONFIRMED_TRANSACTIONS), zeroKeptAccountBalances = false, defaultCurrency = "INR", nowMs = 3_000L)
+        assertNull(db.transactionDao().getById("tx_conf"))
+        assertNotNull(db.transactionDao().getById("tx_pend"))
+        assertEquals(500_000L, db.accountDao().getById(wallet.id)!!.balanceMinor)
+        assertNull(db.shoppingListDao().getById("sl_1")!!.lastConvertedTxId)
+        assertEquals(1, db.debtDao().getAllActive().size)
+
+        // 3. Clear only Shopping Lists & Pending Review -> debts & budgets remain intact
+        db.clearSelectedDataAtomic(
+            setOf(ClearDataSection.SHOPPING_LISTS, ClearDataSection.PENDING_REVIEW_PAYMENTS),
+            defaultCurrency = "INR",
+            nowMs = 4_000L,
+        )
+        assertEquals(0, db.shoppingListDao().getAllActive().size)
+        assertEquals(0, db.shoppingItemDao().getAllActive().size)
+        assertNull(db.transactionDao().getById("tx_pend"))
+        assertEquals(1, db.debtDao().getAllActive().size)
+        assertEquals(1, db.budgetDao().getAllActive().size)
+
+        // 4. Clear Accounts while keeping Debts & Budgets -> re-creates empty Cash Wallet and detaches kept debt accountId
+        db.clearSelectedDataAtomic(setOf(ClearDataSection.ACCOUNTS), defaultCurrency = "INR", nowMs = 4_500L)
+        val resetWallet = db.accountDao().getAllActive().single()
+        assertEquals(0L, resetWallet.balanceMinor)
+        assertNull(db.debtDao().getAllActive().single().accountId)
+        assertEquals(1, db.budgetDao().getAllActive().size)
+
+        // 5. Select All -> full fresh reset
+        val allClear = db.clearSelectedDataAtomic(ClearDataSection.entries.toSet(), defaultCurrency = "INR", nowMs = 5_000L)
+        assertTrue(allClear.fullReset)
+        assertEquals(0, db.debtDao().getAllActive().size)
+        assertEquals(0, db.budgetDao().getAllActive().size)
+        assertEquals(0L, db.accountDao().getAllActive().single().balanceMinor)
     }
 }

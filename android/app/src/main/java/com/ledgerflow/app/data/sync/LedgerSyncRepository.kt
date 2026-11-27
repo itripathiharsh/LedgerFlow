@@ -28,11 +28,14 @@ import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.FxConverter
 import com.ledgerflow.app.domain.ImportParser
 import com.ledgerflow.app.domain.MagicRuleEngine
+import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.ParsedImportResult
 import com.ledgerflow.app.security.VaultStore
 import com.ledgerflow.app.util.NetworkMonitor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.math.BigDecimal
@@ -123,6 +126,21 @@ data class VaultCategoryHierarchyDto(
     val description: String = "",
 )
 
+/** Transaction fields that never leave the device through cloud sync but belong in a local backup. */
+@Serializable
+data class VaultTransactionDetailDto(
+    val id: String,
+    val reviewStatus: String = TransactionEntity.STATUS_CONFIRMED,
+    val paymentAppName: String = "",
+    val paymentAppPackage: String = "",
+    val referenceId: String = "",
+    val accountHint: String = "",
+    val notificationKey: String = "",
+    val notificationFingerprint: String = "",
+    val originalParsedAmountMinor: Long? = null,
+    val isRefundOrReversal: Boolean = false,
+)
+
 @Serializable
 data class LedgerVaultBackup(
     val exportedAt: String,
@@ -139,6 +157,7 @@ data class LedgerVaultBackup(
     val shoppingLists: List<VaultShoppingListDto> = emptyList(),
     val shoppingItems: List<VaultShoppingItemDto> = emptyList(),
     val categoryHierarchy: List<VaultCategoryHierarchyDto> = emptyList(),
+    val transactionDetails: List<VaultTransactionDetailDto> = emptyList(),
 )
 
 class LedgerSyncRepository(
@@ -224,30 +243,56 @@ class LedgerSyncRepository(
         try {
             // Isolate local DB if user explicitly switched to a different cloud account.
             if (!state.lastCloudUserId.isNullOrBlank() && state.lastCloudUserId != userId) {
-                db.clearAllTables()
-                state = vault.update { it.copy(lastCloudUserId = userId, lastSyncWatermarkIso = null, lastSyncEpochMs = 0L) }
+                withContext(Dispatchers.IO) { db.clearAllTables() }
+                SeedData.ensureMinimalSetup(db, defaultCurrency = state.baseCurrency)
+                state = vault.update {
+                    it.copy(
+                        lastCloudUserId = userId,
+                        lastSyncWatermarkIso = null,
+                        lastSyncEpochMs = 0L,
+                        cloudDetailColumnsMissing = false,
+                    )
+                }
             }
+
+            val ids = CloudIdMapper(userId)
+            val watermark = state.lastSyncWatermarkIso
+            // Until a first pull has returned data, untouched starter rows are held back so that a
+            // fresh install can never overwrite the copy already in the cloud.
+            val firstSync = watermark.isNullOrBlank()
 
             // Validate/refresh session on 401 automatically
-            val pushCode = pushAllDirty(userId, token)
-            if (pushCode == 401) {
+            var push = pushAllDirty(userId, token, ids, holdUntouchedStarters = firstSync)
+            if (push.code == 401) {
                 token = refreshAccessTokenOrNull(state.refreshToken) ?: return SyncOutcome.Error("Session expired; sign in again")
-                val retryPush = pushAllDirty(userId, token)
-                if (retryPush !in 200..299) {
-                    return SyncOutcome.Error("Cloud push failed (HTTP $retryPush)")
-                }
-            } else if (pushCode !in 200..299) {
-                return SyncOutcome.Error("Cloud push failed (HTTP $pushCode)")
+                push = pushAllDirty(userId, token, ids, holdUntouchedStarters = firstSync)
+            }
+            if (push.code !in 200..299) {
+                return SyncOutcome.Error("Cloud push failed (HTTP ${push.code})")
             }
 
-            val watermark = vault.read().lastSyncWatermarkIso
-            var pullOutcome = pullAllDelta(watermark, token)
+            var pullOutcome = pullAllDelta(watermark, token, ids, replaceUntouchedStarters = firstSync)
             if (pullOutcome.statusCode == 401) {
                 token = refreshAccessTokenOrNull(vault.read().refreshToken) ?: return SyncOutcome.Error("Session expired; sign in again")
-                pullOutcome = pullAllDelta(watermark, token)
+                pullOutcome = pullAllDelta(watermark, token, ids, replaceUntouchedStarters = firstSync)
             }
             if (pullOutcome.statusCode !in 200..299) {
                 return SyncOutcome.Error("Cloud pull failed (HTTP ${pullOutcome.statusCode})")
+            }
+
+            // The cloud schema has gained the detail columns since an earlier upload had to omit them.
+            val backfill = push.sentDetail && !push.droppedDetail && vault.read().cloudDetailColumnsMissing
+            if (backfill) {
+                markRowsWithDetailDirty()
+                vault.update { it.copy(cloudDetailColumnsMissing = false) }
+            }
+            if (firstSync || backfill) {
+                // Sends starter rows the cloud turned out not to have, plus any backfilled rows.
+                val followUp = pushAllDirty(userId, token, ids, holdUntouchedStarters = false)
+                if (followUp.code !in 200..299) {
+                    if (backfill) vault.update { it.copy(cloudDetailColumnsMissing = true) }
+                    return SyncOutcome.Error("Cloud push failed (HTTP ${followUp.code})")
+                }
             }
 
             val nowMs = System.currentTimeMillis()
@@ -290,7 +335,17 @@ class LedgerSyncRepository(
         val maxServerUpdatedAtMs: Long?,
     )
 
+    /** Payload for a cloud schema that does not yet have a table's detail columns. */
+    private class CorePayload<E, D>(val toDto: (E) -> D, val omitKeys: Set<String>)
+
+    private class PushReport {
+        var code = 200
+        var sentDetail = false
+        var droppedDetail = false
+    }
+
     private suspend fun <E, D> pushDirtyTable(
+        report: PushReport,
         table: String,
         dirty: List<E>,
         serializer: kotlinx.serialization.KSerializer<D>,
@@ -298,15 +353,32 @@ class LedgerSyncRepository(
         idOf: (E) -> String,
         toDto: (E) -> D,
         markSynced: suspend (List<String>) -> Unit,
-    ): Int {
-        if (dirty.isEmpty()) return 200
-        val code = remote.upsertTable(table, dirty.map(toDto), serializer, token)
-        if (code !in 200..299) return code
-        markSynced(dirty.map(idOf))
-        return 200
+        core: CorePayload<E, D>? = null,
+    ) {
+        if (dirty.isEmpty()) return
+        var result = remote.upsertTable(table, dirty.map(toDto), serializer, token)
+        if (result.missingColumn && core != null) {
+            result = remote.upsertTable(table, dirty.map(core.toDto), serializer, token, core.omitKeys)
+            if (result.code in 200..299) {
+                report.droppedDetail = true
+                vault.update { it.copy(cloudDetailColumnsMissing = true) }
+            }
+        } else if (result.code in 200..299 && core != null) {
+            report.sentDetail = true
+        }
+        if (result.code !in 200..299) {
+            if (report.code in 200..299) report.code = result.code
+            return
+        }
+        dirty.map(idOf).chunked(400).forEach { markSynced(it) }
     }
 
-    private suspend fun pushAllDirty(userId: String, token: String): Int {
+    private suspend fun pushAllDirty(
+        userId: String,
+        token: String,
+        ids: CloudIdMapper,
+        holdUntouchedStarters: Boolean,
+    ): PushReport {
         // Only confirmed, account-assigned transactions may leave device; raw notification metadata stays local.
         val allDirtyTx = db.transactionDao().getDirty()
         val deletedUnreviewed = allDirtyTx.filter {
@@ -318,20 +390,72 @@ class LedgerSyncRepository(
         val syncableTx = allDirtyTx.filter {
             it.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW && it.accountId.isNotBlank()
         }
+        var accounts = db.accountDao().getDirty()
+        var categories = db.categoryDao().getDirty()
+        if (holdUntouchedStarters) {
+            val usedAccountIds = accountIdsWithTransactions()
+            accounts = accounts.filterNot { SeedData.isUntouchedStarterWallet(it, it.id in usedAccountIds) }
+            categories = categories.filterNot(SeedData::isUntouchedStarterCategory)
+        }
 
-        val codes = listOf(
-            pushDirtyTable("accounts", db.accountDao().getDirty(), SupabaseAccountDto.serializer(), token, { it.id }, { it.toRemoteDto(userId) }, db.accountDao()::markSynced),
-            pushDirtyTable("categories", db.categoryDao().getDirty(), SupabaseCategoryDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.categoryDao()::markSynced),
-            pushDirtyTable("transactions", syncableTx, SupabaseTransactionDto.serializer(), token, { it.id }, { it.toRemoteDto(userId) }, db.transactionDao()::markSynced),
-            pushDirtyTable("budgets", db.budgetDao().getDirty(), SupabaseBudgetDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.budgetDao()::markSynced),
-            pushDirtyTable("planned_payments", db.plannedPaymentDao().getDirty(), SupabasePlannedDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.plannedPaymentDao()::markSynced),
-            pushDirtyTable("holdings", db.holdingDao().getDirty(), SupabaseHoldingDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.holdingDao()::markSynced),
-            pushDirtyTable("magic_rules", db.magicRuleDao().getDirty(), SupabaseMagicRuleDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.magicRuleDao()::markSynced),
+        val report = PushReport()
+        val accountDto = { it: AccountEntity -> it.toRemoteDto(userId).withIds(ids::toCloud) }
+        pushDirtyTable(
+            report, "accounts", accounts, SupabaseAccountDto.serializer(), token, { it.id },
+            accountDto, db.accountDao()::markSynced,
+            core = CorePayload(accountDto, ACCOUNT_DETAIL_KEYS),
         )
-        return codes.firstOrNull { it !in 200..299 } ?: 200
+        val categoryDto = { it: CategoryEntity -> it.toDto(userId).withIds(ids::toCloud) }
+        pushDirtyTable(
+            report, "categories", categories, SupabaseCategoryDto.serializer(), token, { it.id },
+            categoryDto, db.categoryDao()::markSynced,
+            core = CorePayload(categoryDto, CATEGORY_DETAIL_KEYS),
+        )
+        pushDirtyTable(
+            report, "transactions", syncableTx, SupabaseTransactionDto.serializer(), token, { it.id },
+            { it.toRemoteDto(userId).withIds(ids) }, db.transactionDao()::markSynced,
+            core = CorePayload({ it.toCoreRemoteDto(userId).withIds(ids) }, TRANSACTION_DETAIL_KEYS),
+        )
+        pushDirtyTable(report, "budgets", db.budgetDao().getDirty(), SupabaseBudgetDto.serializer(), token, { it.id }, { it.toDto(userId).withIds(ids::toCloud) }, db.budgetDao()::markSynced)
+        pushDirtyTable(report, "planned_payments", db.plannedPaymentDao().getDirty(), SupabasePlannedDto.serializer(), token, { it.id }, { it.toDto(userId).withIds(ids::toCloud) }, db.plannedPaymentDao()::markSynced)
+        pushDirtyTable(report, "holdings", db.holdingDao().getDirty(), SupabaseHoldingDto.serializer(), token, { it.id }, { it.toDto(userId).withIds(ids::toCloud) }, db.holdingDao()::markSynced)
+        pushDirtyTable(report, "magic_rules", db.magicRuleDao().getDirty(), SupabaseMagicRuleDto.serializer(), token, { it.id }, { it.toDto(userId).withIds(ids::toCloud) }, db.magicRuleDao()::markSynced)
+        return report
     }
 
-    private suspend fun pullAllDelta(sinceIso: String?, token: String): PullResult {
+    private suspend fun accountIdsWithTransactions(): Set<String> =
+        db.transactionDao().getAllActive()
+            .flatMap { listOfNotNull(it.accountId, it.transferAccountId) }
+            .toSet()
+
+    /**
+     * Queues the rows that hold something in a detail column. Rows without any are left alone, so a
+     * device that only ever saw the coarse cloud copy cannot overwrite fuller data from another one.
+     */
+    private suspend fun markRowsWithDetailDirty() {
+        db.withTransaction {
+            val accounts = db.accountDao().getAllIncludingDeleted().filter {
+                it.creditLimitMinor != 0L || AccountTypeCatalog.toSupabaseSafeType(it.accountType) != it.accountType
+            }
+            db.accountDao().upsertAll(accounts.map { it.copy(pendingSync = true) })
+            val categories = db.categoryDao().getAllIncludingDeleted().filter {
+                it.parentCategoryId != null || it.description.isNotBlank()
+            }
+            db.categoryDao().upsertAll(categories.map { it.copy(pendingSync = true) })
+            val transactions = db.transactionDao().getAllActive().filter {
+                it.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW &&
+                    (it.spendingPurpose.isNotBlank() || it.categoryIdsCsv.isNotBlank())
+            }
+            transactions.map { it.id }.chunked(400).forEach { db.transactionDao().markDirty(it) }
+        }
+    }
+
+    private suspend fun pullAllDelta(
+        sinceIso: String?,
+        token: String,
+        ids: CloudIdMapper,
+        replaceUntouchedStarters: Boolean,
+    ): PullResult {
         val now = System.currentTimeMillis()
         val (accCode, accDtos) = remote.pullTableSince("accounts", sinceIso, SupabaseAccountDto.serializer(), token)
         if (accCode !in 200..299) return PullResult(accCode, 0, null)
@@ -355,66 +479,91 @@ class LedgerSyncRepository(
         }
 
         db.withTransaction {
-            total += mergePulledEntities(
-                remotes = accDtos.map { it.toEntity(now) },
+            // Read before any pulled transaction lands, so it reflects only what was done on this device.
+            val usedAccountIds = if (replaceUntouchedStarters) accountIdsWithTransactions() else emptySet()
+            total += mergePulledRows(
+                remotes = accDtos.map { it.withIds(ids::toLocal) },
                 idOf = { it.id },
-                updatedAtOf = { it.updatedAtEpochMs },
+                remoteUpdatedAtOf = { IsoTime.parseOr(it.updatedAt, now) },
                 fetchExistingChunk = { db.accountDao().getByIds(it) },
+                localIdOf = { it.id },
+                localUpdatedAtOf = { it.updatedAtEpochMs },
                 localPendingOf = { it.pendingSync },
+                toEntity = { dto, local -> dto.toEntity(now, local) },
                 upsertAll = { db.accountDao().upsertAll(it) },
                 onServerTimestamp = ::noteServerTimestamp,
+                isReplaceable = { replaceUntouchedStarters && SeedData.isUntouchedStarterWallet(it, it.id in usedAccountIds) },
             )
-            total += mergePulledEntities(
-                remotes = catDtos.map { it.toEntity(now) },
+            total += mergePulledRows(
+                remotes = catDtos.map { it.withIds(ids::toLocal) },
                 idOf = { it.id },
-                updatedAtOf = { it.updatedAtEpochMs },
+                remoteUpdatedAtOf = { IsoTime.parseOr(it.updatedAt, now) },
                 fetchExistingChunk = { db.categoryDao().getByIds(it) },
+                localIdOf = { it.id },
+                localUpdatedAtOf = { it.updatedAtEpochMs },
                 localPendingOf = { it.pendingSync },
+                toEntity = { dto, local -> dto.toEntity(now, local) },
                 upsertAll = { db.categoryDao().upsertAll(it) },
                 onServerTimestamp = ::noteServerTimestamp,
+                isReplaceable = { replaceUntouchedStarters && SeedData.isUntouchedStarterCategory(it) },
             )
-            total += mergePulledEntities(
-                remotes = txDtos.map { it.toEntity(now) },
+            total += mergePulledRows(
+                remotes = txDtos.map { it.withIds(ids, toLocal = true) },
                 idOf = { it.id },
-                updatedAtOf = { it.updatedAtEpochMs },
+                remoteUpdatedAtOf = { IsoTime.parseOr(it.updatedAt, now) },
                 fetchExistingChunk = { db.transactionDao().getByIds(it) },
+                localIdOf = { it.id },
+                localUpdatedAtOf = { it.updatedAtEpochMs },
                 localPendingOf = { it.pendingSync },
+                toEntity = { dto, local -> dto.toEntity(now, local) },
                 upsertAll = { db.transactionDao().upsertAll(it) },
                 onServerTimestamp = ::noteServerTimestamp,
             )
-            total += mergePulledEntities(
-                remotes = bdgDtos.map { it.toEntity(now) },
+            total += mergePulledRows(
+                remotes = bdgDtos.map { it.withIds(ids::toLocal) },
                 idOf = { it.id },
-                updatedAtOf = { it.updatedAtEpochMs },
+                remoteUpdatedAtOf = { IsoTime.parseOr(it.updatedAt, now) },
                 fetchExistingChunk = { db.budgetDao().getByIds(it) },
+                localIdOf = { it.id },
+                localUpdatedAtOf = { it.updatedAtEpochMs },
                 localPendingOf = { it.pendingSync },
+                toEntity = { dto, _ -> dto.toEntity(now) },
                 upsertAll = { db.budgetDao().upsertAll(it) },
                 onServerTimestamp = ::noteServerTimestamp,
             )
-            total += mergePulledEntities(
-                remotes = plnDtos.map { it.toEntity(now) },
+            total += mergePulledRows(
+                remotes = plnDtos.map { it.withIds(ids::toLocal) },
                 idOf = { it.id },
-                updatedAtOf = { it.updatedAtEpochMs },
+                remoteUpdatedAtOf = { IsoTime.parseOr(it.updatedAt, now) },
                 fetchExistingChunk = { db.plannedPaymentDao().getByIds(it) },
+                localIdOf = { it.id },
+                localUpdatedAtOf = { it.updatedAtEpochMs },
                 localPendingOf = { it.pendingSync },
+                toEntity = { dto, _ -> dto.toEntity(now) },
                 upsertAll = { db.plannedPaymentDao().upsertAll(it) },
                 onServerTimestamp = ::noteServerTimestamp,
             )
-            total += mergePulledEntities(
-                remotes = hldDtos.map { it.toEntity(now) },
+            total += mergePulledRows(
+                remotes = hldDtos.map { it.withIds(ids::toLocal) },
                 idOf = { it.id },
-                updatedAtOf = { it.updatedAtEpochMs },
+                remoteUpdatedAtOf = { IsoTime.parseOr(it.updatedAt, now) },
                 fetchExistingChunk = { db.holdingDao().getByIds(it) },
+                localIdOf = { it.id },
+                localUpdatedAtOf = { it.updatedAtEpochMs },
                 localPendingOf = { it.pendingSync },
+                toEntity = { dto, _ -> dto.toEntity(now) },
                 upsertAll = { db.holdingDao().upsertAll(it) },
                 onServerTimestamp = ::noteServerTimestamp,
             )
-            total += mergePulledEntities(
-                remotes = rleDtos.map { it.toEntity(now) },
+            total += mergePulledRows(
+                remotes = rleDtos.map { it.withIds(ids::toLocal) },
                 idOf = { it.id },
-                updatedAtOf = { it.updatedAtEpochMs },
+                remoteUpdatedAtOf = { IsoTime.parseOr(it.updatedAt, now) },
                 fetchExistingChunk = { db.magicRuleDao().getByIds(it) },
+                localIdOf = { it.id },
+                localUpdatedAtOf = { it.updatedAtEpochMs },
                 localPendingOf = { it.pendingSync },
+                toEntity = { dto, _ -> dto.toEntity(now) },
                 upsertAll = { db.magicRuleDao().upsertAll(it) },
                 onServerTimestamp = ::noteServerTimestamp,
             )
@@ -432,25 +581,33 @@ class LedgerSyncRepository(
         return !localPendingSync
     }
 
-    private suspend inline fun <E> mergePulledEntities(
-        remotes: List<E>,
-        idOf: (E) -> String,
-        updatedAtOf: (E) -> Long,
+    private suspend inline fun <D, E> mergePulledRows(
+        remotes: List<D>,
+        idOf: (D) -> String,
+        remoteUpdatedAtOf: (D) -> Long,
         fetchExistingChunk: suspend (List<String>) -> List<E>,
+        localIdOf: (E) -> String,
+        localUpdatedAtOf: (E) -> Long,
         localPendingOf: (E) -> Boolean,
+        toEntity: (D, E?) -> E,
         upsertAll: suspend (List<E>) -> Unit,
         onServerTimestamp: (Long) -> Unit,
+        isReplaceable: (E) -> Boolean = { false },
     ): Int {
         if (remotes.isEmpty()) return 0
-        remotes.forEach { onServerTimestamp(updatedAtOf(it)) }
-        val existing = remotes.map(idOf).chunked(400).flatMap { fetchExistingChunk(it) }.associateBy(idOf)
-        val winners = remotes.filter { remoteEntity ->
-            val local = existing[idOf(remoteEntity)]
-            local == null || shouldApplyRemote(
+        remotes.forEach { onServerTimestamp(remoteUpdatedAtOf(it)) }
+        val existing = remotes.map(idOf).distinct().chunked(400)
+            .flatMap { fetchExistingChunk(it) }
+            .associateBy(localIdOf)
+        // Remotes arrive oldest first, so when two map to one local row the newer one is written last.
+        val winners = remotes.mapNotNull { dto ->
+            val local = existing[idOf(dto)]
+            val wins = local == null || isReplaceable(local) || shouldApplyRemote(
                 localPendingSync = localPendingOf(local),
-                localUpdatedAtMs = updatedAtOf(local),
-                remoteUpdatedAtMs = updatedAtOf(remoteEntity),
+                localUpdatedAtMs = localUpdatedAtOf(local),
+                remoteUpdatedAtMs = remoteUpdatedAtOf(dto),
             )
+            if (wins) toEntity(dto, local) else null
         }
         if (winners.isNotEmpty()) upsertAll(winners)
         return winners.size
@@ -545,17 +702,38 @@ class LedgerSyncRepository(
         defaultCurrency: String,
         nowMs: Long,
     ): DataImportOutcome {
+        // Older backups carry the hierarchy only in categoryHierarchy and have no transaction details.
         val catMeta = backup.categoryHierarchy.associateBy { it.id }
         val cats = backup.categories.map { dto ->
             val meta = catMeta[dto.id]
-            dto.toEntity(nowMs).copy(
-                parentCategoryId = meta?.parentCategoryId,
-                description = meta?.description.orEmpty(),
+            dto.toEntity(nowMs, local = null).copy(
+                parentCategoryId = meta?.parentCategoryId ?: dto.parentCategoryId,
+                description = meta?.description ?: dto.description,
                 pendingSync = true,
             )
         }
-        val accs = backup.accounts.map { it.toEntity(nowMs).copy(pendingSync = true) }
-        val txs = backup.transactions.map { it.toEntity(nowMs).copy(pendingSync = true) }
+        val accs = backup.accounts.map { it.toEntity(nowMs, local = null).copy(pendingSync = true) }
+        val txDetails = backup.transactionDetails.associateBy { it.id }
+        val txs = backup.transactions.map { dto ->
+            val restored = dto.toEntity(nowMs, local = null).copy(pendingSync = true)
+            val detail = txDetails[dto.id]
+            when {
+                detail != null -> restored.copy(
+                    reviewStatus = detail.reviewStatus,
+                    paymentAppName = detail.paymentAppName,
+                    paymentAppPackage = detail.paymentAppPackage,
+                    referenceId = detail.referenceId,
+                    accountHint = detail.accountHint,
+                    notificationKey = detail.notificationKey,
+                    notificationFingerprint = detail.notificationFingerprint,
+                    originalParsedAmountMinor = detail.originalParsedAmountMinor,
+                    isRefundOrReversal = detail.isRefundOrReversal,
+                )
+                // Only a payment still awaiting review can be without an account.
+                restored.accountId.isBlank() -> restored.copy(reviewStatus = TransactionEntity.STATUS_PENDING_REVIEW)
+                else -> restored
+            }
+        }
         val budgets = backup.budgets.map { it.toEntity(nowMs).copy(pendingSync = true) }
         val planned = backup.plannedPayments.map { it.toEntity(nowMs).copy(pendingSync = true) }
         val holdings = backup.holdings.map { it.toEntity(nowMs).copy(pendingSync = true) }
@@ -623,12 +801,13 @@ class LedgerSyncRepository(
     suspend fun exportVaultJson(): String {
         val state = vault.read()
         val uid = state.userId ?: "local-offline"
+        val transactions = db.transactionDao().getAllActive()
         val backup = LedgerVaultBackup(
             exportedAt = IsoTime.format(System.currentTimeMillis()),
             baseCurrency = state.baseCurrency,
             accounts = db.accountDao().getAllActive().map { it.toDto(uid) },
             categories = db.categoryDao().getAllActive().map { it.toDto(uid) },
-            transactions = db.transactionDao().getAllActive().map { it.toDto(uid) },
+            transactions = transactions.map { it.toDto(uid) },
             budgets = db.budgetDao().getAllActive().map { it.toDto(uid) },
             plannedPayments = db.plannedPaymentDao().getAllActive().map { it.toDto(uid) },
             holdings = db.holdingDao().getAllActive().map { it.toDto(uid) },
@@ -640,6 +819,7 @@ class LedgerSyncRepository(
             categoryHierarchy = db.categoryDao().getAllActive()
                 .filter { it.parentCategoryId != null || it.description.isNotBlank() }
                 .map { VaultCategoryHierarchyDto(it.id, it.parentCategoryId, it.description) },
+            transactionDetails = transactions.map { it.toBackupDetail() },
         )
         return exportJson.encodeToString(LedgerVaultBackup.serializer(), backup)
     }
@@ -652,7 +832,9 @@ class LedgerSyncRepository(
         for (tx in txs) {
             val accName = accounts[tx.accountId]?.name ?: tx.accountId
             val catName = cats[tx.categoryId]?.name ?: "General"
-            val amountStr = String.format(Locale.US, "%.2f", tx.amountMinor / 100.0)
+            val amountStr = BigDecimal.valueOf(tx.amountMinor)
+                .movePointLeft(MoneyFormatter.decimalPlaces(tx.currency))
+                .toPlainString()
             sb.append(csvCell(IsoTime.format(tx.occurredAtEpochMs))).append(',')
                 .append(csvCell(tx.merchant)).append(',')
                 .append(csvCell(tx.txType)).append(',')
@@ -670,9 +852,20 @@ class LedgerSyncRepository(
     private fun csvCell(v: String): String = "\"${v.replace("\"", "\"\"")}\""
 }
 
+// Account types the core cloud schema reports when it cannot express the exact local one.
+private val COARSE_ACCOUNT_TYPES = setOf("CARD", "SHARED")
+
+private val ACCOUNT_DETAIL_KEYS = setOf("credit_limit_minor", "account_subtype", "detail_version")
+private val CATEGORY_DETAIL_KEYS = setOf("parent_category_id", "description", "detail_version")
+private val TRANSACTION_DETAIL_KEYS = setOf("category_ids_csv", "spending_purpose", "detail_version")
+
+/** Marks a row whose detail columns were actually written; rows without it leave local detail alone. */
+private const val DETAIL_VERSION = 1
+
 private fun AccountEntity.toDto(userId: String) = SupabaseAccountDto(
     id = id, userId = userId, name = name, institution = institution, accountType = accountType,
-    currency = currency, balanceMinor = balanceMinor, lastFour = lastFour, sourceType = sourceType,
+    currency = currency, balanceMinor = balanceMinor, creditLimitMinor = creditLimitMinor,
+    accountSubtype = accountType, detailVersion = DETAIL_VERSION, lastFour = lastFour, sourceType = sourceType,
     syncStatus = syncStatus, lastSyncedAt = lastSyncedAtEpochMs?.let(IsoTime::format),
     createdAt = IsoTime.format(createdAtEpochMs), updatedAt = IsoTime.format(updatedAtEpochMs),
     deletedAt = deletedAtEpochMs?.let(IsoTime::format),
@@ -682,28 +875,53 @@ private fun AccountEntity.toRemoteDto(userId: String) = toDto(userId).copy(
     accountType = AccountTypeCatalog.toSupabaseSafeType(accountType),
 )
 
-private fun SupabaseAccountDto.toEntity(now: Long) = AccountEntity(
-    id = id, name = name, institution = institution, accountType = accountType,
-    currency = currency, balanceMinor = balanceMinor, lastFour = lastFour, sourceType = sourceType,
-    syncStatus = syncStatus, lastSyncedAtEpochMs = lastSyncedAt?.let { IsoTime.parseOr(it, now) },
-    createdAtEpochMs = IsoTime.parseOr(createdAt, now), updatedAtEpochMs = IsoTime.parseOr(updatedAt, now),
-    deletedAtEpochMs = deletedAt?.let { IsoTime.parseOr(it, now) }, pendingSync = false,
-)
+/** [local] supplies whatever the incoming row cannot express, so a pull never blanks it. */
+private fun SupabaseAccountDto.toEntity(now: Long, local: AccountEntity?): AccountEntity {
+    val detailed = detailVersion >= DETAIL_VERSION
+    // Cloud rows carry the exact type in account_subtype and a coarse one in account_type; backups
+    // carry the exact type in both.
+    val exactType = accountSubtype.takeIf {
+        detailed && it.isNotBlank() && it !in COARSE_ACCOUNT_TYPES &&
+            (it == accountType || AccountTypeCatalog.toSupabaseSafeType(it) == accountType)
+    }
+    val localType = local?.accountType?.takeIf { AccountTypeCatalog.toSupabaseSafeType(it) == accountType }
+    return AccountEntity(
+        id = id, name = name, institution = institution, accountType = exactType ?: localType ?: accountType,
+        currency = currency, balanceMinor = balanceMinor, lastFour = lastFour,
+        creditLimitMinor = if (local == null || exactType != null) creditLimitMinor else local.creditLimitMinor,
+        sourceType = sourceType, syncStatus = syncStatus,
+        lastSyncedAtEpochMs = lastSyncedAt?.let { IsoTime.parseOr(it, now) },
+        createdAtEpochMs = IsoTime.parseOr(createdAt, now), updatedAtEpochMs = IsoTime.parseOr(updatedAt, now),
+        deletedAtEpochMs = deletedAt?.let { IsoTime.parseOr(it, now) }, pendingSync = false,
+    )
+}
+
+private fun SupabaseAccountDto.withIds(map: (String) -> String) = copy(id = map(id))
 
 private fun CategoryEntity.toDto(userId: String) = SupabaseCategoryDto(
     id = id, userId = userId, name = name, kind = kind, iconKey = iconKey, colorHex = colorHex,
+    parentCategoryId = parentCategoryId, description = description, detailVersion = DETAIL_VERSION,
     createdAt = IsoTime.format(createdAtEpochMs), updatedAt = IsoTime.format(updatedAtEpochMs),
     deletedAt = deletedAtEpochMs?.let(IsoTime::format),
 )
 
-private fun SupabaseCategoryDto.toEntity(now: Long) = CategoryEntity(
-    id = id, name = name, kind = kind, iconKey = iconKey, colorHex = colorHex,
-    createdAtEpochMs = IsoTime.parseOr(createdAt, now), updatedAtEpochMs = IsoTime.parseOr(updatedAt, now),
-    deletedAtEpochMs = deletedAt?.let { IsoTime.parseOr(it, now) }, pendingSync = false,
-)
+private fun SupabaseCategoryDto.toEntity(now: Long, local: CategoryEntity?): CategoryEntity {
+    val detailed = detailVersion >= DETAIL_VERSION
+    return CategoryEntity(
+        id = id, name = name, kind = kind, iconKey = iconKey, colorHex = colorHex,
+        parentCategoryId = if (detailed || local == null) parentCategoryId else local.parentCategoryId,
+        description = if (detailed || local == null) description else local.description,
+        createdAtEpochMs = IsoTime.parseOr(createdAt, now), updatedAtEpochMs = IsoTime.parseOr(updatedAt, now),
+        deletedAtEpochMs = deletedAt?.let { IsoTime.parseOr(it, now) }, pendingSync = false,
+    )
+}
+
+private fun SupabaseCategoryDto.withIds(map: (String) -> String) =
+    copy(id = map(id), parentCategoryId = parentCategoryId?.let(map))
 
 private fun TransactionEntity.toDto(userId: String) = SupabaseTransactionDto(
     id = id, userId = userId, accountId = accountId, transferAccountId = transferAccountId, categoryId = categoryId,
+    categoryIdsCsv = categoryIdsCsv, spendingPurpose = spendingPurpose, detailVersion = DETAIL_VERSION,
     txType = txType, amountMinor = amountMinor, currency = currency, convertedMinor = convertedMinor,
     convertedCurrency = convertedCurrency, merchant = merchant, note = note, labelsCsv = labelsCsv,
     sourceTag = sourceTag, autoRuleApplied = autoRuleApplied, occurredAt = IsoTime.format(occurredAtEpochMs),
@@ -711,30 +929,84 @@ private fun TransactionEntity.toDto(userId: String) = SupabaseTransactionDto(
     deletedAt = deletedAtEpochMs?.let(IsoTime::format),
 )
 
-private fun TransactionEntity.toRemoteDto(userId: String): SupabaseTransactionDto {
-    val safeSource = when (sourceTag) {
-        "GPAY_AUTO", "BANK_SYNC", "PLANNED", "IMPORT" -> sourceTag
-        else -> "MANUAL"
-    }
-    val combinedUserNote = listOfNotNull(
-        spendingPurpose.trim().takeIf { it.isNotEmpty() },
-        note.trim().takeIf { it.isNotEmpty() },
-    ).distinct().joinToString(" • ")
-    return toDto(userId).copy(
-        note = combinedUserNote,
-        sourceTag = safeSource,
+private fun cloudSourceTag(sourceTag: String): String = when (sourceTag) {
+    "GPAY_AUTO", "BANK_SYNC", "PLANNED", "IMPORT" -> sourceTag
+    else -> "MANUAL"
+}
+
+/** The single note a cloud row holds when it has no separate spending purpose column. */
+private fun combinedNote(spendingPurpose: String, note: String): String = listOfNotNull(
+    spendingPurpose.trim().takeIf { it.isNotEmpty() },
+    note.trim().takeIf { it.isNotEmpty() },
+).distinct().joinToString(" • ")
+
+private fun TransactionEntity.toRemoteDto(userId: String) =
+    toDto(userId).copy(sourceTag = cloudSourceTag(sourceTag))
+
+private fun TransactionEntity.toCoreRemoteDto(userId: String) =
+    toRemoteDto(userId).copy(note = combinedNote(spendingPurpose, note))
+
+private fun SupabaseTransactionDto.toEntity(now: Long, local: TransactionEntity?): TransactionEntity {
+    val detailed = detailVersion >= DETAIL_VERSION
+    // Without detail columns, an unchanged combined note means the local split is still accurate.
+    val localSplit = local?.takeIf { !detailed && combinedNote(it.spendingPurpose, it.note) == note }
+    return TransactionEntity(
+        id = id, accountId = accountId, transferAccountId = transferAccountId, categoryId = categoryId,
+        categoryIdsCsv = if (!detailed && local != null && local.categoryId == categoryId) {
+            local.categoryIdsCsv
+        } else {
+            categoryIdsCsv
+        },
+        txType = txType, amountMinor = amountMinor, currency = currency, convertedMinor = convertedMinor,
+        convertedCurrency = convertedCurrency, merchant = merchant,
+        note = localSplit?.note ?: note,
+        spendingPurpose = if (detailed) spendingPurpose else localSplit?.spendingPurpose.orEmpty(),
+        labelsCsv = labelsCsv,
+        sourceTag = local?.sourceTag?.takeIf { cloudSourceTag(it) == sourceTag } ?: sourceTag,
+        autoRuleApplied = autoRuleApplied, occurredAtEpochMs = IsoTime.parseOr(occurredAt, now),
+        createdAtEpochMs = IsoTime.parseOr(createdAt, now), updatedAtEpochMs = IsoTime.parseOr(updatedAt, now),
+        deletedAtEpochMs = deletedAt?.let { IsoTime.parseOr(it, now) }, pendingSync = false,
+        reviewStatus = TransactionEntity.STATUS_CONFIRMED,
+        // Payment capture metadata is never uploaded, so it can only come from this device.
+        paymentAppName = local?.paymentAppName.orEmpty(),
+        paymentAppPackage = local?.paymentAppPackage.orEmpty(),
+        referenceId = local?.referenceId.orEmpty(),
+        accountHint = local?.accountHint.orEmpty(),
+        notificationKey = local?.notificationKey.orEmpty(),
+        notificationFingerprint = local?.notificationFingerprint.orEmpty(),
+        originalParsedAmountMinor = local?.originalParsedAmountMinor,
+        isRefundOrReversal = local?.isRefundOrReversal ?: false,
     )
 }
 
-private fun SupabaseTransactionDto.toEntity(now: Long) = TransactionEntity(
-    id = id, accountId = accountId, transferAccountId = transferAccountId, categoryId = categoryId,
-    txType = txType, amountMinor = amountMinor, currency = currency, convertedMinor = convertedMinor,
-    convertedCurrency = convertedCurrency, merchant = merchant, note = note, labelsCsv = labelsCsv,
-    sourceTag = sourceTag, autoRuleApplied = autoRuleApplied, occurredAtEpochMs = IsoTime.parseOr(occurredAt, now),
-    createdAtEpochMs = IsoTime.parseOr(createdAt, now), updatedAtEpochMs = IsoTime.parseOr(updatedAt, now),
-    deletedAtEpochMs = deletedAt?.let { IsoTime.parseOr(it, now) }, pendingSync = false,
-    reviewStatus = TransactionEntity.STATUS_CONFIRMED,
+private fun SupabaseTransactionDto.withIds(ids: CloudIdMapper, toLocal: Boolean = false): SupabaseTransactionDto {
+    val map: (String) -> String = if (toLocal) ids::toLocal else ids::toCloud
+    return copy(
+        id = map(id),
+        accountId = map(accountId),
+        transferAccountId = transferAccountId?.let(map),
+        categoryId = categoryId?.let(map),
+        categoryIdsCsv = if (toLocal) ids.csvToLocal(categoryIdsCsv) else ids.csvToCloud(categoryIdsCsv),
+    )
+}
+
+private fun TransactionEntity.toBackupDetail() = VaultTransactionDetailDto(
+    id = id, reviewStatus = reviewStatus, paymentAppName = paymentAppName,
+    paymentAppPackage = paymentAppPackage, referenceId = referenceId, accountHint = accountHint,
+    notificationKey = notificationKey, notificationFingerprint = notificationFingerprint,
+    originalParsedAmountMinor = originalParsedAmountMinor, isRefundOrReversal = isRefundOrReversal,
 )
+
+private fun SupabaseBudgetDto.withIds(map: (String) -> String) =
+    copy(id = map(id), categoryId = categoryId?.let(map))
+
+private fun SupabasePlannedDto.withIds(map: (String) -> String) =
+    copy(id = map(id), accountId = accountId?.let(map), categoryId = categoryId?.let(map))
+
+private fun SupabaseHoldingDto.withIds(map: (String) -> String) = copy(id = map(id))
+
+private fun SupabaseMagicRuleDto.withIds(map: (String) -> String) =
+    copy(id = map(id), targetCategoryId = targetCategoryId?.let(map))
 
 private fun BudgetEntity.toDto(userId: String) = SupabaseBudgetDto(
     id = id, userId = userId, categoryId = categoryId, name = name, limitMinor = limitMinor,
