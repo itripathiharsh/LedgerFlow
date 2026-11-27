@@ -63,7 +63,6 @@ import androidx.compose.ui.platform.LocalContext
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CleanCard
-import com.ledgerflow.app.ui.components.ManageCategoriesDialog
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.rememberDataImportPicker
 import com.ledgerflow.app.ui.theme.AlabasterBg
@@ -102,6 +101,7 @@ private val themeOptions = listOf(
 @Composable
 fun SettingsScreen(
     vm: LedgerViewModel,
+    onOpenCategories: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -120,7 +120,6 @@ fun SettingsScreen(
 
     var showProfileDialog by remember { mutableStateOf(false) }
     var showCurrencyDialog by remember { mutableStateOf(false) }
-    var showCategoryManager by remember { mutableStateOf(false) }
     var showPinDialog by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
@@ -298,10 +297,10 @@ fun SettingsScreen(
             }
         }
 
-        // 3. Categories & Subcategories
+        // 3. Categories & Subcategories shortcut (opens full-screen Categories page)
         item {
             SettingsGroupTitle("CATEGORIES")
-            CleanCard(padding = 14.dp, onClick = { showCategoryManager = true }) {
+            CleanCard(padding = 14.dp, onClick = onOpenCategories) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -616,19 +615,6 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showCurrencyDialog = false }) { Text("Close") }
-            },
-        )
-    }
-
-    if (showCategoryManager) {
-        ManageCategoriesDialog(
-            categories = categories,
-            onDismiss = { showCategoryManager = false },
-            onCreateCategory = { name, kind, parentId, iconKey, colorHex ->
-                vm.addCategory(name, kind, parentId, iconKey, colorHex)
-            },
-            onDeleteCategories = { ids ->
-                vm.deleteCategories(ids)
             },
         )
     }

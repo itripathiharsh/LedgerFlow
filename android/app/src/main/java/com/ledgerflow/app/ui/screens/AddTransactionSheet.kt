@@ -53,8 +53,8 @@ import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.MoneyFormatter
 import kotlin.math.abs
 import com.ledgerflow.app.ui.LedgerViewModel
+import com.ledgerflow.app.ui.components.CategoryEditorBottomSheet
 import com.ledgerflow.app.ui.components.CleanCard
-import com.ledgerflow.app.ui.components.CreateCategoryDialog
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.theme.AlabasterBg
 import com.ledgerflow.app.ui.theme.BorderSubtle
@@ -518,12 +518,13 @@ fun AddTransactionScreen(
     }
 
     if (showCreateCategoryDialog) {
-        CreateCategoryDialog(
+        CategoryEditorBottomSheet(
+            editingCategory = null,
             initialKind = if (txType == "INCOME") "INCOME" else "EXPENSE",
-            parentCategories = categories.filter { it.parentCategoryId == null && it.deletedAtEpochMs == null },
             initialParentId = activeParentId,
+            allCategories = categories,
             onDismiss = { showCreateCategoryDialog = false },
-            onCreate = { name, kind, parentId, iconKey, colorHex ->
+            onSave = { name, kind, parentId, iconKey, colorHex ->
                 vm.addCategory(
                     name = name,
                     kind = kind,

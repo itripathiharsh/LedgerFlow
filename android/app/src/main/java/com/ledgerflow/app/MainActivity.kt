@@ -37,6 +37,7 @@ import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Contactless
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Home
@@ -103,6 +104,7 @@ import com.ledgerflow.app.ui.screens.AccountsScreen
 import com.ledgerflow.app.ui.screens.AddTransactionScreen
 import com.ledgerflow.app.ui.screens.AnalyticsScreen
 import com.ledgerflow.app.ui.screens.BudgetsScreen
+import com.ledgerflow.app.ui.screens.CategoriesScreen
 import com.ledgerflow.app.ui.screens.HomeScreen
 import com.ledgerflow.app.ui.screens.InvestScreen
 import com.ledgerflow.app.ui.screens.OnboardingScreen
@@ -397,6 +399,7 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
     var budgetsInitialTab by remember { mutableIntStateOf(0) }
     var openAddAccountOnStart by remember { mutableStateOf(false) }
     var showSmartPasteImport by remember { mutableStateOf(false) }
+    var categoriesOpenedFromSettings by remember { mutableStateOf(false) }
 
     LaunchedEffect(statusMsg) {
         statusMsg?.let { msg ->
@@ -427,11 +430,12 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
         scope.launch { drawerState.close() }
     }
 
-    val mainRoutes = setOf("home", "records", "accounts", "budgets", "invest", "analytics")
+    val mainRoutes = setOf("home", "records", "accounts", "budgets", "categories", "invest", "analytics")
     val showFab = currentRoute in mainRoutes
 
     val navigateDrawerRoute: (String) -> Unit = { route ->
         scope.launch { drawerState.close() }
+        if (route == "categories") categoriesOpenedFromSettings = false
         if (route == "settings") {
             navController.navigate("settings") { launchSingleTop = true }
         } else {
@@ -552,6 +556,9 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                         budgetsInitialTab = 0
                         navigateDrawerRoute("budgets")
                     }
+                    DrawerNavEntry("Categories", Icons.Outlined.Category, currentRoute == "categories", itemColors) {
+                        navigateDrawerRoute("categories")
+                    }
                     DrawerNavEntry("Investments", Icons.AutoMirrored.Outlined.TrendingUp, currentRoute == "invest", itemColors) {
                         navigateDrawerRoute("invest")
                     }
@@ -641,6 +648,20 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                         onOpenSettings = { navigateDrawerRoute("settings") },
                     )
                 }
+                composable("categories") {
+                    CategoriesScreen(
+                        vm = vm,
+                        openedFromSettings = categoriesOpenedFromSettings,
+                        onNavigateBackOrDrawer = {
+                            if (categoriesOpenedFromSettings) {
+                                categoriesOpenedFromSettings = false
+                                navController.popBackStack()
+                            } else {
+                                scope.launch { drawerState.open() }
+                            }
+                        },
+                    )
+                }
                 composable("analytics") {
                     AnalyticsScreen(
                         vm = vm,
@@ -667,6 +688,10 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                 composable("settings") {
                     SettingsScreen(
                         vm = vm,
+                        onOpenCategories = {
+                            categoriesOpenedFromSettings = true
+                            navController.navigate("categories") { launchSingleTop = true }
+                        },
                         onBack = { navController.popBackStack() },
                     )
                 }

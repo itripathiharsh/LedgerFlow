@@ -331,6 +331,21 @@
   - Signed `LedgerFlow-v1.4.0.apk` (`4,731,064` bytes, SHA-256 `793e0b3de3f429fb6d8b012b264ad61b87c79b2a6462a0846355995119bfa1d2`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
   - Direct APK Download (`v1.4.0`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.4.0/LedgerFlow-v1.4.0.apk`.
 
+---
+
+## Full-Screen Categories & Single-Layer Theme Polish (`v1.5.0`, `versionCode 16`)
+- **Dedicated `CategoriesScreen` (`CategoriesScreen.kt`, `MainActivity.kt`, `SettingsScreen.kt`)**:
+  - Promoted **Categories** out of nested Settings modals into a primary full screen in the Left Navigation Drawer (right between `Budgets & Planned` and `Investments`), with a direct shortcut in [SettingsScreen.kt](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/java/com/ledgerflow/app/ui/screens/SettingsScreen.kt) showing a `←` back arrow when opened from Settings.
+  - Added full-width `Expense` | `Income` segmented toggle, live search bar (`Search categories or subcategories...`), `Select` bulk-delete toolbar, `+ Category` CTA, and full-width expandable cards with wrapped `FlowRow` subcategory chips (`never horizontally clipped`).
+- **Single-Layer Add/Edit Bottom Sheet & Edit API (`CategoryManagerDialog.kt`, `LedgerViewModel.kt`, `AddTransactionSheet.kt`)**:
+  - Replaced `CreateCategoryDialog` / `ManageCategoriesDialog` with a single-layer `CategoryEditorBottomSheet` (`ModalBottomSheet`) supporting Create, Rename (`vm.updateCategory()`), Icon & Accent Color pickers, searchable/wrapped Parent Category selector (pre-filled when tapping `+ Sub`), and Delete.
+- **Material 3 Dark Surface Consistency (`Theme.kt`)**:
+  - Overrode Material 3 `secondaryContainer`, `onSecondaryContainer`, `surfaceContainerLowest`, `surfaceContainerHighest`, `outlineVariant`, and `surfaceTint` (`Color.Transparent`) across `buildColorScheme()` so dialogs, bottom sheets, and chips adhere strictly to **Flow Dark** (`#0F201B`) and **Premium Black** (`#000000` / `#0D0D11`) with zero off-brand purplish-grey surfaces.
+- **Verification (`v1.5.0`)**:
+  - `.\gradlew.bat testDirectDebugUnitTest lintDirectDebug assembleDirectRelease compilePlayStoreDebugKotlin --max-workers=1 --no-daemon`: **41 / 41 passed** (`0` failures, `0` errors, `0` skipped), `0` Lint errors (`29` warnings).
+  - Signed `LedgerFlow-v1.5.0.apk` (`4,731,064` bytes, SHA-256 `353a2f50ded4b0ee0e966ff8152f1ce89d701994f6408dce8458a067fa05b1cb`, signing cert `40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0`, `0` restricted permissions).
+  - Direct APK Download (`v1.5.0`): `https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.5.0/LedgerFlow-v1.5.0.apk`.
+
 
 
 

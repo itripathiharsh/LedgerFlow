@@ -749,6 +749,56 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun updateCategory(
+        categoryId: String,
+        name: String,
+        kind: String,
+        parentCategoryId: String?,
+        iconKey: String,
+        colorHex: String,
+    ) {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) {
+            _statusMessage.value = "Enter a category name"
+            return
+        }
+        val cleanKind = if (kind.trim().uppercase() == "INCOME") "INCOME" else "EXPENSE"
+        val cleanIcon = iconKey.trim().ifBlank { "category" }
+        val cleanColor = colorHex.trim().ifBlank { "#059669" }
+        viewModelScope.launch {
+            val existing = db.categoryDao().getById(categoryId) ?: return@launch
+            if (existing.deletedAtEpochMs != null) return@launch
+            val safeParentId = parentCategoryId?.takeIf { it != categoryId }
+            val resolvedParent = safeParentId?.let { db.categoryDao().getById(it) }
+                ?.takeIf { it.deletedAtEpochMs == null && it.parentCategoryId == null }
+            val resolvedKind = resolvedParent?.kind ?: cleanKind
+            val now = System.currentTimeMillis()
+            val updated = existing.copy(
+                name = cleanName,
+                kind = resolvedKind,
+                iconKey = cleanIcon,
+                colorHex = cleanColor,
+                parentCategoryId = resolvedParent?.id,
+                updatedAtEpochMs = now,
+                pendingSync = true,
+            )
+            val allActive = db.categoryDao().getAllActive()
+            val updates = buildList {
+                add(updated)
+                if (updated.parentCategoryId == null && updated.kind != existing.kind) {
+                    allActive
+                        .filter { it.parentCategoryId == updated.id && it.kind != updated.kind }
+                        .forEach { child ->
+                            add(child.copy(kind = updated.kind, updatedAtEpochMs = now, pendingSync = true))
+                        }
+                }
+            }
+            db.categoryDao().upsertAll(updates)
+            SyncWorker.enqueueWhenOnline(app)
+            _statusMessage.value = "\"$cleanName\" updated"
+        }
+    }
+
     fun deleteCategories(ids: Set<String>) {
         if (ids.isEmpty()) return
         viewModelScope.launch {

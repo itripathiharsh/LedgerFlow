@@ -1,16 +1,16 @@
 {
-  "versionCode": 15,
-  "versionName": "1.4.0",
+  "versionCode": 16,
+  "versionName": "1.5.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T16:34:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.4.0/LedgerFlow-v1.4.0.apk",
+  "releasedAt": "2026-11-27T16:56:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.5.0/LedgerFlow-v1.5.0.apk",
   "apkSizeBytes": 4731064,
-  "sha256": "793e0b3de3f429fb6d8b012b264ad61b87c79b2a6462a0846355995119bfa1d2",
+  "sha256": "353a2f50ded4b0ee0e966ff8152f1ce89d701994f6408dce8458a067fa05b1cb",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Moved navigation from the 5-tab bottom bar to a left Navigation Drawer (Home, Records, Accounts, Budgets & Planned, Investments, Analytics & Insights, Smart Paste & Import, Settings) with a single floating + button.",
-    "Decluttered Home with Overview and Budgets tabs: Overview contains only the horizontal Accounts Strip, unified Total Balance & Current Cash Flow card, and Last 3 Recent Records.",
-    "Added tap-to-open Account Detail sheets (30-day balance trendline, account transactions, edit, repay, and delete), emerald-themed Payment Capture, Title Case user names, and clean Budgets & Investments empty states."
+    "Promoted Categories & Subcategories to a dedicated full screen in the Left Navigation Drawer (plus shortcut from Settings) with full-width expandable cards, multi-row FlowRow subcategory chips (never clipped), Search, Select bulk-delete, and + Category / + Sub actions.",
+    "Replaced stacked category popup dialogs with a single-layer CategoryEditorBottomSheet supporting Create, Rename, Icon/Accent Color customization, Parent Category filter, and Delete.",
+    "Fixed Material 3 dark theme container slots in Theme.kt (Flow Dark emerald-slate and Premium Black pure OLED) so dialogs, bottom sheets, and chips never render off-brand purplish-grey."
   ],
   "mandatory": false
 }
