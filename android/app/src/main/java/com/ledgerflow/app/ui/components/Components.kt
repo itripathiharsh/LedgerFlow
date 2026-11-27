@@ -150,13 +150,15 @@ fun SyncBadge(
 }
 
 @Composable
-fun SourceTagBadge(sourceTag: String) {
+fun SourceTagBadge(sourceTag: String, paymentAppName: String = "") {
     val palette = LedgerThemeColors
-    val (label, bg, fg) = when (sourceTag) {
-        "GPAY_AUTO" -> Triple("GPay Auto", SkySoft, SkySync)
-        "BANK_SYNC" -> Triple("Bank Sync", EmeraldSoft, EmeraldDark)
-        "PLANNED" -> Triple("Planned", palette.indigoSoft, palette.indigoStrong)
-        "IMPORT" -> Triple("Imported", AmberSoft, AmberWarn)
+    val cleanApp = paymentAppName.trim()
+    val (label, bg, fg) = when {
+        cleanApp.isNotEmpty() -> Triple(cleanApp, SkySoft, SkySync)
+        sourceTag == "GPAY_AUTO" -> Triple("Auto-Detected", SkySoft, SkySync)
+        sourceTag == "BANK_SYNC" -> Triple("Bank Auto", EmeraldSoft, EmeraldDark)
+        sourceTag == "PLANNED" -> Triple("Planned", palette.indigoSoft, palette.indigoStrong)
+        sourceTag == "IMPORT" -> Triple("Imported", AmberSoft, AmberWarn)
         else -> Triple("Manual", SlateTint, MutedSlate)
     }
     StatusPill(text = label, containerColor = bg, contentColor = fg)

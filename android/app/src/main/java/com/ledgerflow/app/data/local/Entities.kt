@@ -52,6 +52,10 @@ data class CategoryEntity(
         Index("occurredAtEpochMs"),
         Index("updatedAtEpochMs"),
         Index("deletedAtEpochMs"),
+        Index("reviewStatus"),
+        Index("referenceId"),
+        Index("notificationKey"),
+        Index("notificationFingerprint"),
     ]
 )
 data class TransactionEntity(
@@ -75,7 +79,23 @@ data class TransactionEntity(
     val updatedAtEpochMs: Long,
     val deletedAtEpochMs: Long? = null,
     val pendingSync: Boolean = true,
-)
+    val reviewStatus: String = STATUS_CONFIRMED, // PENDING_REVIEW, CONFIRMED
+    val spendingPurpose: String = "",
+    val paymentAppName: String = "",
+    val paymentAppPackage: String = "",
+    val referenceId: String = "",
+    val accountHint: String = "",
+    val notificationKey: String = "",
+    val notificationFingerprint: String = "",
+    val originalParsedAmountMinor: Long? = null,
+    val isRefundOrReversal: Boolean = false,
+) {
+    companion object {
+        const val UNASSIGNED_ACCOUNT_ID = ""
+        const val STATUS_PENDING_REVIEW = "PENDING_REVIEW"
+        const val STATUS_CONFIRMED = "CONFIRMED"
+    }
+}
 
 @Fts4(contentEntity = TransactionEntity::class)
 @Entity(tableName = "transactions_fts")

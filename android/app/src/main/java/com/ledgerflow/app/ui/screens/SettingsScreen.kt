@@ -1,6 +1,7 @@
 package com.ledgerflow.app.ui.screens
 
 import android.content.Intent
+import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.AlertDialog
@@ -45,6 +47,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,12 +63,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ledgerflow.app.domain.MoneyFormatter
+import com.ledgerflow.app.service.PayAndTrackCapture
 import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CleanCard
+import com.ledgerflow.app.ui.components.NotificationAccessPrivacyDialog
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.rememberDataImportPicker
 import com.ledgerflow.app.ui.theme.AlabasterBg
+import com.ledgerflow.app.ui.theme.AmberSoft
+import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
@@ -123,6 +133,21 @@ fun SettingsScreen(
     var showPinDialog by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
+    var showNotificationDisclosure by remember { mutableStateOf(false) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val supportsOsListener = remember(context) { PayAndTrackCapture.isOsListenerAvailable(context) }
+    var listenerEnabled by remember { mutableStateOf(PayAndTrackCapture.isOsListenerEnabled(context)) }
+    DisposableEffect(lifecycleOwner, vault.payAndTrackEnabled) {
+        listenerEnabled = PayAndTrackCapture.isOsListenerEnabled(context)
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                listenerEnabled = PayAndTrackCapture.isOsListenerEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val fmt = remember { SimpleDateFormat("MMM d, HH:mm", Locale.US) }
     val currencies = listOf("INR", "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "SGD")
@@ -322,6 +347,102 @@ fun SettingsScreen(
                         }
                     }
                     Text("Manage", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
+                }
+            }
+        }
+
+        // 3b. Opt-In Automatic Payment Detection
+        item {
+            SettingsGroupTitle("PAYMENT DETECTION")
+            CleanCard(padding = 14.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Outlined.Notifications, contentDescription = null, tint = EmeraldDark)
+                        Column {
+                            Text("Notification Access", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk)
+                            Text(
+                                text = "Detects GPay, PhonePe, Paytm, BHIM & bank alerts locally into Pending Review",
+                                fontSize = 12.sp,
+                                color = MutedSlate,
+                            )
+                        }
+                    }
+                    StatusPill(
+                        text = when {
+                            listenerEnabled && vault.payAndTrackEnabled -> "Active"
+                            listenerEnabled -> "Paused"
+                            else -> "Off"
+                        },
+                        containerColor = when {
+                            listenerEnabled && vault.payAndTrackEnabled -> EmeraldSoft
+                            listenerEnabled -> AmberSoft
+                            else -> SlateTint
+                        },
+                        contentColor = when {
+                            listenerEnabled && vault.payAndTrackEnabled -> EmeraldDark
+                            listenerEnabled -> AmberWarn
+                            else -> MutedSlate
+                        },
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Categories and spending purpose are never guessed automatically. Raw notification text stays strictly on-device and never syncs to Supabase or Render.",
+                    fontSize = 11.sp,
+                    color = MutedSlate,
+                )
+                if (listenerEnabled) {
+                    HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-Detect Payments", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = SlateInk)
+                            Text("Pause or resume local notification logging", fontSize = 11.sp, color = MutedSlate)
+                        }
+                        Switch(
+                            checked = vault.payAndTrackEnabled,
+                            onCheckedChange = { vm.setPayAndTrackEnabled(it) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
+                        )
+                    }
+                }
+                if (supportsOsListener) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = {
+                            if (listenerEnabled) {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                    )
+                                }
+                            } else {
+                                showNotificationDisclosure = true
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(
+                            text = if (listenerEnabled) "Disable Notification Access in Settings" else "Enable Notification Access",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (listenerEnabled) RoseOutflow else EmeraldPrimary,
+                        )
+                    }
                 }
             }
         }
@@ -703,6 +824,26 @@ fun SettingsScreen(
                 ) { Text("Delete Everything") }
             },
             dismissButton = { TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showNotificationDisclosure) {
+        NotificationAccessPrivacyDialog(
+            onDismiss = { showNotificationDisclosure = false },
+            onContinueToSettings = {
+                vm.setNotificationDisclosureAccepted(true)
+                vm.setPayAndTrackEnabled(true)
+                showNotificationDisclosure = false
+                runCatching {
+                    context.startActivity(
+                        Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    )
+                }.onFailure {
+                    vm.showMessage("Open Android Settings > Notification Access > LedgerFlow")
+                }
+            },
         )
     }
 }

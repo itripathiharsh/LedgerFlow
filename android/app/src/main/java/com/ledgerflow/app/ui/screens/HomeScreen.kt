@@ -45,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.CategoryHierarchy
@@ -68,11 +70,13 @@ import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.ads.OnlineOnlyAdBanner
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
+import com.ledgerflow.app.ui.components.ReviewTransactionBottomSheet
 import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.SourceTagBadge
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.parseSliceColor
 import com.ledgerflow.app.ui.theme.AlabasterBg
+import com.ledgerflow.app.ui.theme.AmberSoft
 import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
@@ -82,12 +86,17 @@ import com.ledgerflow.app.ui.theme.LedgerThemeColors
 import com.ledgerflow.app.ui.theme.MutedSlate
 import com.ledgerflow.app.ui.theme.RoseOutflow
 import com.ledgerflow.app.ui.theme.RoseSoft
+import com.ledgerflow.app.ui.theme.SkySoft
+import com.ledgerflow.app.ui.theme.SkySync
 import com.ledgerflow.app.ui.theme.SlateInk
 import com.ledgerflow.app.ui.theme.SlateTint
 import com.ledgerflow.app.ui.theme.SurfaceCard
 import com.ledgerflow.app.ui.theme.TabularStyle
 import com.ledgerflow.app.ui.theme.resolveIsDarkTheme
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -96,6 +105,7 @@ fun HomeScreen(
     vm: LedgerViewModel,
     onOpenDrawer: () -> Unit,
     onOpenRecords: () -> Unit,
+    onOpenPendingRecords: () -> Unit = onOpenRecords,
     onOpenBudgets: () -> Unit,
     onOpenGoals: () -> Unit = onOpenBudgets,
     onOpenAccounts: () -> Unit,
@@ -106,6 +116,7 @@ fun HomeScreen(
     val accounts by vm.accounts.collectAsState()
     val categories by vm.categories.collectAsState()
     val transactions by vm.allTransactions.collectAsState()
+    val pendingReview by vm.pendingReviewTransactions.collectAsState()
     val budgets by vm.budgets.collectAsState()
     val savingsGoals by vm.savingsGoals.collectAsState()
 
@@ -122,15 +133,21 @@ fun HomeScreen(
     val dashboard = remember(accounts, transactions, baseCurrency, monthStart) {
         AnalyticsCalculator.computeDashboard(accounts, transactions, baseCurrency, monthStart)
     }
+    val pendingSummary = remember(pendingReview, baseCurrency) {
+        AnalyticsCalculator.computePendingReviewSummary(pendingReview, baseCurrency)
+    }
     val accountSummary = remember(accounts, baseCurrency) {
         AnalyticsCalculator.computeAccountSummary(accounts, baseCurrency)
     }
     val budgetProgress = remember(budgets, transactions, categories, baseCurrency, monthStart, monthFraction) {
         AnalyticsCalculator.computeBudgets(budgets, transactions, baseCurrency, monthStart, monthFraction, categories)
     }
+    val accMap = remember(accounts) { accounts.associateBy { it.id } }
     val categoryMap = remember(categories) { categories.associateBy { it.id } }
+    val pendingDateFmt = remember { SimpleDateFormat("MMM d • h:mm a", Locale.US) }
 
-    var homeTab by remember { mutableIntStateOf(0) } // 0 = Overview, 1 = Budgets
+    var homeTab by remember { mutableIntStateOf(0) } // 0 = Overview, 1 = Budgets & Goals
+    var reviewingTx by remember { mutableStateOf<TransactionEntity?>(null) }
 
     LazyColumn(
         modifier = Modifier
@@ -319,6 +336,110 @@ fun HomeScreen(
                 }
             }
 
+            // PENDING REVIEW SECTION (Detected payments awaiting user category & purpose)
+            if (pendingReview.isNotEmpty()) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionHeader(
+                            title = "Pending Review (${pendingSummary.count})",
+                            actionText = "Review all →",
+                            onActionClick = onOpenPendingRecords,
+                        )
+                        CleanCard(
+                            padding = 12.dp,
+                            borderColor = AmberWarn.copy(alpha = 0.45f),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Total pending: ${MoneyFormatter.formatMinor(pendingSummary.totalVolumeMinor, baseCurrency, masked = masked)}",
+                                    style = TabularStyle,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateInk,
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (pendingSummary.unassignedCount > 0) {
+                                        StatusPill("${pendingSummary.unassignedCount} unassigned", AmberSoft, AmberWarn)
+                                    }
+                                    StatusPill("${pendingSummary.count} to classify", AmberSoft, AmberWarn)
+                                }
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            pendingReview.take(4).forEachIndexed { idx, ptx ->
+                                if (idx > 0) {
+                                    HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { reviewingTx = ptx }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = ptx.merchant.ifBlank { "Merchant not provided" },
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = SlateInk,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = pendingDateFmt.format(Date(ptx.occurredAtEpochMs)),
+                                            fontSize = 11.sp,
+                                            color = MutedSlate,
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            StatusPill(
+                                                text = ptx.paymentAppName.ifBlank { "Payment Alert" },
+                                                containerColor = SkySoft,
+                                                contentColor = SkySync,
+                                            )
+                                            if (ptx.accountId.isBlank()) {
+                                                StatusPill("Unassigned Account", AmberSoft, AmberWarn)
+                                            } else {
+                                                accMap[ptx.accountId]?.let { acc ->
+                                                    StatusPill(acc.name, SlateTint, MutedSlate)
+                                                }
+                                            }
+                                            if (ptx.isRefundOrReversal) {
+                                                StatusPill("Refund", EmeraldSoft, EmeraldDark)
+                                            }
+                                        }
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = MoneyFormatter.formatMinor(
+                                                ptx.amountMinor,
+                                                ptx.currency,
+                                                showPlus = ptx.txType == "INCOME",
+                                                masked = masked,
+                                            ),
+                                            style = TabularStyle,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (ptx.txType == "INCOME") EmeraldDark else RoseOutflow,
+                                        )
+                                        Text("Tap to classify", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = EmeraldPrimary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // MODULE 2: Unified Total Balance & Current Cash Flow Card
             item {
                 CleanCard(padding = 18.dp) {
@@ -425,21 +546,26 @@ fun HomeScreen(
                         } else {
                             topTx.forEachIndexed { idx, tx ->
                                 if (idx > 0) HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 12.dp))
+                                val isPending = tx.reviewStatus == TransactionEntity.STATUS_PENDING_REVIEW
                                 val assigned = with(CategoryHierarchy) { tx.allAssignedCategoryIds() }.mapNotNull { categoryMap[it] }
                                 val cat = assigned.firstOrNull() ?: categoryMap[tx.categoryId]
-                                val catLabel = assigned.map { it.name }.distinct().joinToString(" + ").ifBlank { cat?.name ?: tx.txType }
+                                val catLabel = if (isPending) {
+                                    accMap[tx.accountId]?.name ?: "Unassigned Account"
+                                } else {
+                                    assigned.map { it.name }.distinct().joinToString(" + ").ifBlank { cat?.name ?: tx.txType }
+                                }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { onOpenRecords() }
+                                        .clickable { reviewingTx = tx }
                                         .padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    CategoryIconBadge(cat?.iconKey ?: "category", cat?.colorHex ?: "#059669", size = 36.dp)
+                                    CategoryIconBadge(cat?.iconKey ?: "category", cat?.colorHex ?: if (isPending) "#D97706" else "#059669", size = 36.dp)
                                     Spacer(Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = tx.merchant,
+                                            text = tx.merchant.ifBlank { "Merchant not provided" },
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = SlateInk,
@@ -449,7 +575,10 @@ fun HomeScreen(
                                         Spacer(Modifier.height(2.dp))
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             Text(catLabel, fontSize = 12.sp, color = MutedSlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            SourceTagBadge(tx.sourceTag)
+                                            SourceTagBadge(tx.sourceTag, tx.paymentAppName)
+                                            if (isPending) {
+                                                StatusPill("Pending", AmberSoft, AmberWarn)
+                                            }
                                         }
                                     }
                                     Text(
@@ -600,6 +729,38 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    reviewingTx?.let { target ->
+        ReviewTransactionBottomSheet(
+            tx = target,
+            accounts = accounts,
+            categories = categories,
+            baseCurrency = baseCurrency,
+            onDismiss = { reviewingTx = null },
+            onDelete = { del ->
+                vm.deleteTransaction(del.id)
+                reviewingTx = null
+            },
+            onSave = { txType, magMinor, accountId, transferTargetId, categoryId, categoryIdsCsv, spendingPurpose, merchant, note, labelsCsv ->
+                vm.confirmOrUpdateTransaction(
+                    txId = target.id,
+                    txType = txType,
+                    magnitudeMinor = magMinor,
+                    currency = target.currency,
+                    accountId = accountId,
+                    transferAccountId = transferTargetId,
+                    categoryId = categoryId,
+                    categoryIdsCsv = categoryIdsCsv,
+                    spendingPurpose = spendingPurpose,
+                    merchant = merchant,
+                    note = note,
+                    labelsCsv = labelsCsv,
+                    markConfirmed = true,
+                )
+                reviewingTx = null
+            },
+        )
     }
 }
 

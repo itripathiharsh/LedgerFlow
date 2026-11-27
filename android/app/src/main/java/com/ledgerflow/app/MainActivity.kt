@@ -309,7 +309,7 @@ class MainActivity : FragmentActivity() {
         if (launchedFromHistory) return
         val shared = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
         if (shared.isNotBlank() && !vm.isLocked.value) {
-            vm.capturePaymentAlertText(shared, originNote = "Captured via Share-to-Track")
+            vm.capturePaymentAlertText(shared, originNote = "")
             intent.removeExtra(Intent.EXTRA_TEXT)
         }
     }
@@ -657,7 +657,14 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                     HomeScreen(
                         vm = vm,
                         onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onOpenRecords = { navigateDrawerRoute("records") },
+                        onOpenRecords = {
+                            vm.setRecordsFilter("ALL")
+                            navigateDrawerRoute("records")
+                        },
+                        onOpenPendingRecords = {
+                            vm.setRecordsFilter("PENDING_REVIEW")
+                            navigateDrawerRoute("records")
+                        },
                         onOpenBudgets = {
                             budgetsInitialTab = 0
                             navigateDrawerRoute("budgets")
@@ -797,7 +804,7 @@ private fun LedgerFlowMainShell(vm: LedgerViewModel) {
                     Button(
                         enabled = pasteText.isNotBlank(),
                         onClick = {
-                            vm.capturePaymentAlertText(pasteText, originNote = "Captured via Smart Paste")
+                            vm.capturePaymentAlertText(pasteText, originNote = "")
                             showSmartPasteImport = false
                         },
                         modifier = Modifier.fillMaxWidth(),

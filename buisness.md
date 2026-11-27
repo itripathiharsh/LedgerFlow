@@ -6,7 +6,7 @@
 
 ## 1. Core Product Positioning
 - **Value Proposition**: Fast, calm, offline-first personal finance, expense tracking, budgeting, multi-currency wallet, planned bills, investment tracking, and optional Google Wallet auto-capture without bloat or paywalls.
-- **Offline-First Guarantee**: Every financial workflow (Room ledger CRUD, FTS4 search, budgets, forecasts, charts, recurring payments, Pay & Track listener, PIN/biometric vault lock, JSON/CSV exports) works **100% locally without internet**. Cloud outages, Render free-tier spin-down delays, or airplane mode never block user access to their financial data.
+- **Offline-First Guarantee**: Every financial workflow (Room ledger CRUD, FTS4 search, budgets, savings goals, debts, shopping checklists, forecasts, charts, recurring payments, opt-in payment notification detection + pending classification, PIN/biometric vault lock, JSON/CSV exports) works **100% locally without internet**. Cloud outages, Render free-tier spin-down delays, or airplane mode never block user access to their financial data.
 
 ---
 
@@ -42,9 +42,9 @@
 ## 5. Privacy & Play Policy Commitments
 - Encrypt saved cloud tokens/credentials with `AndroidKeyStore` (`AES/GCM/NoPadding`) and protect PIN verification with salted PBKDF2 (`VaultSecurity.kt`).
 - Block cloud backups and device-to-device data extraction (`android:allowBackup="false"` + [data_extraction_rules.xml](file:///D:/all%20farzi%20project/LedgerFlow/android/app/src/main/res/xml/data_extraction_rules.xml)) and protect the screen switcher (`FLAG_SECURE` when blur-in-switcher is enabled).
-- Opt-in local-only `NotificationListenerService` (**Pay & Track** parses payment notifications strictly on-device).
+- Opt-in local-only `NotificationListenerService` across Google Pay India, PhonePe, Paytm, BHIM, Google Wallet, and major banking apps (**Payment Detection** displays explicit disclosure before opening Android Settings, keeps Notification Access optional and one-tap disableable, never auto-assigns spending category/purpose, retains zero raw notification content in cloud sync, and keeps **Share-to-Track** and **Smart Paste** functional without Notification Access).
 - Release traffic strictly enforces HTTPS (`cleartextTrafficPermitted="false"`).
-- Full JSON & CSV local export built into `PrivacyVaultScreen`.
+- Full JSON & CSV local export built into `SettingsScreen`.
 
 ---
 
@@ -66,3 +66,4 @@
 | 2026-11-25 | Free HTTPS + APK-signature-verified self-updater (`UpdateCheckWorker`, "Update Now" / "Later") | Delivers seamless updates without Play Store lock-in or cost while protecting offline UX & binary trust |
 | 2026-11-25 | Added IP rate limiting (120 req/min) & multi-base FX caching on Render backend | Protects free-tier Render hours & bandwidth against burst traffic while offline fallbacks preserve UX |
 | 2026-11-25 | Added release signing + UMP consent + device verification gates before Play Store GA | Audit confirmed release APK (`4,280,594` B) is still unsigned with AdMob test IDs and requires live hardware smoke validation |
+| 2026-11-27 | User-controlled `PENDING_REVIEW` payment classification + strict on-device notification privacy (`v1.7.0`) | Keeps categories & purpose 100% user-decided, supports Indian UPI/bank alerts + Unassigned Account safety, and guarantees raw notification metadata never leaves device (`48/48` tests, `0` Lint errors) |

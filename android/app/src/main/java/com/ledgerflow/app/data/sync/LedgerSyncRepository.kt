@@ -141,7 +141,9 @@ class LedgerSyncRepository(
     suspend fun countPendingChanges(): Int =
         db.accountDao().getDirty().size +
             db.categoryDao().getDirty().size +
-            db.transactionDao().getDirty().size +
+            db.transactionDao().getDirty().count {
+                it.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW && it.accountId.isNotBlank()
+            } +
             db.budgetDao().getDirty().size +
             db.plannedPaymentDao().getDirty().size +
             db.holdingDao().getDirty().size +
@@ -292,10 +294,22 @@ class LedgerSyncRepository(
     }
 
     private suspend fun pushAllDirty(userId: String, token: String): Int {
+        // Only confirmed, account-assigned transactions may leave device; raw notification metadata stays local.
+        val allDirtyTx = db.transactionDao().getDirty()
+        val deletedUnreviewed = allDirtyTx.filter {
+            it.deletedAtEpochMs != null && it.reviewStatus == TransactionEntity.STATUS_PENDING_REVIEW
+        }
+        if (deletedUnreviewed.isNotEmpty()) {
+            db.transactionDao().markSynced(deletedUnreviewed.map { it.id })
+        }
+        val syncableTx = allDirtyTx.filter {
+            it.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW && it.accountId.isNotBlank()
+        }
+
         val codes = listOf(
             pushDirtyTable("accounts", db.accountDao().getDirty(), SupabaseAccountDto.serializer(), token, { it.id }, { it.toRemoteDto(userId) }, db.accountDao()::markSynced),
             pushDirtyTable("categories", db.categoryDao().getDirty(), SupabaseCategoryDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.categoryDao()::markSynced),
-            pushDirtyTable("transactions", db.transactionDao().getDirty(), SupabaseTransactionDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.transactionDao()::markSynced),
+            pushDirtyTable("transactions", syncableTx, SupabaseTransactionDto.serializer(), token, { it.id }, { it.toRemoteDto(userId) }, db.transactionDao()::markSynced),
             pushDirtyTable("budgets", db.budgetDao().getDirty(), SupabaseBudgetDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.budgetDao()::markSynced),
             pushDirtyTable("planned_payments", db.plannedPaymentDao().getDirty(), SupabasePlannedDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.plannedPaymentDao()::markSynced),
             pushDirtyTable("holdings", db.holdingDao().getDirty(), SupabaseHoldingDto.serializer(), token, { it.id }, { it.toDto(userId) }, db.holdingDao()::markSynced),
@@ -673,6 +687,21 @@ private fun TransactionEntity.toDto(userId: String) = SupabaseTransactionDto(
     deletedAt = deletedAtEpochMs?.let(IsoTime::format),
 )
 
+private fun TransactionEntity.toRemoteDto(userId: String): SupabaseTransactionDto {
+    val safeSource = when (sourceTag) {
+        "GPAY_AUTO", "BANK_SYNC", "PLANNED", "IMPORT" -> sourceTag
+        else -> "MANUAL"
+    }
+    val combinedUserNote = listOfNotNull(
+        spendingPurpose.trim().takeIf { it.isNotEmpty() },
+        note.trim().takeIf { it.isNotEmpty() },
+    ).distinct().joinToString(" • ")
+    return toDto(userId).copy(
+        note = combinedUserNote,
+        sourceTag = safeSource,
+    )
+}
+
 private fun SupabaseTransactionDto.toEntity(now: Long) = TransactionEntity(
     id = id, accountId = accountId, transferAccountId = transferAccountId, categoryId = categoryId,
     txType = txType, amountMinor = amountMinor, currency = currency, convertedMinor = convertedMinor,
@@ -680,6 +709,7 @@ private fun SupabaseTransactionDto.toEntity(now: Long) = TransactionEntity(
     sourceTag = sourceTag, autoRuleApplied = autoRuleApplied, occurredAtEpochMs = IsoTime.parseOr(occurredAt, now),
     createdAtEpochMs = IsoTime.parseOr(createdAt, now), updatedAtEpochMs = IsoTime.parseOr(updatedAt, now),
     deletedAtEpochMs = deletedAt?.let { IsoTime.parseOr(it, now) }, pendingSync = false,
+    reviewStatus = TransactionEntity.STATUS_CONFIRMED,
 )
 
 private fun BudgetEntity.toDto(userId: String) = SupabaseBudgetDto(

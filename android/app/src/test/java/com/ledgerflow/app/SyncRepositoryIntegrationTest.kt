@@ -7,7 +7,9 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.ledgerflow.app.data.local.AccountEntity
 import com.ledgerflow.app.data.local.LedgerDatabase
+import com.ledgerflow.app.data.local.MagicRuleEntity
 import com.ledgerflow.app.data.local.SeedData
+import com.ledgerflow.app.data.local.TransactionEntity
 import com.ledgerflow.app.data.remote.IsoTime
 import com.ledgerflow.app.data.remote.SupabaseSyncClient
 import com.ledgerflow.app.data.sync.LedgerSyncRepository
@@ -20,6 +22,7 @@ import org.junit.After
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.BeforeClass
@@ -41,7 +44,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 private class LocalLoopbackHttpServer(
-    private val handler: (method: String, pathAndQuery: String) -> Pair<Int, String>,
+    private val handlerWithBody: ((method: String, pathAndQuery: String, requestBody: String) -> Pair<Int, String>)? = null,
+    private val handler: (method: String, pathAndQuery: String) -> Pair<Int, String> = { _, _ -> 200 to "[]" },
 ) {
     private val serverSocket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val running = AtomicBoolean(true)
@@ -83,14 +87,17 @@ private class LocalLoopbackHttpServer(
                         ?.trim()
                         ?.toIntOrNull() ?: 0
                     var remaining = contentLength
+                    val reqBytes = java.io.ByteArrayOutputStream()
                     val sink = ByteArray(1024)
                     while (remaining > 0) {
                         val read = reader.read(sink, 0, minOf(remaining, sink.size))
                         if (read <= 0) break
+                        reqBytes.write(sink, 0, read)
                         remaining -= read
                     }
+                    val reqBody = reqBytes.toString(Charsets.UTF_8.name())
 
-                    val (status, body) = handler(method, target)
+                    val (status, body) = handlerWithBody?.invoke(method, target, reqBody) ?: handler(method, target)
                     val bodyBytes = body.toByteArray(Charsets.UTF_8)
                     val out = sock.getOutputStream()
                     val head = (
@@ -411,5 +418,159 @@ class SyncRepositoryIntegrationTest {
         val restoreOutcome = repo.importExternalDataOffline(backupJson.toByteArray(Charsets.UTF_8), defaultCurrency = "INR")
         assertEquals(3, restoreOutcome.importedTransactions)
         assertEquals(-84_025L + 500_000L - 12_000L, db.accountDao().getAllActive().first().balanceMinor)
+    }
+
+    @Test
+    fun detectedPaymentCapture_offlinePendingReviewSyncPrivacyAndConflictIntegrity() = runTest {
+        SeedData.ensureMinimalSetup(db, defaultCurrency = "INR", nowMs = 1_700_000_000_000L)
+        val wallet = db.accountDao().getAllActive().single()
+        val hdfc = AccountEntity("22222222-2222-4222-8222-222222222111", "HDFC Bank", "HDFC", "CHECKING", "INR", 200_000L, "4821", 0L, "MANUAL", "OK", null, 1L, 1L)
+        db.accountDao().upsert(hdfc)
+        // Add an auto-rule that MUST NOT run on incoming payment notifications
+        db.magicRuleDao().upsert(MagicRuleEntity("r_coffee", "blue bottle|swiggy", SeedData.CAT_DINING, "dining", enabled = true, createdAtEpochMs = 1L, updatedAtEpochMs = 1L))
+
+        // Work 100% offline
+        markOnline(false)
+        vault.update {
+            it.copy(
+                baseCurrency = "INR",
+                payAndTrackEnabled = true,
+                userId = "user-sync-privacy",
+                accessToken = "valid-token",
+            )
+        }
+
+        // Unsupported app (WhatsApp) must be completely ignored
+        val whatsappIgnored = PayAndTrackCapture.capturePaymentDetailed(
+            context = context,
+            title = "WhatsApp",
+            text = "Paid ₹500 to Rohan",
+            packageName = "com.whatsapp",
+            manualEntry = false,
+            dbOverride = db,
+        )
+        assertFalse(whatsappIgnored.captured)
+
+        // Supported PhonePe notification matching HDFC ••4821 creates PENDING_REVIEW with NULL category
+        val phonePeCaptured = PayAndTrackCapture.capturePaymentDetailed(
+            context = context,
+            title = "Paid ₹350 to Swiggy",
+            text = "Using HDFC Bank ••4821 • UPI Ref No 432100998877",
+            packageName = PayAndTrackCapture.PHONEPE_PACKAGE,
+            notificationKey = "0|com.phonepe.app|42|null|100",
+            occurredAtEpochMs = 1_700_000_100_000L,
+            manualEntry = false,
+            dbOverride = db,
+        )
+        assertTrue(phonePeCaptured.captured)
+        assertEquals(hdfc.id, phonePeCaptured.matchedAccountId)
+        val pendingRow = db.transactionDao().getPendingReview().single()
+        assertNull(pendingRow.categoryId) // Must NEVER guess category!
+        assertEquals("", pendingRow.spendingPurpose)
+        assertEquals(TransactionEntity.STATUS_PENDING_REVIEW, pendingRow.reviewStatus)
+        assertEquals(165_000L, db.accountDao().getById(hdfc.id)!!.balanceMinor) // Included once immediately
+
+        // Cross-app duplicate with same UPI Ref ID is ignored without double deduction
+        val bankCrossDup = PayAndTrackCapture.capturePaymentDetailed(
+            context = context,
+            title = "HDFC Bank",
+            text = "Rs. 350 debited from A/c **4821. UPI Ref 432100998877",
+            packageName = "com.snapwork.hdfc",
+            occurredAtEpochMs = 1_700_000_102_000L,
+            manualEntry = false,
+            dbOverride = db,
+        )
+        assertFalse(bankCrossDup.captured)
+        assertEquals(165_000L, db.accountDao().getById(hdfc.id)!!.balanceMinor)
+
+        // Unidentifiable bank/card stays Unassigned ("") and touches zero balances
+        val unassignedCaptured = PayAndTrackCapture.capturePaymentDetailed(
+            context = context,
+            title = "Paid ₹120 to Tea Stall",
+            text = "Paid via Paytm UPI",
+            packageName = PayAndTrackCapture.PAYTM_PACKAGE,
+            notificationKey = "0|net.one97.paytm|7|null|101",
+            occurredAtEpochMs = 1_700_000_200_000L,
+            manualEntry = false,
+            dbOverride = db,
+        )
+        assertTrue(unassignedCaptured.captured)
+        assertEquals(TransactionEntity.UNASSIGNED_ACCOUNT_ID, unassignedCaptured.matchedAccountId)
+        assertEquals(165_000L, db.accountDao().getById(hdfc.id)!!.balanceMinor)
+        assertEquals(0L, db.accountDao().getById(wallet.id)!!.balanceMinor)
+
+        // When online returns, PENDING_REVIEW transactions must NEVER be uploaded before user classification
+        val postedPayloads = mutableListOf<Pair<String, String>>()
+        val srv = LocalLoopbackHttpServer(
+            handlerWithBody = { method, path, body ->
+                if (method == "POST") postedPayloads.add(path to body)
+                when {
+                    method == "POST" -> 201 to ""
+                    path.startsWith("/rest/v1/transactions") -> {
+                        // Return a stale server edit for pendingRow.id to verify conflict resolution keeps newer local edit
+                        200 to """
+                            [
+                              {"id":"${pendingRow.id}","user_id":"user-sync-privacy","account_id":"${hdfc.id}","transfer_account_id":null,"category_id":"${SeedData.CAT_GENERAL}","tx_type":"EXPENSE","amount_minor":-35000,"currency":"INR","converted_minor":null,"converted_currency":null,"merchant":"Stale Server Name","note":"old","labels_csv":"","source_tag":"BANK_SYNC","auto_rule_applied":false,"occurred_at":"2023-11-14T22:13:20Z","created_at":"2023-11-14T22:13:20Z","updated_at":"2023-11-14T22:13:25Z","deleted_at":null}
+                            ]
+                        """.trimIndent()
+                    }
+                    else -> 200 to "[]"
+                }
+            }
+        )
+        server = srv
+        markOnline(true)
+        val remote = SupabaseSyncClient("http://127.0.0.1:${srv.port}", "test-key", "http://127.0.0.1:${srv.port}")
+        val repo = LedgerSyncRepository(context, db, vault, remote)
+
+        // Push while still PENDING_REVIEW -> zero /rest/v1/transactions POST calls made
+        assertTrue(repo.syncNow() is SyncOutcome.Success)
+        assertFalse(postedPayloads.any { it.first.startsWith("/rest/v1/transactions") })
+
+        // Now classify & confirm the Swiggy payment offline, fixing parsed amount (-350 -> -375),
+        // then sync when online: only CONFIRMED ledger fields sync, zero raw notification metadata uploaded,
+        // and newer local edit survives the stale remote row conflict!
+        markOnline(false)
+        assertTrue(
+            db.confirmOrUpdateTransactionAtomic(
+                txId = pendingRow.id,
+                txType = "EXPENSE",
+                magnitudeMinor = 37_500L,
+                currency = "INR",
+                accountId = hdfc.id,
+                transferAccountId = null,
+                categoryId = SeedData.CAT_DINING,
+                categoryIdsCsv = SeedData.CAT_DINING,
+                spendingPurpose = "Late lunch",
+                merchant = "Swiggy Food",
+                note = "Corrected delivery fee",
+                labelsCsv = "",
+                markConfirmed = true,
+                baseCurrency = "INR",
+                nowMs = 1_800_000_000_000L,
+            )
+        )
+        assertEquals(162_500L, db.accountDao().getById(hdfc.id)!!.balanceMinor)
+
+        postedPayloads.clear()
+        markOnline(true)
+        val secondSync = repo.syncNow()
+        assertTrue(secondSync is SyncOutcome.Success)
+        val txPostBody = postedPayloads.firstOrNull { it.first.startsWith("/rest/v1/transactions") }?.second.orEmpty()
+        assertTrue(txPostBody.contains("Swiggy Food"))
+        assertTrue(txPostBody.contains("Late lunch"))
+        // Strictly ensure raw notification fields/keys never upload to Supabase
+        assertFalse(txPostBody.contains("notificationKey"))
+        assertFalse(txPostBody.contains("notificationFingerprint"))
+        assertFalse(txPostBody.contains("paymentAppPackage"))
+        assertFalse(txPostBody.contains("0|com.phonepe.app|42|null|100"))
+        // Still kept unassigned pending item purely local
+        assertFalse(txPostBody.contains("Local Store"))
+        assertFalse(txPostBody.contains("Tea Stall"))
+        // Newer local confirmed row won conflict over stale remote row and preserved HDFC balance
+        val afterConflict = db.transactionDao().getById(pendingRow.id)!!
+        assertEquals("Swiggy Food", afterConflict.merchant)
+        assertEquals(-37_500L, afterConflict.amountMinor)
+        assertEquals(162_500L, db.accountDao().getById(hdfc.id)!!.balanceMinor)
     }
 }

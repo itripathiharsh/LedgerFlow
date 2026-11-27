@@ -12,6 +12,7 @@ import com.ledgerflow.app.data.local.SeedData
 import com.ledgerflow.app.data.local.ShoppingItemEntity
 import com.ledgerflow.app.data.local.ShoppingListEntity
 import com.ledgerflow.app.data.local.TransactionEntity
+import com.ledgerflow.app.domain.AccountMatcher
 import com.ledgerflow.app.domain.AccountTypeCatalog
 import com.ledgerflow.app.domain.AnalyticsCalculator
 import com.ledgerflow.app.domain.AnalyticsEngine
@@ -23,6 +24,7 @@ import com.ledgerflow.app.domain.MagicRuleEngine
 import com.ledgerflow.app.domain.MoneyFormatter
 import com.ledgerflow.app.domain.NotificationParser
 import com.ledgerflow.app.domain.ReportExporter
+import com.ledgerflow.app.domain.SupportedPaymentApps
 import com.ledgerflow.app.security.VaultCryptoEngine
 import com.ledgerflow.app.security.VaultKeyProvider
 import com.ledgerflow.app.security.VaultSessionState
@@ -540,5 +542,132 @@ class FinanceMathTest {
         assertEquals(1, sum.uncheckedItems)
         assertEquals(60_500L, sum.estimatedTotalMinor)
         assertEquals(10_500L, sum.checkedTotalMinor)
+    }
+
+    @Test
+    fun supportedAppsAndPaymentNotifications_parseDebitsCreditsRefundsFailuresAndMissingMerchant() {
+        // Supported vs unsupported apps
+        assertTrue(SupportedPaymentApps.isSupported("com.google.android.apps.nbu.paisa.user"))
+        assertTrue(SupportedPaymentApps.isSupported("com.phonepe.app"))
+        assertTrue(SupportedPaymentApps.isSupported("net.one97.paytm"))
+        assertTrue(SupportedPaymentApps.isSupported("in.org.npci.upiapp"))
+        assertTrue(SupportedPaymentApps.isSupported("com.google.android.apps.walletnfcrel"))
+        assertTrue(SupportedPaymentApps.isSupported("com.snapwork.hdfc"))
+        assertFalse(SupportedPaymentApps.isSupported("com.whatsapp"))
+        assertFalse(SupportedPaymentApps.isSupported("com.instagram.android"))
+
+        // PhonePe UPI debit with ref ID & card/account last-4
+        val phonePe = NotificationParser.parsePaymentNotification(
+            title = "Paid ₹349.50 to Swiggy",
+            text = "Sent using HDFC Bank ••4821 • UPI Ref No 432198765432",
+            defaultCurrency = "INR",
+            sourceApp = "PhonePe",
+        )!!
+        assertEquals("EXPENSE", phonePe.txType)
+        assertEquals(-34_950L, phonePe.amountMinor)
+        assertEquals("INR", phonePe.currency)
+        assertEquals("Swiggy", phonePe.merchant)
+        assertEquals("432198765432", phonePe.referenceId)
+        assertEquals("4821", phonePe.accountLastFour)
+        assertEquals("HDFC", phonePe.bankOrAccountHint)
+
+        // Bank alert with trailing available balance must extract transaction amount, NOT balance
+        val bankDebit = NotificationParser.parsePaymentNotification(
+            title = "SBI Alert",
+            text = "Rs. 1,250.00 debited from A/c **1234 on 27-11-26 to Reliance Retail. Avl Bal Rs. 25,430.00. Ref 9988776655",
+            defaultCurrency = "INR",
+            sourceApp = "SBI YONO",
+        )!!
+        assertEquals("EXPENSE", bankDebit.txType)
+        assertEquals(-125_000L, bankDebit.amountMinor)
+        assertEquals("Reliance Retail", bankDebit.merchant)
+        assertEquals("1234", bankDebit.accountLastFour)
+        assertEquals("9988776655", bankDebit.referenceId)
+
+        // Missing merchant produces null rather than guessing
+        val missingMerchant = NotificationParser.parsePaymentNotification(
+            title = "BHIM",
+            text = "Debited Rs 500.00 from A/c XX4821 via UPI Ref 112233445566",
+            defaultCurrency = "INR",
+            sourceApp = "BHIM",
+        )!!
+        assertEquals(-50_000L, missingMerchant.amountMinor)
+        assertNull(missingMerchant.merchant)
+
+        // Credit / Received / Refund / Reversal detection
+        val received = NotificationParser.parsePaymentNotification(
+            title = "Rohan Verma paid you ₹1,500",
+            text = "Money received via Google Pay India",
+            defaultCurrency = "INR",
+            sourceApp = "Google Pay",
+        )!!
+        assertEquals("INCOME", received.txType)
+        assertEquals(150_000L, received.amountMinor)
+        assertFalse(received.isRefundOrReversal)
+        assertEquals("Rohan Verma", received.merchant)
+
+        val refund = NotificationParser.parsePaymentNotification(
+            title = "Paytm Refund",
+            text = "Refund of Rs 299.00 from Flipkart credited to HDFC A/c XX4821 UTR 5566778899",
+            defaultCurrency = "INR",
+            sourceApp = "Paytm",
+        )!!
+        assertEquals("INCOME", refund.txType)
+        assertEquals(29_900L, refund.amountMinor)
+        assertTrue(refund.isRefundOrReversal)
+        assertEquals("Flipkart", refund.merchant)
+
+        // Credit card expense must NEVER be classified as INCOME just because of the word "Credit Card"
+        val creditCardSpend = NotificationParser.parsePaymentNotification(
+            title = "HDFC Bank",
+            text = "INR 499.00 spent on HDFC Credit Card XX7788 at Starbucks",
+            defaultCurrency = "INR",
+            sourceApp = "HDFC Bank",
+        )!!
+        assertEquals("EXPENSE", creditCardSpend.txType)
+        assertEquals(-49_900L, creditCardSpend.amountMinor)
+
+        // Failed / declined / collect request notifications must NEVER create transactions
+        val failed = NotificationParser.inspectNotification(
+            title = "Payment failed",
+            text = "Payment of ₹500 to Zomato failed. Any debited amount will be refunded.",
+            defaultCurrency = "INR",
+        )
+        assertEquals(NotificationParser.NotificationParseKind.FAILURE_OR_DECLINED, failed.kind)
+        assertNull(failed.payment)
+
+        val declined = NotificationParser.inspectNotification(
+            title = "Card Declined",
+            text = "Transaction of \$42.00 at Target declined due to insufficient funds",
+            defaultCurrency = "USD",
+        )
+        assertEquals(NotificationParser.NotificationParseKind.FAILURE_OR_DECLINED, declined.kind)
+        assertNull(declined.payment)
+
+        val collectReq = NotificationParser.inspectNotification(
+            title = "Flipkart is requesting ₹999",
+            text = "Approve payment request before it expires",
+            defaultCurrency = "INR",
+        )
+        assertEquals(NotificationParser.NotificationParseKind.FAILURE_OR_DECLINED, collectReq.kind)
+        assertNull(collectReq.payment)
+
+        // Deterministic account matching: exact vs ambiguous -> UNASSIGNED ("")
+        val hdfc = AccountEntity("a1", "HDFC Salary", "HDFC Bank", "CHECKING", "INR", 100_000L, "4821", 0L, "MANUAL", "OK", null, 1L, 1L)
+        val sbi1 = AccountEntity("a2", "SBI Checking", "SBI", "CHECKING", "INR", 50_000L, "1111", 0L, "MANUAL", "OK", null, 1L, 1L)
+        val sbi2 = AccountEntity("a3", "SBI Card", "SBI", "CREDIT_CARD", "INR", 0L, "2222", 500_000L, "MANUAL", "OK", null, 1L, 1L)
+        assertEquals("a1", AccountMatcher.matchAccountId(listOf(hdfc, sbi1, sbi2), bankHint = "HDFC", lastFour = "4821"))
+        assertEquals("", AccountMatcher.matchAccountId(listOf(hdfc, sbi1, sbi2), bankHint = "SBI", lastFour = null))
+        assertEquals("", AccountMatcher.matchAccountId(listOf(hdfc, sbi1, sbi2), bankHint = null, lastFour = "9999"))
+
+        // Pending summary calculator
+        val p1 = TransactionEntity("p1", "", null, null, "", "EXPENSE", -20_000L, "INR", null, null, "Cafe", "", "", "GPAY_AUTO", false, 1L, 1L, 1L, null, true, reviewStatus = TransactionEntity.STATUS_PENDING_REVIEW)
+        val p2 = TransactionEntity("p2", "a1", null, null, "", "INCOME", 15_000L, "INR", null, null, "Refund", "", "", "BANK_SYNC", false, 2L, 2L, 2L, null, true, reviewStatus = TransactionEntity.STATUS_PENDING_REVIEW, isRefundOrReversal = true)
+        val pSum = AnalyticsCalculator.computePendingReviewSummary(listOf(p1, p2), "INR")
+        assertEquals(2, pSum.count)
+        assertEquals(20_000L, pSum.totalOutflowMinor)
+        assertEquals(15_000L, pSum.totalInflowMinor)
+        assertEquals(35_000L, pSum.totalVolumeMinor)
+        assertEquals(1, pSum.unassignedCount)
     }
 }

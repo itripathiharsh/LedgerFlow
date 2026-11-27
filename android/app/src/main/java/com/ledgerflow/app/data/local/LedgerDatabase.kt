@@ -28,7 +28,7 @@ import kotlin.math.abs
         ShoppingListEntity::class,
         ShoppingItemEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class LedgerDatabase : RoomDatabase() {
@@ -66,8 +66,218 @@ abstract class LedgerDatabase : RoomDatabase() {
         withTransaction {
             val existing = transactionDao().getById(txId) ?: return@withTransaction
             if (existing.deletedAtEpochMs != null) return@withTransaction
-            transactionDao().upsert(existing.copy(deletedAtEpochMs = nowMs, updatedAtEpochMs = nowMs, pendingSync = true))
+            val keepSyncDirty = existing.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW
+            transactionDao().upsert(existing.copy(deletedAtEpochMs = nowMs, updatedAtEpochMs = nowMs, pendingSync = keepSyncDirty))
             applyTransactionBalanceDelta(existing, signMultiplier = -1, nowMs = nowMs)
+        }
+    }
+
+    enum class DetectedCaptureAction {
+        CREATED_PENDING,
+        UPDATED_PENDING,
+        IGNORED_DUPLICATE,
+        IGNORED_CONFIRMED,
+        CANCELLED_BY_FAILURE,
+    }
+
+    data class DetectedCaptureResult(
+        val action: DetectedCaptureAction,
+        val transaction: TransactionEntity? = null,
+    )
+
+    suspend fun handleDetectedFailureNotificationAtomic(
+        notificationKey: String,
+        referenceId: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Boolean {
+        return withTransaction {
+            val target = when {
+                notificationKey.isNotBlank() -> transactionDao().findByNotificationKey(notificationKey)
+                referenceId.isNotBlank() -> transactionDao().findByReferenceId(referenceId)
+                else -> null
+            } ?: return@withTransaction false
+            if (target.deletedAtEpochMs != null) return@withTransaction false
+            if (target.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW) return@withTransaction false
+            softDeleteTransactionAtomic(target.id, nowMs = nowMs)
+            true
+        }
+    }
+
+    /**
+     * Atomically captures or updates a detected notification payment while preventing duplicate rows,
+     * preserving user-confirmed transactions, and adjusting assigned account balances strictly once.
+     */
+    suspend fun upsertDetectedPaymentAtomic(
+        draft: TransactionEntity,
+        nowMs: Long = System.currentTimeMillis(),
+    ): DetectedCaptureResult {
+        return withTransaction {
+            // 1. Updated Android notification with the same StatusBarNotification key
+            if (draft.notificationKey.isNotBlank()) {
+                val existingByKey = transactionDao().findByNotificationKey(draft.notificationKey)
+                if (existingByKey != null) {
+                    if (existingByKey.deletedAtEpochMs != null) {
+                        return@withTransaction DetectedCaptureResult(DetectedCaptureAction.IGNORED_DUPLICATE, existingByKey)
+                    }
+                    if (existingByKey.reviewStatus == TransactionEntity.STATUS_CONFIRMED) {
+                        return@withTransaction DetectedCaptureResult(DetectedCaptureAction.IGNORED_CONFIRMED, existingByKey)
+                    }
+                    if (existingByKey.notificationFingerprint.isNotBlank() &&
+                        existingByKey.notificationFingerprint == draft.notificationFingerprint &&
+                        existingByKey.amountMinor == draft.amountMinor &&
+                        existingByKey.merchant == draft.merchant
+                    ) {
+                        return@withTransaction DetectedCaptureResult(DetectedCaptureAction.IGNORED_DUPLICATE, existingByKey)
+                    }
+                    val resolvedAccount = draft.accountId.ifBlank { existingByKey.accountId }
+                    val resolvedMerchant = draft.merchant.ifBlank { existingByKey.merchant }
+                    val updated = existingByKey.copy(
+                        accountId = resolvedAccount,
+                        txType = draft.txType,
+                        amountMinor = draft.amountMinor,
+                        currency = draft.currency,
+                        convertedMinor = draft.convertedMinor,
+                        convertedCurrency = draft.convertedCurrency,
+                        merchant = resolvedMerchant,
+                        referenceId = draft.referenceId.ifBlank { existingByKey.referenceId },
+                        accountHint = draft.accountHint.ifBlank { existingByKey.accountHint },
+                        paymentAppName = draft.paymentAppName.ifBlank { existingByKey.paymentAppName },
+                        paymentAppPackage = draft.paymentAppPackage.ifBlank { existingByKey.paymentAppPackage },
+                        notificationFingerprint = draft.notificationFingerprint,
+                        originalParsedAmountMinor = draft.amountMinor,
+                        isRefundOrReversal = draft.isRefundOrReversal,
+                        updatedAtEpochMs = nowMs,
+                    )
+                    recordTransactionAtomic(updated)
+                    return@withTransaction DetectedCaptureResult(DetectedCaptureAction.UPDATED_PENDING, updated)
+                }
+            }
+
+            // 2. Cross-app duplicate or update sharing the same external UPI / UTR / bank reference ID
+            if (draft.referenceId.isNotBlank()) {
+                val existingByRef = transactionDao().findByReferenceId(draft.referenceId)
+                if (existingByRef != null && existingByRef.deletedAtEpochMs == null) {
+                    if (existingByRef.reviewStatus == TransactionEntity.STATUS_PENDING_REVIEW) {
+                        val improvedAccount = existingByRef.accountId.ifBlank { draft.accountId }
+                        val improvedMerchant = if (existingByRef.merchant.isBlank() && draft.merchant.isNotBlank()) {
+                            draft.merchant
+                        } else {
+                            existingByRef.merchant
+                        }
+                        val improvedHint = existingByRef.accountHint.ifBlank { draft.accountHint }
+                        if (improvedAccount != existingByRef.accountId ||
+                            improvedMerchant != existingByRef.merchant ||
+                            improvedHint != existingByRef.accountHint
+                        ) {
+                            val enriched = existingByRef.copy(
+                                accountId = improvedAccount,
+                                merchant = improvedMerchant,
+                                accountHint = improvedHint,
+                                updatedAtEpochMs = nowMs,
+                            )
+                            recordTransactionAtomic(enriched)
+                            return@withTransaction DetectedCaptureResult(DetectedCaptureAction.UPDATED_PENDING, enriched)
+                        }
+                    }
+                    return@withTransaction DetectedCaptureResult(DetectedCaptureAction.IGNORED_DUPLICATE, existingByRef)
+                }
+            }
+
+            // 3. Durable SHA-256 fingerprint & time-window dedupe (survives process restarts)
+            if (draft.notificationFingerprint.isNotBlank()) {
+                val existingByFp = transactionDao().findByFingerprint(draft.notificationFingerprint)
+                if (existingByFp != null) {
+                    return@withTransaction DetectedCaptureResult(DetectedCaptureAction.IGNORED_DUPLICATE, existingByFp)
+                }
+            }
+
+            val windowMs = 120_000L
+            val recentMatch = transactionDao().findRecentDuplicate(
+                amountMinor = draft.amountMinor,
+                currency = draft.currency,
+                merchant = draft.merchant,
+                minEpochMs = draft.occurredAtEpochMs - windowMs,
+                maxEpochMs = draft.occurredAtEpochMs + windowMs,
+            )
+            if (recentMatch != null) {
+                return@withTransaction DetectedCaptureResult(DetectedCaptureAction.IGNORED_DUPLICATE, recentMatch)
+            }
+
+            recordTransactionAtomic(draft)
+            DetectedCaptureResult(DetectedCaptureAction.CREATED_PENDING, draft)
+        }
+    }
+
+    /**
+     * Transitions a PENDING_REVIEW transaction to CONFIRMED (or edits an existing CONFIRMED transaction),
+     * preserving original parsed audit metadata and atomically reconciling account balances.
+     */
+    suspend fun confirmOrUpdateTransactionAtomic(
+        txId: String,
+        txType: String,
+        magnitudeMinor: Long,
+        currency: String,
+        accountId: String,
+        transferAccountId: String?,
+        categoryId: String?,
+        categoryIdsCsv: String,
+        spendingPurpose: String,
+        merchant: String,
+        note: String,
+        labelsCsv: String,
+        markConfirmed: Boolean,
+        baseCurrency: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Boolean {
+        val cleanMag = abs(magnitudeMinor)
+        if (cleanMag <= 0L) return false
+        return withTransaction {
+            val existing = transactionDao().getById(txId) ?: return@withTransaction false
+            if (existing.deletedAtEpochMs != null) return@withTransaction false
+            if (accountId.isBlank()) return@withTransaction false
+            val targetAcc = accountDao().getById(accountId)?.takeIf { it.deletedAtEpochMs == null }
+                ?: return@withTransaction false
+            val normType = when (txType.trim().uppercase()) {
+                "INCOME" -> "INCOME"
+                "TRANSFER" -> "TRANSFER"
+                else -> "EXPENSE"
+            }
+            if (normType == "TRANSFER" && (transferAccountId.isNullOrBlank() || transferAccountId == targetAcc.id)) {
+                return@withTransaction false
+            }
+            if (markConfirmed && normType != "TRANSFER" && categoryId.isNullOrBlank()) {
+                return@withTransaction false
+            }
+            val signedMinor = when (normType) {
+                "EXPENSE" -> -cleanMag
+                else -> cleanMag
+            }
+            val cleanCur = currency.trim().uppercase().ifBlank { targetAcc.currency }
+            val converted = if (cleanCur != baseCurrency) {
+                FxConverter.convertMinor(signedMinor, cleanCur, baseCurrency)
+            } else null
+
+            val updated = existing.copy(
+                accountId = targetAcc.id,
+                transferAccountId = if (normType == "TRANSFER") transferAccountId else null,
+                categoryId = if (normType == "TRANSFER") null else categoryId,
+                categoryIdsCsv = if (normType == "TRANSFER") "" else categoryIdsCsv,
+                txType = normType,
+                amountMinor = signedMinor,
+                currency = cleanCur,
+                convertedMinor = converted,
+                convertedCurrency = if (converted != null) baseCurrency else null,
+                merchant = merchant.trim().ifBlank { existing.merchant },
+                spendingPurpose = spendingPurpose.trim(),
+                note = note.trim(),
+                labelsCsv = labelsCsv.trim(),
+                reviewStatus = if (markConfirmed) TransactionEntity.STATUS_CONFIRMED else existing.reviewStatus,
+                originalParsedAmountMinor = existing.originalParsedAmountMinor ?: existing.amountMinor,
+                updatedAtEpochMs = nowMs,
+                pendingSync = true,
+            )
+            recordTransactionAtomic(updated)
+            true
         }
     }
 
@@ -76,7 +286,8 @@ abstract class LedgerDatabase : RoomDatabase() {
         signMultiplier: Int,
         nowMs: Long,
     ) {
-        val sourceAccount = accountDao().getById(tx.accountId)
+        if (tx.accountId.isBlank()) return
+        val sourceAccount = accountDao().getById(tx.accountId) ?: return
         val mag = abs(tx.amountMinor)
         when (tx.txType) {
             "EXPENSE" -> {
@@ -544,6 +755,25 @@ abstract class LedgerDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN reviewStatus TEXT NOT NULL DEFAULT 'CONFIRMED'")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN spendingPurpose TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN paymentAppName TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN paymentAppPackage TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN referenceId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN accountHint TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN notificationKey TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN notificationFingerprint TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN originalParsedAmountMinor INTEGER")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN isRefundOrReversal INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_reviewStatus` ON `transactions` (`reviewStatus`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_referenceId` ON `transactions` (`referenceId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_notificationKey` ON `transactions` (`notificationKey`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_notificationFingerprint` ON `transactions` (`notificationFingerprint`)")
+            }
+        }
+
         fun advanceDueDateEpochMs(currentDueMs: Long, cadence: String): Long =
             AnalyticsCalculator.advanceDueDate(currentDueMs, cadence)
 
@@ -557,7 +787,7 @@ abstract class LedgerDatabase : RoomDatabase() {
                     LedgerDatabase::class.java,
                     "ledgerflow_vault.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
                     .also { INSTANCE = it }

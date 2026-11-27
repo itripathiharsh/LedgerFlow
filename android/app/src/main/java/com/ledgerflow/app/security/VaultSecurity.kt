@@ -31,6 +31,7 @@ data class VaultSessionState(
     val autoLockSeconds: Int = 10,
     val blurInSwitcher: Boolean = true,
     val payAndTrackEnabled: Boolean = true,
+    val notificationDisclosureAccepted: Boolean = false,
     val telemetryOptIn: Boolean = false,
     val hideBalances: Boolean = false,
     val pinHashBase64: String? = null,

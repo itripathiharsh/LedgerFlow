@@ -1,16 +1,16 @@
 {
-  "versionCode": 17,
-  "versionName": "1.6.0",
+  "versionCode": 18,
+  "versionName": "1.7.0",
   "minSupportedVersionCode": 1,
-  "releasedAt": "2026-11-27T17:26:00+05:30",
-  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.6.0/LedgerFlow-v1.6.0.apk",
-  "apkSizeBytes": 4858239,
-  "sha256": "5343df64b2f38614c648f85f2f716753fb67ca81707f0af9dcc76759f388800a",
+  "releasedAt": "2026-11-27T18:24:00+05:30",
+  "apkUrl": "https://github.com/itripathiharsh/LedgerFlow/releases/download/v1.7.0/LedgerFlow-v1.7.0.apk",
+  "apkSizeBytes": 4891007,
+  "sha256": "b95bf6f20a7040dc16007d83475e9536195175408275481552843bfdf77d7481",
   "signingCertSha256": "40413065bb787030d0bdc97f3afda5c9e3017b2adb5ec07fc502e376defb02a0",
   "releaseNotes": [
-    "Added Debts (Lent & Borrowed) screen in the Left Navigation Drawer with Active / Closed sub-tabs, To Receive & To Pay summary strip, optional initial ledger linking, partial/full Record Repayment settlement flow, and single-layer management sheet.",
-    "Added Savings Goals inside Budgets & Goals (Budgets | Goals | Planned) and on Home's Budgets & Goals tab, with Active / Paused / Reached filters, progress bars, custom icons/accents, Pause/Resume controls, and quick + Add Funds contributions.",
-    "Added Shopping Lists screen in the Left Navigation Drawer with checklist progress cards, quick-add item + estimated price bar, strike-through checked grouping, and one-tap Log as Expense conversion with itemized notes into your ledger (Room v3)."
+    "Added opt-in privacy-first Automatic Payment Detection across Google Pay India, PhonePe, Paytm, BHIM, Google Wallet, and major banking apps (with in-app privacy disclosure before opening Android Notification Access settings, plus Share-to-Track & Smart Paste fallbacks).",
+    "Detected payments land strictly as PENDING_REVIEW without auto-guessing category or spending purpose, feature a Pending Review card on Home, support Unassigned Account state, prevent duplicates/double-deductions across updated notifications and UPI Ref IDs, and reject failed/declined alerts.",
+    "Added a single-layer Review & Classify sheet (category, spending purpose, merchant, account, amount correction, notes) for confirming pending payments and editing confirmed transactions anytime, while keeping raw notification metadata strictly on-device (Room v4)."
   ],
   "mandatory": false
 }

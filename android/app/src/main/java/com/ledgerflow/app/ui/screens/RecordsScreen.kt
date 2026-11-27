@@ -58,9 +58,12 @@ import com.ledgerflow.app.ui.LedgerViewModel
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
+import com.ledgerflow.app.ui.components.ReviewTransactionBottomSheet
 import com.ledgerflow.app.ui.components.SourceTagBadge
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.theme.AlabasterBg
+import com.ledgerflow.app.ui.theme.AmberSoft
+import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
 import com.ledgerflow.app.ui.theme.EmeraldPrimary
@@ -84,6 +87,7 @@ fun RecordsScreen(
 ) {
     val context = LocalContext.current
     val transactions by vm.filteredTransactions.collectAsState()
+    val pendingReview by vm.pendingReviewTransactions.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val categories by vm.categories.collectAsState()
     val magicRules by vm.magicRules.collectAsState()
@@ -96,6 +100,7 @@ fun RecordsScreen(
     val accMap = remember(accounts) { accounts.associateBy { it.id } }
     val catMap = remember(categories) { categories.associateBy { it.id } }
 
+    var editingTx by remember { mutableStateOf<TransactionEntity?>(null) }
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var showRulesDialog by remember { mutableStateOf(false) }
 
@@ -175,10 +180,12 @@ fun RecordsScreen(
 
         // Filter Chips
         item {
+            val pendingLabel = if (pendingReview.isNotEmpty()) "Pending (${pendingReview.size})" else "Pending"
             val filters = listOf(
                 "ALL" to "All",
+                "PENDING_REVIEW" to pendingLabel,
+                "AUTO" to "Auto-Detected",
                 "MANUAL" to "Manual",
-                "GPAY_AUTO" to "GPay Auto",
                 "PLANNED" to "Planned",
                 "IMPORT" to "Imported",
             )
@@ -251,41 +258,62 @@ fun RecordsScreen(
                     CleanCard(padding = 4.dp) {
                         itemsInDay.forEachIndexed { idx, tx ->
                             if (idx > 0) HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 12.dp))
+                            val isPending = tx.reviewStatus == TransactionEntity.STATUS_PENDING_REVIEW
                             val assignedCats = remember(tx.categoryId, tx.categoryIdsCsv, catMap) {
                                 with(CategoryHierarchy) { tx.allAssignedCategoryIds() }.mapNotNull { catMap[it] }
                             }
                             val cat = assignedCats.firstOrNull() ?: catMap[tx.categoryId]
-                            val catLabel = assignedCats.map { it.name }.distinct().joinToString(" + ").ifBlank { cat?.name ?: tx.txType }
-                            val acc = accMap[tx.accountId]
+                            val accLabel = if (tx.accountId.isBlank()) "Unassigned Account" else (accMap[tx.accountId]?.name ?: "Account")
+                            val catLabel = if (isPending) {
+                                "Needs category"
+                            } else {
+                                assignedCats.map { it.name }.distinct().joinToString(" + ").ifBlank { cat?.name ?: tx.txType }
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { pendingDelete = tx }
+                                    .clickable { editingTx = tx }
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                CategoryIconBadge(cat?.iconKey ?: "category", cat?.colorHex ?: "#059669", size = 38.dp)
+                                CategoryIconBadge(
+                                    iconKey = cat?.iconKey ?: "category",
+                                    tintHex = cat?.colorHex ?: if (isPending) "#D97706" else "#059669",
+                                    size = 38.dp,
+                                )
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(tx.merchant, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SlateInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            text = tx.merchant.ifBlank { "Merchant not provided" },
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = SlateInk,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                         if (tx.autoRuleApplied) {
                                             StatusPill("Auto-Rule", EmeraldSoft, EmeraldDark)
                                         }
                                     }
-                                    Spacer(Modifier.height(2.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(
-                                            text = "$catLabel • ${acc?.name ?: "Account"}",
-                                            fontSize = 12.sp,
-                                            color = MutedSlate,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                    if (tx.spendingPurpose.isNotBlank()) {
+                                        Spacer(Modifier.height(1.dp))
+                                        Text(tx.spendingPurpose, fontSize = 12.sp, color = EmeraldDark, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = "$catLabel • $accLabel",
+                                        fontSize = 12.sp,
+                                        color = MutedSlate,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                     Spacer(Modifier.height(4.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        SourceTagBadge(tx.sourceTag)
+                                        SourceTagBadge(tx.sourceTag, tx.paymentAppName)
+                                        if (isPending) {
+                                            StatusPill("Pending Review", AmberSoft, AmberWarn)
+                                        }
                                         if (tx.labelsCsv.isNotBlank()) {
                                             StatusPill("#${tx.labelsCsv.split(',').first()}", SlateTint, MutedSlate)
                                         }
@@ -316,6 +344,38 @@ fun RecordsScreen(
                 }
             }
         }
+    }
+
+    editingTx?.let { target ->
+        ReviewTransactionBottomSheet(
+            tx = target,
+            accounts = accounts,
+            categories = categories,
+            baseCurrency = baseCurrency,
+            onDismiss = { editingTx = null },
+            onDelete = { del ->
+                editingTx = null
+                pendingDelete = del
+            },
+            onSave = { txType, magMinor, accountId, transferTargetId, categoryId, categoryIdsCsv, spendingPurpose, merchant, note, labelsCsv ->
+                vm.confirmOrUpdateTransaction(
+                    txId = target.id,
+                    txType = txType,
+                    magnitudeMinor = magMinor,
+                    currency = target.currency,
+                    accountId = accountId,
+                    transferAccountId = transferTargetId,
+                    categoryId = categoryId,
+                    categoryIdsCsv = categoryIdsCsv,
+                    spendingPurpose = spendingPurpose,
+                    merchant = merchant,
+                    note = note,
+                    labelsCsv = labelsCsv,
+                    markConfirmed = true,
+                )
+                editingTx = null
+            },
+        )
     }
 
     pendingDelete?.let { tx ->

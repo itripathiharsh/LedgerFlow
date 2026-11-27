@@ -80,10 +80,12 @@ import com.ledgerflow.app.ui.components.BalanceTrendLineChart
 import com.ledgerflow.app.ui.components.CategoryIconBadge
 import com.ledgerflow.app.ui.components.CleanCard
 import com.ledgerflow.app.ui.components.EmptyPlaceholder
+import com.ledgerflow.app.ui.components.NotificationAccessPrivacyDialog
 import com.ledgerflow.app.ui.components.SectionHeader
 import com.ledgerflow.app.ui.components.StatusPill
 import com.ledgerflow.app.ui.components.rememberDataImportPicker
 import com.ledgerflow.app.ui.theme.AlabasterBg
+import com.ledgerflow.app.ui.theme.AmberSoft
 import com.ledgerflow.app.ui.theme.AmberWarn
 import com.ledgerflow.app.ui.theme.BorderSubtle
 import com.ledgerflow.app.ui.theme.EmeraldDark
@@ -132,7 +134,7 @@ fun AccountsScreen(
     }
 
     val gpayCapturedCount = remember(transactions) {
-        transactions.count { it.sourceTag == "GPAY_AUTO" }
+        transactions.count { it.sourceTag == "GPAY_AUTO" || it.sourceTag == "BANK_SYNC" || it.paymentAppName.isNotBlank() }
     }
 
     var showAddAccount by remember { mutableStateOf(false) }
@@ -142,6 +144,7 @@ fun AccountsScreen(
     var pendingEditAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var pendingEditLimitAccount by remember { mutableStateOf<AccountEntity?>(null) }
     var showSmartPaste by remember { mutableStateOf(false) }
+    var showNotificationDisclosure by remember { mutableStateOf(false) }
     val importBusy by vm.importInProgress.collectAsState()
 
     LaunchedEffect(openAddOnStart) {
@@ -367,8 +370,29 @@ fun AccountsScreen(
             }
         }
 
-        // Restyled Dark-Emerald Payment Capture Card
+        // Opt-in Privacy-First Payment Detection Card
         item {
+            val statusLabel = when {
+                enabledListeners && vault.payAndTrackEnabled -> "Notification Access Active ($gpayCapturedCount)"
+                enabledListeners -> "Detection Paused"
+                else -> "Notification Access Off"
+            }
+            val pillBg = when {
+                enabledListeners && vault.payAndTrackEnabled -> SurfaceCard
+                enabledListeners -> AmberSoft
+                else -> SlateTint
+            }
+            val pillFg = when {
+                enabledListeners && vault.payAndTrackEnabled -> EmeraldDark
+                enabledListeners -> AmberWarn
+                else -> MutedSlate
+            }
+            val dotCol = when {
+                enabledListeners && vault.payAndTrackEnabled -> EmeraldPrimary
+                enabledListeners -> AmberWarn
+                else -> MutedSlate
+            }
+
             CleanCard(
                 containerColor = EmeraldSoft,
                 borderColor = EmeraldPrimary.copy(alpha = 0.30f),
@@ -379,68 +403,79 @@ fun AccountsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CategoryIconBadge("directions_transit", "#059669", size = 38.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        CategoryIconBadge("payments", "#059669", size = 38.dp)
                         Column {
-                            Text("Payment Capture", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
+                            Text("Automatic Payment Detection", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlateInk)
                             Spacer(Modifier.height(2.dp))
                             StatusPill(
-                                text = when {
-                                    enabledListeners -> "Listener Active"
-                                    supportsOsListener -> "Listener Ready"
-                                    else -> "Share & Smart Paste ($gpayCapturedCount)"
-                                },
-                                containerColor = SurfaceCard,
-                                contentColor = EmeraldDark,
-                                dotColor = EmeraldPrimary,
+                                text = statusLabel,
+                                containerColor = pillBg,
+                                contentColor = pillFg,
+                                dotColor = dotCol,
                             )
                         }
                     }
-                    Switch(
-                        checked = vault.payAndTrackEnabled,
-                        onCheckedChange = { vm.setPayAndTrackEnabled(it) },
-                        colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
-                    )
+                    if (enabledListeners) {
+                        Switch(
+                            checked = vault.payAndTrackEnabled,
+                            onCheckedChange = { vm.setPayAndTrackEnabled(it) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = EmeraldPrimary),
+                        )
+                    }
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = if (supportsOsListener) {
-                        "Automatically log payment notifications locally with duplicate suppression."
+                    text = if (enabledListeners) {
+                        "Detects supported payment & bank notifications locally into Pending Review — you always choose category and purpose."
                     } else {
-                        "Share any payment SMS or alert to LedgerFlow, or paste one directly below."
+                        "Optionally enable Notification Access (GPay, PhonePe, Paytm, BHIM, Banks) or use Share-to-Track & Smart Paste privately."
                     },
                     fontSize = 12.sp,
                     color = SlateInk,
                 )
                 Spacer(Modifier.height(10.dp))
-                if (supportsOsListener) {
-                    OutlinedButton(
-                        onClick = {
-                            runCatching {
-                                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (supportsOsListener) {
+                        OutlinedButton(
+                            onClick = {
+                                if (enabledListeners) {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    showNotificationDisclosure = true
                                 }
-                                context.startActivity(intent)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.45f)),
-                    ) {
-                        Icon(Icons.Outlined.Contactless, contentDescription = null, tint = EmeraldPrimary)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Notification Access", fontSize = 12.sp, color = SlateInk)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.45f)),
+                        ) {
+                            Text(
+                                text = if (enabledListeners) "Disable / Manage Access" else "Enable Access",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SlateInk,
+                            )
+                        }
                     }
-                } else {
                     Button(
                         onClick = { showSmartPaste = true },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                     ) {
-                        Icon(Icons.Outlined.Contactless, contentDescription = null, tint = Color.White)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Smart Paste Alert", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Icon(Icons.Outlined.Contactless, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Smart Paste", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     }
                 }
             }
@@ -1049,13 +1084,33 @@ fun AccountsScreen(
                 Button(
                     enabled = pasteText.isNotBlank(),
                     onClick = {
-                        vm.capturePaymentAlertText(pasteText, originNote = "Captured via Smart Paste")
+                        vm.capturePaymentAlertText(pasteText, originNote = "")
                         showSmartPaste = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                 ) { Text("Extract & Save") }
             },
             dismissButton = { TextButton(onClick = { showSmartPaste = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (showNotificationDisclosure) {
+        NotificationAccessPrivacyDialog(
+            onDismiss = { showNotificationDisclosure = false },
+            onContinueToSettings = {
+                vm.setNotificationDisclosureAccepted(true)
+                vm.setPayAndTrackEnabled(true)
+                showNotificationDisclosure = false
+                runCatching {
+                    context.startActivity(
+                        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    )
+                }.onFailure {
+                    vm.showMessage("Open Android Settings > Notification Access > LedgerFlow")
+                }
+            },
         )
     }
 }

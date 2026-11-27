@@ -110,6 +110,9 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
     val allTransactions: StateFlow<List<TransactionEntity>> = db.transactionDao().observeActive()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val pendingReviewTransactions: StateFlow<List<TransactionEntity>> = db.transactionDao().observePendingReview()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val filteredTransactions: StateFlow<List<TransactionEntity>> = combine(
         _searchQuery.flatMapLatest { q ->
             if (q.isBlank()) {
@@ -125,8 +128,11 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         _vaultState,
     ) { list, filter, v ->
         when (filter) {
+            "PENDING_REVIEW" -> list.filter { it.reviewStatus == TransactionEntity.STATUS_PENDING_REVIEW }
             "MANUAL" -> list.filter { it.sourceTag == "MANUAL" }
-            "GPAY_AUTO" -> list.filter { it.sourceTag == "GPAY_AUTO" }
+            "GPAY_AUTO", "AUTO" -> list.filter {
+                it.sourceTag == "GPAY_AUTO" || it.sourceTag == "BANK_SYNC" || it.paymentAppName.isNotBlank()
+            }
             "PLANNED" -> list.filter { it.sourceTag == "PLANNED" }
             "IMPORT" -> list.filter { it.sourceTag == "IMPORT" }
             "MULTIFX" -> list.filter { it.currency != v.baseCurrency }
@@ -165,8 +171,9 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         plannedPayments,
         holdings,
     ) { acc, txs, bdg, pln, hld ->
-        acc.count { it.pendingSync } + txs.count { it.pendingSync } +
-            bdg.count { it.pendingSync } + pln.count { it.pendingSync } + hld.count { it.pendingSync }
+        acc.count { it.pendingSync } + txs.count {
+            it.pendingSync && it.reviewStatus != TransactionEntity.STATUS_PENDING_REVIEW && it.accountId.isNotBlank()
+        } + bdg.count { it.pendingSync } + pln.count { it.pendingSync } + hld.count { it.pendingSync }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     init {
@@ -490,6 +497,51 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
             db.softDeleteTransactionAtomic(txId)
             SyncWorker.enqueueWhenOnline(app)
             _statusMessage.value = "Transaction deleted and balance updated"
+        }
+    }
+
+    fun confirmOrUpdateTransaction(
+        txId: String,
+        txType: String,
+        magnitudeMinor: Long,
+        currency: String,
+        accountId: String,
+        transferAccountId: String?,
+        categoryId: String?,
+        categoryIdsCsv: String,
+        spendingPurpose: String,
+        merchant: String,
+        note: String,
+        labelsCsv: String,
+        markConfirmed: Boolean = true,
+    ) {
+        viewModelScope.launch {
+            val ok = db.confirmOrUpdateTransactionAtomic(
+                txId = txId,
+                txType = txType,
+                magnitudeMinor = magnitudeMinor,
+                currency = currency,
+                accountId = accountId,
+                transferAccountId = transferAccountId,
+                categoryId = categoryId,
+                categoryIdsCsv = categoryIdsCsv,
+                spendingPurpose = spendingPurpose,
+                merchant = merchant,
+                note = note,
+                labelsCsv = labelsCsv,
+                markConfirmed = markConfirmed,
+                baseCurrency = _vaultState.value.baseCurrency,
+            )
+            if (ok) {
+                SyncWorker.enqueueWhenOnline(app)
+                _statusMessage.value = if (markConfirmed) {
+                    "Transaction classified and confirmed"
+                } else {
+                    "Transaction updated"
+                }
+            } else {
+                _statusMessage.value = "Select an account, category, and positive amount"
+            }
         }
     }
 
@@ -1447,7 +1499,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun capturePaymentAlertText(rawText: String, originNote: String = "Captured via Smart Paste") {
+    fun capturePaymentAlertText(rawText: String, originNote: String = "") {
         val cleaned = rawText.trim()
         if (cleaned.isBlank()) {
             _statusMessage.value = "Paste a payment SMS or alert containing amount and merchant"
@@ -1464,11 +1516,18 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 manualEntry = true,
                 noteText = originNote,
             )
-            _statusMessage.value = if (outcome.captured && outcome.merchant != null) {
-                val formatted = MoneyFormatter.formatMinor(outcome.amountMinor, outcome.currency)
-                "Captured $formatted at ${outcome.merchant}"
-            } else {
-                "Could not extract an amount and merchant from that text"
+            _statusMessage.value = when {
+                outcome.captured -> {
+                    val formatted = MoneyFormatter.formatMinor(outcome.amountMinor, outcome.currency)
+                    val target = outcome.merchant ?: "Pending Review"
+                    "Detected $formatted ($target) — review on Home"
+                }
+                outcome.action == LedgerDatabase.DetectedCaptureAction.IGNORED_DUPLICATE ->
+                    "Duplicate payment alert skipped"
+                outcome.action == LedgerDatabase.DetectedCaptureAction.CANCELLED_BY_FAILURE ->
+                    "Failed/declined alert ignored"
+                else ->
+                    "Could not extract a completed payment amount"
             }
         }
     }
@@ -1663,6 +1722,10 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setPayAndTrackEnabled(enabled: Boolean) {
         _vaultState.value = vault.update { it.copy(payAndTrackEnabled = enabled) }
+    }
+
+    fun setNotificationDisclosureAccepted(accepted: Boolean) {
+        _vaultState.value = vault.update { it.copy(notificationDisclosureAccepted = accepted) }
     }
 
     fun setBlurInSwitcher(enabled: Boolean) {

@@ -285,53 +285,311 @@ object MagicRuleEngine {
 }
 
 object NotificationParser {
-    private val paidPattern = Regex(
-        """(?i)(?:paid|spent|charged|purchase(?:d)?|sent|debited)\s+(?:by\s+|for\s+|of\s+)?(Rs\.?|RS\.?|[€$£₹]|USD|EUR|GBP|INR)?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)"""
+    private val balanceClausePattern = Regex(
+        """(?i)\b(?:avl\.?\s*bal(?:ance)?|available\s*bal(?:ance)?|closing\s*bal(?:ance)?|total\s*bal(?:ance)?|cur\.?\s*bal(?:ance)?|updated\s*bal(?:ance)?)\b(?:\s*is)?\s*[:\-]?\s*(?:Rs\.?|INR|USD|EUR|GBP|JPY|[€$£₹¥])?\s*[0-9,]+(?:\.[0-9]{1,2})?"""
     )
-    private val amountPattern = Regex("""(Rs\.?|RS\.?|[€$£₹]|USD|EUR|GBP|INR)\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)""", RegexOption.IGNORE_CASE)
-    private val merchantAtPattern = Regex(
-        """(?i)\b(?:at|to)\s+([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s+(?:via|with|on|from|using|checking|card)\b|\s*[•|(\[]|$)"""
+
+    private val failurePattern = Regex(
+        """(?i)\b(failed|declined|unsuccessful|could\s+not\s+(?:be\s+)?complete(?:d)?|couldn't\s+complete|not\s+completed|rejected|cancelled|canceled|timed\s*out|expired|insufficient\s+(?:balance|funds)|wrong\s+pin|incorrect\s+pin|invalid\s+pin|unable\s+to\s+process|is\s+requesting|request\s+from|requested\s+(?:money|₹|rs|inr)|collect\s+request|approve\s+(?:payment|mandate)|otp\s+is|one\s+time\s+password|verification\s+code|do\s+not\s+share|scratch\s+card|weekly\s+summary|monthly\s+statement|credit\s+limit\s+is)\b"""
     )
+
+    private val refundReversalPattern = Regex(
+        """(?i)\b(refund(?:ed)?|reversal|reversed\s+(?:to|back|into)|cashback\s+(?:credited|received)|chargeback)\b"""
+    )
+
+    private val creditPattern = Regex(
+        """(?i)\b(received|credited|deposited|paid\s+you|sent\s+you|money\s+received|added\s+to\s+(?:your\s+)?(?:a/c|acct?|account|wallet))\b"""
+    )
+
+    private val debitPattern = Regex(
+        """(?i)\b(paid|spent|charged|purchase(?:d)?|debited|auto-?debited|sent|transferred|withdrawn|deducted|used\s+for|payment\s+(?:of|to|for|at))\b"""
+    )
+
+    private val paidVerbAmountPattern = Regex(
+        """(?i)\b(?:paid|spent|charged|purchase(?:d)?|sent|debited|auto-?debited|received|credited|refund(?:ed)?|deposited|withdrawn|deducted|transferred)\b(?:\s+(?:you|of|by|for|with|from|amount))*\s*(Rs\.?|INR|USD|EUR|GBP|JPY|[€$£₹¥])?\s*([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)"""
+    )
+
+    private val amountBeforeVerbPattern = Regex(
+        """(?i)(Rs\.?|INR|USD|EUR|GBP|JPY|[€$£₹¥])\s*([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)\s+(?:has\s+been\s+|was\s+|is\s+)?(?:paid|spent|charged|debited|credited|received|refunded|reversed|sent|deducted|withdrawn|deposited)"""
+    )
+
+    private val currencyBeforeAmountPattern = Regex(
+        """(?i)(Rs\.?|INR|USD|EUR|GBP|JPY|[€$£₹¥])\s*([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)"""
+    )
+
+    private val currencyAfterAmountPattern = Regex(
+        """(?i)\b([0-9]+(?:,[0-9]{2,3})*(?:\.[0-9]{1,2})?)\s*(INR|USD|EUR|GBP|JPY)\b"""
+    )
+
+    private val merchantIncomeFromPattern = Regex(
+        """(?i)\bfrom\s+([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,64}?)(?=\s+(?:credited|deposited|received|sent|paid|via|in|into|on|to|using|for|ref|upi|utr|rrn|txn|order|with|avl)\b|\.\s|\s*[•|(\[\n]|$)"""
+    )
+
+    private val merchantPaidYouPattern = Regex(
+        """(?i)^([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,64}?)\s+(?:paid|sent)\s+you\b"""
+    )
+
+    private val merchantAtOrToPattern = Regex(
+        """(?i)\b(?:at|to|towards)\s+([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,64}?)(?=\s+(?:via|with|on|from|using|for|checking|card|a/c|acct|account|ref|upi|utr|rrn|txn|order|avl)\b|\.\s|\s*[•|(\[\n]|$)"""
+    )
+
+    private val referenceIdPattern = Regex(
+        """(?i)(?:upi\s*ref(?:\s*(?:no\.?|id))?|rrn|utr|txn\s*(?:id|no\.?|ref)?|transaction\s*(?:id|no\.?)|order\s*id|ref(?:\s*(?:no\.?|id|#))?)[:\s#-]*([A-Z0-9]{6,24})\b"""
+    )
+
+    private val lastFourPatterns = listOf(
+        Regex("""(?i)(?:a/c|acct?|account|card|ending(?:\s+in)?|via|from|to\s+a/c)\s*(?:no\.?\s*)?(?:xx+|x+|\*+|•+)?\s*([0-9]{4})\b"""),
+        Regex("""(?:••|\*\*|XX|xx)([0-9]{4})\b"""),
+    )
+
+    private val bankHintRegex = Regex(
+        """(?i)\b(HDFC(?:\s+Bank)?|SBI(?:\s+YONO)?|ICICI(?:\s+Bank)?|Axis(?:\s+Bank)?|Kotak(?:\s+Bank)?|IDFC(?:\s+First)?|Bank\s+of\s+Baroda|BOB|Canara(?:\s+Bank)?|IndusInd(?:\s+Bank)?|Chase|Monzo|Revolut|Wise|Credit\s+Card|Debit\s+Card|Checking|Savings|Cash\s+Wallet)\b"""
+    )
+
+    private val genericTitleNoise = listOf(
+        "google pay", "google wallet", "phonepe", "paytm", "bhim", "cred",
+        "sbi", "hdfc bank", "icici bank", "axis bank", "kotak bank",
+        "alert", "notification", "money received", "payment successful", "transaction successful",
+    )
+
+    enum class NotificationParseKind {
+        PAYMENT,
+        FAILURE_OR_DECLINED,
+        IGNORED,
+    }
 
     data class ParsedPayment(
-        val merchant: String,
+        val merchant: String?,
         val amountMinor: Long,
         val currency: String,
+        val txType: String = "EXPENSE", // EXPENSE or INCOME
+        val isRefundOrReversal: Boolean = false,
+        val referenceId: String? = null,
+        val accountLastFour: String? = null,
+        val bankOrAccountHint: String? = null,
+        val sourceApp: String = "",
     )
 
-    fun parseGooglePayNotification(title: String, text: String, defaultCurrency: String = "USD"): ParsedPayment? {
+    data class ParseInspection(
+        val kind: NotificationParseKind,
+        val payment: ParsedPayment? = null,
+        val referenceId: String? = null,
+    )
+
+    fun inspectNotification(
+        title: String,
+        text: String,
+        defaultCurrency: String = "USD",
+        sourceApp: String = "",
+        subText: String = "",
+        defaultBankHint: String? = null,
+    ): ParseInspection {
         val cleanTitle = title.trim()
         val cleanText = text.trim()
-        val combined = "$cleanTitle $cleanText".trim()
-        if (combined.isBlank()) return null
+        val cleanSub = subText.trim()
+        val fullCombined = listOf(cleanTitle, cleanText, cleanSub).filter { it.isNotEmpty() }.joinToString(" ")
+        if (fullCombined.isBlank()) return ParseInspection(NotificationParseKind.IGNORED)
 
-        val match = paidPattern.find(combined) ?: amountPattern.find(combined) ?: return null
-        val symbol = match.groupValues[1].trim().uppercase(Locale.US)
-        val rawNumber = match.groupValues[2].replace(",", "")
-        val num = rawNumber.toDoubleOrNull() ?: return null
-        if (num <= 0.0) return null
+        val refId = extractReferenceId(fullCombined)
 
-        val currency = when (symbol) {
+        if (failurePattern.containsMatchIn(fullCombined)) {
+            return ParseInspection(
+                kind = NotificationParseKind.FAILURE_OR_DECLINED,
+                referenceId = refId,
+            )
+        }
+
+        val isRefund = refundReversalPattern.containsMatchIn(fullCombined)
+        val isCredit = isRefund || creditPattern.containsMatchIn(fullCombined)
+        val isDebit = debitPattern.containsMatchIn(fullCombined)
+        if (!isCredit && !isDebit) {
+            return ParseInspection(NotificationParseKind.IGNORED, referenceId = refId)
+        }
+        // Refund / credit indicators take priority over words like "paid" in "Rohan paid you"
+        val txType = if (isCredit) "INCOME" else "EXPENSE"
+
+        // Strip trailing Available Balance so we parse transaction amount rather than account balance
+        val titleNoBal = balanceClausePattern.replace(cleanTitle, " ")
+        val textNoBal = balanceClausePattern.replace(cleanText, " ")
+        val subNoBal = balanceClausePattern.replace(cleanSub, " ")
+        val amountSearchText = listOf(titleNoBal, textNoBal, subNoBal).filter { it.isNotBlank() }.joinToString(" ")
+
+        val amountMatch = amountBeforeVerbPattern.find(amountSearchText)
+            ?: paidVerbAmountPattern.find(amountSearchText)
+            ?: currencyBeforeAmountPattern.find(amountSearchText)
+            ?: currencyAfterAmountPattern.find(amountSearchText)
+            ?: return ParseInspection(NotificationParseKind.IGNORED, referenceId = refId)
+
+        val rawSym: String
+        val rawNumStr: String
+        if (amountMatch.groupValues[1].firstOrNull()?.isDigit() == true) {
+            rawNumStr = amountMatch.groupValues[1].replace(",", "")
+            rawSym = amountMatch.groupValues[2].trim().uppercase(Locale.US)
+        } else {
+            rawSym = amountMatch.groupValues[1].trim().uppercase(Locale.US)
+            rawNumStr = amountMatch.groupValues[2].replace(",", "")
+        }
+
+        val currency = when (rawSym) {
             "$" -> "USD"
             "€" -> "EUR"
             "£" -> "GBP"
+            "¥" -> "JPY"
             "₹", "RS", "RS." -> "INR"
-            "USD", "EUR", "GBP", "INR" -> symbol
-            else -> defaultCurrency
+            "USD", "EUR", "GBP", "INR", "JPY" -> rawSym
+            else -> defaultCurrency.trim().uppercase(Locale.US).ifBlank { "USD" }
         }
 
-        val merchant = (
-            merchantAtPattern.find(cleanTitle)
-                ?: merchantAtPattern.find(cleanText)
-            )?.groupValues?.getOrNull(1)?.trim()
-            ?: cleanTitle.takeIf { it.isNotBlank() && !it.contains("Google", ignoreCase = true) }
-            ?: "Card / Wallet Payment"
+        val bd = rawNumStr.toBigDecimalOrNull() ?: return ParseInspection(NotificationParseKind.IGNORED, referenceId = refId)
+        if (bd <= BigDecimal.ZERO) return ParseInspection(NotificationParseKind.IGNORED, referenceId = refId)
+        val scale = if (currency == "JPY") BigDecimal.ONE else BigDecimal(100)
+        val magMinor = runCatching {
+            bd.multiply(scale).setScale(0, RoundingMode.HALF_UP).longValueExact()
+        }.getOrNull() ?: return ParseInspection(NotificationParseKind.IGNORED, referenceId = refId)
+        if (magMinor <= 0L || magMinor > 1_000_000_000_000_00L) {
+            return ParseInspection(NotificationParseKind.IGNORED, referenceId = refId)
+        }
 
-        return ParsedPayment(
-            merchant = merchant.take(64),
-            amountMinor = -(num * 100.0).roundToLong(),
-            currency = currency,
+        val signedMinor = if (txType == "INCOME") magMinor else -magMinor
+        val merchant = extractMerchant(cleanTitle, cleanText, isCredit)
+        val lastFour = extractLastFour(fullCombined)
+        val bankHint = extractBankHint(fullCombined) ?: defaultBankHint?.takeIf { it.isNotBlank() }
+
+        return ParseInspection(
+            kind = NotificationParseKind.PAYMENT,
+            referenceId = refId,
+            payment = ParsedPayment(
+                merchant = merchant,
+                amountMinor = signedMinor,
+                currency = currency,
+                txType = txType,
+                isRefundOrReversal = isRefund,
+                referenceId = refId,
+                accountLastFour = lastFour,
+                bankOrAccountHint = bankHint,
+                sourceApp = sourceApp,
+            ),
         )
+    }
+
+    fun parsePaymentNotification(
+        title: String,
+        text: String,
+        defaultCurrency: String = "USD",
+        sourceApp: String = "",
+        subText: String = "",
+        defaultBankHint: String? = null,
+    ): ParsedPayment? = inspectNotification(
+        title = title,
+        text = text,
+        defaultCurrency = defaultCurrency,
+        sourceApp = sourceApp,
+        subText = subText,
+        defaultBankHint = defaultBankHint,
+    ).payment
+
+    fun parseGooglePayNotification(title: String, text: String, defaultCurrency: String = "USD"): ParsedPayment? =
+        parsePaymentNotification(title = title, text = text, defaultCurrency = defaultCurrency, sourceApp = "Google Pay")
+
+    private fun extractReferenceId(text: String): String? {
+        val m = referenceIdPattern.find(text) ?: return null
+        val candidate = m.groupValues.getOrNull(1)?.trim()?.uppercase(Locale.US).orEmpty()
+        return candidate.takeIf { it.length >= 6 && it.any(Char::isDigit) }
+    }
+
+    private fun extractLastFour(text: String): String? {
+        for (p in lastFourPatterns) {
+            val found = p.find(text)?.groupValues?.getOrNull(1)?.trim()
+            if (found != null && found.length == 4 && found.all(Char::isDigit)) {
+                return found
+            }
+        }
+        return null
+    }
+
+    private fun extractBankHint(text: String): String? {
+        val found = bankHintRegex.find(text)?.groupValues?.getOrNull(1)?.trim() ?: return null
+        return found.replace(Regex("""(?i)\s+Bank$"""), "").trim()
+    }
+
+    private fun extractMerchant(title: String, text: String, isCredit: Boolean): String? {
+        val rawCandidate = if (isCredit) {
+            merchantPaidYouPattern.find(title)?.groupValues?.getOrNull(1)
+                ?: merchantPaidYouPattern.find(text)?.groupValues?.getOrNull(1)
+                ?: merchantIncomeFromPattern.find(title)?.groupValues?.getOrNull(1)
+                ?: merchantIncomeFromPattern.find(text)?.groupValues?.getOrNull(1)
+                ?: merchantAtOrToPattern.find(text)?.groupValues?.getOrNull(1)
+        } else {
+            merchantAtOrToPattern.find(title)?.groupValues?.getOrNull(1)
+                ?: merchantAtOrToPattern.find(text)?.groupValues?.getOrNull(1)
+        }?.let(::cleanMerchantName)
+
+        if (!rawCandidate.isNullOrBlank()) return rawCandidate
+
+        val fallbackTitle = title
+            .takeIf { t ->
+                t.isNotBlank() &&
+                    genericTitleNoise.none { noise -> t.contains(noise, ignoreCase = true) } &&
+                    !currencyBeforeAmountPattern.containsMatchIn(t) &&
+                    !debitPattern.containsMatchIn(t) &&
+                    !creditPattern.containsMatchIn(t)
+            }
+            ?.let(::cleanMerchantName)
+        return fallbackTitle
+    }
+
+    private fun cleanMerchantName(raw: String): String? {
+        val cleaned = raw
+            .replace(Regex("""(?i)\b(?:a/c|acct?|account|card|upi|wallet)\b.*$"""), "")
+            .trim()
+            .trimEnd('.', ',', '-', ':', ';')
+            .trim()
+        if (cleaned.length < 2) return null
+        val lower = cleaned.lowercase(Locale.US)
+        if (lower in setOf("your", "a/c", "acct", "account", "upi", "bank", "card", "wallet")) return null
+        if (genericTitleNoise.any { lower == it }) return null
+        return cleaned.take(64)
+    }
+}
+
+object AccountMatcher {
+    /**
+     * Deterministically matches an active account by explicit last-4 digits or bank/account hint.
+     * Returns UNASSIGNED ("") rather than guessing when ambiguous or unidentifiable.
+     */
+    fun matchAccountId(
+        accounts: List<AccountEntity>,
+        bankHint: String?,
+        lastFour: String?,
+    ): String {
+        val active = accounts.filter { it.deletedAtEpochMs == null }
+        if (active.isEmpty()) return TransactionEntity.UNASSIGNED_ACCOUNT_ID
+
+        val cleanLast4 = lastFour?.trim()?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+        val cleanHint = bankHint?.trim()?.lowercase(Locale.US)?.takeIf { it.length >= 2 }
+
+        if (cleanLast4 != null) {
+            val byLast4 = active.filter { it.lastFour.trim() == cleanLast4 }
+            if (byLast4.size == 1) return byLast4.first().id
+            if (byLast4.size > 1 && cleanHint != null) {
+                val narrowed = byLast4.filter { matchesBankHint(it, cleanHint) }
+                if (narrowed.size == 1) return narrowed.first().id
+            }
+            return TransactionEntity.UNASSIGNED_ACCOUNT_ID
+        }
+
+        if (cleanHint != null) {
+            val byHint = active.filter { matchesBankHint(it, cleanHint) }
+            if (byHint.size == 1) return byHint.first().id
+        }
+
+        return TransactionEntity.UNASSIGNED_ACCOUNT_ID
+    }
+
+    private fun matchesBankHint(account: AccountEntity, cleanHint: String): Boolean {
+        val nameLower = account.name.lowercase(Locale.US)
+        val instLower = account.institution.lowercase(Locale.US)
+        return nameLower.contains(cleanHint) || instLower.contains(cleanHint)
     }
 }
 
@@ -966,6 +1224,42 @@ object AnalyticsCalculator {
             uncheckedItems = active.size - checkedList.size,
             estimatedTotalMinor = estTotal,
             checkedTotalMinor = checkedTotal,
+        )
+    }
+
+    data class PendingReviewSummary(
+        val count: Int,
+        val totalOutflowMinor: Long,
+        val totalInflowMinor: Long,
+        val netImpactMinor: Long,
+        val totalVolumeMinor: Long,
+        val unassignedCount: Int,
+    )
+
+    fun computePendingReviewSummary(
+        transactions: List<TransactionEntity>,
+        baseCurrency: String,
+    ): PendingReviewSummary {
+        val pending = transactions.filter { it.deletedAtEpochMs == null && it.reviewStatus == TransactionEntity.STATUS_PENDING_REVIEW }
+        var outflow = 0L
+        var inflow = 0L
+        var unassigned = 0
+        for (tx in pending) {
+            if (tx.accountId.isBlank()) unassigned++
+            val mag = abs(FxConverter.convertMinor(tx.amountMinor, tx.currency, baseCurrency))
+            if (tx.txType == "INCOME") {
+                inflow += mag
+            } else {
+                outflow += mag
+            }
+        }
+        return PendingReviewSummary(
+            count = pending.size,
+            totalOutflowMinor = outflow,
+            totalInflowMinor = inflow,
+            netImpactMinor = inflow - outflow,
+            totalVolumeMinor = outflow + inflow,
+            unassignedCount = unassigned,
         )
     }
 }

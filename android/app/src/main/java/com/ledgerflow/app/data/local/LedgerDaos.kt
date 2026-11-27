@@ -97,6 +97,36 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE deletedAtEpochMs IS NULL ORDER BY occurredAtEpochMs DESC")
     suspend fun getAllActive(): List<TransactionEntity>
 
+    @Query("SELECT * FROM transactions WHERE deletedAtEpochMs IS NULL AND reviewStatus = 'PENDING_REVIEW' ORDER BY occurredAtEpochMs DESC")
+    fun observePendingReview(): Flow<List<TransactionEntity>>
+
+    @Query("SELECT * FROM transactions WHERE deletedAtEpochMs IS NULL AND reviewStatus = 'PENDING_REVIEW' ORDER BY occurredAtEpochMs DESC")
+    suspend fun getPendingReview(): List<TransactionEntity>
+
+    @Query("SELECT * FROM transactions WHERE notificationKey = :notificationKey AND :notificationKey != '' ORDER BY updatedAtEpochMs DESC LIMIT 1")
+    suspend fun findByNotificationKey(notificationKey: String): TransactionEntity?
+
+    @Query("SELECT * FROM transactions WHERE referenceId = :referenceId AND :referenceId != '' AND deletedAtEpochMs IS NULL ORDER BY updatedAtEpochMs DESC LIMIT 1")
+    suspend fun findByReferenceId(referenceId: String): TransactionEntity?
+
+    @Query("SELECT * FROM transactions WHERE notificationFingerprint = :fingerprint AND :fingerprint != '' AND deletedAtEpochMs IS NULL ORDER BY updatedAtEpochMs DESC LIMIT 1")
+    suspend fun findByFingerprint(fingerprint: String): TransactionEntity?
+
+    @Query(
+        "SELECT * FROM transactions WHERE deletedAtEpochMs IS NULL " +
+            "AND amountMinor = :amountMinor AND currency = :currency " +
+            "AND LOWER(merchant) = LOWER(:merchant) " +
+            "AND occurredAtEpochMs BETWEEN :minEpochMs AND :maxEpochMs " +
+            "LIMIT 1"
+    )
+    suspend fun findRecentDuplicate(
+        amountMinor: Long,
+        currency: String,
+        merchant: String,
+        minEpochMs: Long,
+        maxEpochMs: Long,
+    ): TransactionEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(tx: TransactionEntity)
 
